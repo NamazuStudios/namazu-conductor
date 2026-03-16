@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://getelements.dev). It abstracts provider-specific APIs (EdgeGap, Multiplay, AWS Fargate) behind a common `OrchestrationService` interface.
+Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://namazustudios.com/docs). It abstracts provider-specific APIs (EdgeGap, Multiplay, AWS Fargate) behind a common `OrchestrationService` interface.
 
 ## Build & Run
 

@@ -1,6 +1,6 @@
 # Namazu Conductor
 
-Namazu Conductor is a container orchestration framework built on the [Namazu Elements SDK](https://getelements.dev). It provides a unified API for dispatching containerized jobs across multiple cloud and fleet providers, abstracting provider-specific details behind a common `OrchestrationService` interface.
+Namazu Conductor is a container orchestration framework built on the [Namazu Elements SDK](https://namazustudios.com/docs). It provides a unified API for dispatching containerized jobs across multiple cloud and fleet providers, abstracting provider-specific details behind a common `OrchestrationService` interface.
 
 ## Supported Providers
 
