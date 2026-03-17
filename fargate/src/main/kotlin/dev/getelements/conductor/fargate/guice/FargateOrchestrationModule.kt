@@ -9,6 +9,8 @@ import dev.getelements.conductor.fargate.service.FargateOrchestrationService
 import dev.getelements.conductor.service.OrchestrationService
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.ecs.EcsClient
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class FargateOrchestrationModule : PrivateModule() {
 
@@ -25,5 +27,9 @@ class FargateOrchestrationModule : PrivateModule() {
         EcsClient.builder()
             .region(Region.of(region))
             .build()
+
+    @Provides
+    @Singleton
+    fun provideExecutorService(): ExecutorService = Executors.newCachedThreadPool()
 
 }

@@ -4,6 +4,7 @@ import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
 import dev.getelements.conductor.IpPlacement
+import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
@@ -16,12 +17,16 @@ import dev.getelements.conductor.edgegap.model.EdgeGapDeployRequest
 import dev.getelements.conductor.edgegap.model.EdgeGapDeployResponse
 import dev.getelements.conductor.edgegap.model.EdgeGapEnvVar
 import dev.getelements.conductor.edgegap.model.EdgeGapGeoIp
+import dev.getelements.conductor.edgegap.model.EdgeGapStatusResponse
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.Entity
 import jakarta.ws.rs.core.MediaType
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 
 /**
  * [OrchestrationService] implementation backed by the [EdgeGap](https://edgegap.com) REST API v1.
@@ -41,7 +46,8 @@ import jakarta.ws.rs.core.MediaType
 class EdgeGapOrchestrationService @Inject constructor(
     @Named(EdgeGapAttributes.API_KEY) private val apiKey: String,
     @Named(EdgeGapAttributes.BASE_URL) private val baseUrl: String,
-    private val client: Client
+    private val client: Client,
+    private val executor: ExecutorService
 ) : OrchestrationService {
 
     /**
@@ -94,6 +100,29 @@ class EdgeGapOrchestrationService @Inject constructor(
     }
 
     /**
+     * Polls `GET /v1/status/{request_id}` on a background thread until the deployment reaches
+     * [status] (or [JobStatus.FAILED]). Each poll maps the EdgeGap lifecycle string to a
+     * [JobStatus] and, once the target is reached, returns a [JobExecution] populated with
+     * the current [JobEndpoint]s.
+     */
+    override fun getFutureForStatus(
+        execution: JobExecution,
+        status: JobStatus
+    ): Future<JobExecution> = CompletableFuture.supplyAsync({
+        var result: JobExecution
+        do {
+            Thread.sleep(POLL_INTERVAL_MS)
+            val statusResponse = fetchStatus(execution.id)
+            result = JobExecution(
+                id = execution.id,
+                status = mapStatus(statusResponse.status),
+                endpoints = mapEndpoints(statusResponse)
+            )
+        } while (result.status != status && result.status != JobStatus.FAILED)
+        result
+    }, executor)
+
+    /**
      * Submits a deployment to EdgeGap and returns a [JobExecution] with status [JobStatus.PENDING].
      *
      * The [JobRequest.profile] must be an [EdgeGapJobProfile] obtained from [getAvailableProfiles].
@@ -129,6 +158,27 @@ class EdgeGapOrchestrationService @Inject constructor(
         return JobExecution(id = response.requestId, status = JobStatus.PENDING)
     }
 
+    private fun fetchStatus(requestId: String): EdgeGapStatusResponse =
+        target("/v1/status/{request_id}")
+            .resolveTemplate("request_id", requestId)
+            .request(MediaType.APPLICATION_JSON)
+            .header(AUTH_HEADER, authValue())
+            .get(EdgeGapStatusResponse::class.java)
+
+    private fun mapStatus(edgeGapStatus: String): JobStatus = when {
+        edgeGapStatus.endsWith("INITIALIZING") || edgeGapStatus.endsWith("WAITING") -> JobStatus.PENDING
+        edgeGapStatus.endsWith("RUNNING") -> JobStatus.RUNNING
+        edgeGapStatus.endsWith("TERMINATED") || edgeGapStatus.endsWith("TERMINATING") -> JobStatus.COMPLETED
+        else -> JobStatus.FAILED
+    }
+
+    private fun mapEndpoints(response: EdgeGapStatusResponse): List<JobEndpoint> {
+        val host = response.fqdn ?: response.publicIp ?: return emptyList()
+        return response.ports.values.map { port ->
+            JobEndpoint(host = host, port = port.external, protocol = port.protocol)
+        }
+    }
+
     private fun target(path: String) = client.target(baseUrl).path(path)
 
     private fun authValue() = "token $apiKey"
@@ -136,6 +186,7 @@ class EdgeGapOrchestrationService @Inject constructor(
     companion object {
         private const val AUTH_HEADER = "Authorization"
         private const val PAGE_SIZE = 100
+        private const val POLL_INTERVAL_MS = 5_000L
     }
 
 }

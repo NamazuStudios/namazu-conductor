@@ -2,7 +2,9 @@ package dev.getelements.conductor.service
 
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
+import dev.getelements.conductor.JobStatus
 import dev.getelements.elements.sdk.annotation.ElementServiceExport
+import java.util.concurrent.Future
 
 /**
  * Orchestrates container executions in the cloud. Implementations of this interface are responsible
@@ -31,5 +33,11 @@ interface OrchestrationService {
      * Executes the job with the supplied. [JobRequest].
      */
     fun execute(request : JobRequest): JobExecution;
+
+    /**
+     * Returns a [Future] for the supplied job status. This allows calling code to wait for a status before proceeding
+     * with calling code.
+     */
+    fun getFutureForStatus(execution: JobExecution, status: JobStatus) : Future<JobExecution>;
 
 }

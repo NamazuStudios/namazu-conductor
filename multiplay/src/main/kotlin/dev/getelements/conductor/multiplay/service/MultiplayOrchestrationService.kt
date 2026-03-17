@@ -3,6 +3,7 @@ package dev.getelements.conductor.multiplay.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
@@ -12,6 +13,7 @@ import dev.getelements.conductor.multiplay.MultiplayAttributes
 import dev.getelements.conductor.multiplay.MultiplayJobProfile
 import dev.getelements.conductor.multiplay.model.MultiplayAllocationRequest
 import dev.getelements.conductor.multiplay.model.MultiplayAllocationResponse
+import dev.getelements.conductor.multiplay.model.MultiplayAllocationStatus
 import dev.getelements.conductor.multiplay.model.MultiplayBuildConfiguration
 import dev.getelements.conductor.multiplay.model.MultiplayBuildConfigurationPage
 import dev.getelements.conductor.multiplay.model.MultiplayFleet
@@ -23,6 +25,9 @@ import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.Entity
 import jakarta.ws.rs.core.MediaType
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 
 /**
  * [OrchestrationService] implementation backed by Unity Multiplay via its REST API.
@@ -37,7 +42,8 @@ import java.util.Base64
  * for [TOKEN_TTL_MS] milliseconds and refreshed transparently before expiry.
  *
  * [RegionPlacement] hints are respected — the first entry is forwarded as `regionId` in the
- * allocation request. All other placement types are silently ignored.
+ * allocation request. All other placement types are silently ignored as Multiplay does not support
+ * runtime command overrides via its allocation API.
  *
  * Configuration is provided by the Elements SDK via the attribute keys declared in
  * [MultiplayAttributes].
@@ -48,7 +54,8 @@ class MultiplayOrchestrationService @Inject constructor(
     @Named(MultiplayAttributes.KEY_SECRET) private val keySecret: String,
     @Named(MultiplayAttributes.PROJECT_ID) private val projectId: String,
     @Named(MultiplayAttributes.ENVIRONMENT_ID) private val environmentId: String,
-    private val client: Client
+    private val client: Client,
+    private val executor: ExecutorService
 ) : OrchestrationService {
 
     @Volatile private var cachedToken: String? = null
@@ -82,6 +89,29 @@ class MultiplayOrchestrationService @Inject constructor(
                 }
         }
     }
+
+    /**
+     * Polls `GET /v1/allocations/projects/{project}/environments/{env}/allocations/{allocationId}`
+     * on a background thread until the allocation reaches [status] (or [JobStatus.FAILED]). Once
+     * the target status is reached the returned [JobExecution] is populated with the server's
+     * [JobEndpoint] if the allocation response includes an IP address and game port.
+     */
+    override fun getFutureForStatus(
+        execution: JobExecution,
+        status: JobStatus
+    ): Future<JobExecution> = CompletableFuture.supplyAsync({
+        var result: JobExecution
+        do {
+            Thread.sleep(POLL_INTERVAL_MS)
+            val allocationStatus = fetchAllocationStatus(execution.id)
+            result = JobExecution(
+                id = execution.id,
+                status = mapStatus(allocationStatus.status),
+                endpoints = mapEndpoints(allocationStatus)
+            )
+        } while (result.status != status && result.status != JobStatus.FAILED)
+        result
+    }, executor)
 
     private fun listAllFleets(): List<MultiplayFleet> {
         val results = mutableListOf<MultiplayFleet>()
@@ -163,6 +193,28 @@ class MultiplayOrchestrationService @Inject constructor(
         return JobExecution(id = response.allocationId, status = JobStatus.PENDING)
     }
 
+    private fun fetchAllocationStatus(allocationId: String): MultiplayAllocationStatus =
+        allocationTarget("/v1/allocations/projects/{project}/environments/{env}/allocations/{allocationId}")
+            .resolveTemplate("project", projectId)
+            .resolveTemplate("env", environmentId)
+            .resolveTemplate("allocationId", allocationId)
+            .request(MediaType.APPLICATION_JSON)
+            .header(AUTH_HEADER, authBearer())
+            .get(MultiplayAllocationStatus::class.java)
+
+    private fun mapStatus(multiplayStatus: String): JobStatus = when (multiplayStatus) {
+        "ALLOCATED" -> JobStatus.RUNNING
+        "FAILED" -> JobStatus.FAILED
+        "CANCELLED" -> JobStatus.COMPLETED
+        else -> JobStatus.PENDING
+    }
+
+    private fun mapEndpoints(allocationStatus: MultiplayAllocationStatus): List<JobEndpoint> {
+        val ip = allocationStatus.ipAddress ?: return emptyList()
+        val port = allocationStatus.gamePort ?: return emptyList()
+        return listOf(JobEndpoint(host = ip, port = port.port, protocol = port.protocol))
+    }
+
     private fun authBearer(): String {
         if (System.currentTimeMillis() < tokenExpiry) return "Bearer ${cachedToken!!}"
         return synchronized(this) {
@@ -188,6 +240,7 @@ class MultiplayOrchestrationService @Inject constructor(
         private const val ALLOCATION_BASE_URL = "https://multiplay.services.api.unity.com"
         private const val PAGE_SIZE = 100
         private const val TOKEN_TTL_MS = 55 * 60 * 1000L // 55 minutes; tokens expire after 1 hour
+        private const val POLL_INTERVAL_MS = 5_000L
     }
 
 }

@@ -3,6 +3,7 @@ package dev.getelements.conductor.fargate.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
@@ -18,8 +19,12 @@ import software.amazon.awssdk.services.ecs.model.ContainerOverride
 import software.amazon.awssdk.services.ecs.model.KeyValuePair
 import software.amazon.awssdk.services.ecs.model.LaunchType
 import software.amazon.awssdk.services.ecs.model.NetworkConfiguration
+import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
 import software.amazon.awssdk.services.ecs.model.TaskOverride
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 
 /**
  * [OrchestrationService] implementation backed by AWS Fargate via the AWS SDK v2 ECS client.
@@ -40,7 +45,8 @@ class FargateOrchestrationService @Inject constructor(
     @Named(FargateAttributes.SUBNETS) private val subnets: String,
     @Named(FargateAttributes.SECURITY_GROUPS) private val securityGroups: String,
     @Named(FargateAttributes.ASSIGN_PUBLIC_IP) private val assignPublicIp: String,
-    private val ecsClient: EcsClient
+    private val ecsClient: EcsClient,
+    private val executor: ExecutorService
 ) : OrchestrationService {
 
     /**
@@ -49,6 +55,7 @@ class FargateOrchestrationService @Inject constructor(
      * [execute].
      */
     override fun getAvailableProfiles(): List<JobProfile> {
+
         val profiles = mutableListOf<FargateJobProfile>()
         var nextToken: String? = null
 
@@ -73,6 +80,29 @@ class FargateOrchestrationService @Inject constructor(
 
         return profiles
     }
+
+    /**
+     * Polls `describeTasks` on a background thread until the task reaches [status] (or
+     * [JobStatus.FAILED]). Once the target status is reached the returned [JobExecution] is
+     * populated with [JobEndpoint]s derived from the task's ENI private IP and the port mappings
+     * declared in its task definition.
+     */
+    override fun getFutureForStatus(
+        execution: JobExecution,
+        status: JobStatus
+    ): Future<JobExecution> = CompletableFuture.supplyAsync({
+        var result: JobExecution
+        do {
+            Thread.sleep(POLL_INTERVAL_MS)
+            val task = fetchTask(execution.id)
+            result = JobExecution(
+                id = execution.id,
+                status = mapStatus(task),
+                endpoints = mapEndpoints(task)
+            )
+        } while (result.status != status && result.status != JobStatus.FAILED)
+        result
+    }, executor)
 
     /**
      * Launches a Fargate task for the given [JobRequest] and returns a [JobExecution] with
@@ -129,6 +159,53 @@ class FargateOrchestrationService @Inject constructor(
             ?: throw JobException("Fargate returned no task for family '${profile.family}' on cluster '$cluster'")
 
         return JobExecution(id = task.taskArn(), status = JobStatus.PENDING)
+    }
+
+    private fun fetchTask(taskArn: String): Task {
+        val response = ecsClient.describeTasks {
+            it.cluster(cluster)
+            it.tasks(taskArn)
+        }
+        return response.tasks().firstOrNull()
+            ?: throw JobException("No task found for ARN '$taskArn' on cluster '$cluster'")
+    }
+
+    private fun mapStatus(task: Task): JobStatus = when (task.lastStatus()) {
+        "RUNNING" -> JobStatus.RUNNING
+        "STOPPED" -> {
+            val stopCode = task.stopCodeAsString() ?: ""
+            if (stopCode.contains("FAILED") || stopCode.contains("ERROR")) JobStatus.FAILED
+            else JobStatus.COMPLETED
+        }
+        "DELETED" -> JobStatus.FAILED
+        else -> JobStatus.PENDING
+    }
+
+    private fun mapEndpoints(task: Task): List<JobEndpoint> {
+        val privateIp = task.attachments()
+            .firstOrNull { it.type() == "ElasticNetworkInterface" }
+            ?.details()
+            ?.firstOrNull { it.name() == "privateIPv4Address" }
+            ?.value()
+            ?: return emptyList()
+
+        val taskDef = ecsClient.describeTaskDefinition { it.taskDefinition(task.taskDefinitionArn()) }
+
+        return taskDef.taskDefinition()
+            .containerDefinitions()
+            .flatMap { container ->
+                container.portMappings().map { port ->
+                    JobEndpoint(
+                        host = privateIp,
+                        port = port.hostPort() ?: port.containerPort(),
+                        protocol = port.protocolAsString() ?: "tcp"
+                    )
+                }
+            }
+    }
+
+    companion object {
+        private const val POLL_INTERVAL_MS = 5_000L
     }
 
 }

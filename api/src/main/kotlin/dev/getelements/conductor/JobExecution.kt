@@ -15,6 +15,12 @@ data class JobExecution(
     /**
      * The status of the running job.
      */
-    var status : JobStatus
+    val status : JobStatus,
+
+    /**
+     * The network endpoints exposed by the running job, populated once the job reaches
+     * [JobStatus.RUNNING]. Empty while the job is [JobStatus.PENDING].
+     */
+    val endpoints : List<JobEndpoint> = emptyList()
 
 )

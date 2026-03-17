@@ -8,6 +8,8 @@ import dev.getelements.conductor.edgegap.service.EdgeGapOrchestrationService
 import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.ClientBuilder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Guice [PrivateModule] that wires the EdgeGap [OrchestrationService] implementation.
@@ -31,5 +33,9 @@ class EdgeGapOrchestrationModule : PrivateModule() {
     fun provideClient(): Client = ClientBuilder.newBuilder()
         .register(JacksonJsonProvider::class.java)
         .build()
+
+    @Provides
+    @Singleton
+    fun provideExecutorService(): ExecutorService = Executors.newCachedThreadPool()
 
 }

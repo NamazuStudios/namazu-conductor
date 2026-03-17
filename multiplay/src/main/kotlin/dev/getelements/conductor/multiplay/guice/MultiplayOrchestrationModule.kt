@@ -8,6 +8,8 @@ import dev.getelements.conductor.multiplay.service.MultiplayOrchestrationService
 import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.ClientBuilder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MultiplayOrchestrationModule : PrivateModule() {
 
@@ -23,5 +25,9 @@ class MultiplayOrchestrationModule : PrivateModule() {
     fun provideClient(): Client = ClientBuilder.newBuilder()
         .register(JacksonJsonProvider::class.java)
         .build()
+
+    @Provides
+    @Singleton
+    fun provideExecutorService(): ExecutorService = Executors.newCachedThreadPool()
 
 }
