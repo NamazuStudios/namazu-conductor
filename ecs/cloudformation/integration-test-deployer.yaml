@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Namazu Conductor — ECS integration test deployer.
+  Namazu Conductor - ECS integration test deployer.
   Creates an IAM user with the minimum permissions required to deploy and
   tear down the integration-test.yaml stack. Deploy this stack first, then
   use its outputs to deploy integration-test.yaml.
@@ -48,7 +48,7 @@ Resources:
         Statement:
 
           # ------------------------------------------------------------------
-          # CloudFormation — scoped to the integration test stack only.
+          # CloudFormation - scoped to the integration test stack only.
           # ValidateTemplate has no resource scope in the IAM model.
           # ------------------------------------------------------------------
           - Sid: CloudFormationStack
@@ -72,7 +72,7 @@ Resources:
             Resource: '*'
 
           # ------------------------------------------------------------------
-          # EC2 — VPC, subnets, IGW, route tables, security groups.
+          # EC2 - VPC, subnets, IGW, route tables, security groups.
           # Most EC2 networking actions do not support resource-level
           # restrictions and require Resource: '*'.
           # ------------------------------------------------------------------
@@ -112,7 +112,7 @@ Resources:
             Resource: '*'
 
           # ------------------------------------------------------------------
-          # ECS — cluster and task definition for the integration test.
+          # ECS - cluster and task definition for the integration test.
           # ------------------------------------------------------------------
           - Sid: EcsClusterAndTaskDefinition
             Effect: Allow
@@ -129,7 +129,7 @@ Resources:
             Resource: '*'
 
           # ------------------------------------------------------------------
-          # IAM — scoped to resources whose names match the stack prefix.
+          # IAM - scoped to resources whose names match the stack prefix.
           # The deployer creates the task execution role, the integration test
           # user, and its inline policy and access key.
           # ------------------------------------------------------------------
@@ -159,6 +159,7 @@ Resources:
               - iam:GetUserPolicy
               - iam:CreateAccessKey
               - iam:DeleteAccessKey
+              - iam:ListAccessKeys
             Resource:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:user/conductor-integration-test*'
 
@@ -172,7 +173,7 @@ Resources:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/conductor-integration-test*'
 
           # ------------------------------------------------------------------
-          # ECR — push access to the integration test repository.
+          # ECR - push access to the integration test repository.
           # GetAuthorizationToken has no resource scope in the IAM model.
           # ------------------------------------------------------------------
           - Sid: EcrGetAuthToken
@@ -195,7 +196,7 @@ Resources:
               - !GetAtt IntegrationTestRepository.Arn
 
           # ------------------------------------------------------------------
-          # CloudWatch Logs — scoped to the integration test log group.
+          # CloudWatch Logs - scoped to the integration test log group.
           # ------------------------------------------------------------------
           - Sid: Logs
             Effect: Allow
@@ -238,7 +239,7 @@ Outputs:
     Value: !Ref DeployerSecret
 
   EcrRepositoryUri:
-    Description: ECR repository URI — use as the image base for docker build/push
+    Description: ECR repository URI - use as the image base for docker build/push
     Value: !GetAtt IntegrationTestRepository.RepositoryUri
 
   AwsAccessKeyId:
@@ -246,7 +247,7 @@ Outputs:
     Value: !Ref DeployerAccessKey
 
   AwsSecretAccessKey:
-    Description: AWS_SECRET_ACCESS_KEY — only visible now, not retrievable later
+    Description: AWS_SECRET_ACCESS_KEY - only visible now, not retrievable later
     Value: !GetAtt DeployerAccessKey.SecretAccessKey
 
   DeployCommand:
