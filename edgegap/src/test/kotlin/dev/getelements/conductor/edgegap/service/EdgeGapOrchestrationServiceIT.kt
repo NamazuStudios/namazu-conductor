@@ -15,6 +15,7 @@ import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.assertTrue
 import org.testng.SkipException
+import org.slf4j.LoggerFactory
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
@@ -41,6 +42,8 @@ import java.util.concurrent.TimeUnit
  */
 class EdgeGapOrchestrationServiceIT {
 
+    private val logger = LoggerFactory.getLogger(EdgeGapOrchestrationServiceIT::class.java)
+
     private lateinit var apiKey: String
     private lateinit var client: Client
     private lateinit var executor: ExecutorService
@@ -59,7 +62,7 @@ class EdgeGapOrchestrationServiceIT {
             .register(JacksonJsonProvider::class.java)
             .register(ClientResponseFilter { req: ClientRequestContext, ctx: ClientResponseContext ->
                 val body = ctx.entityStream.bufferedReader().readText()
-                System.err.println("EdgeGap ${ctx.status} ${req.uri}: $body")
+                logger.debug("EdgeGap {} {}: {}", ctx.status, req.uri, body)
                 ctx.entityStream = body.byteInputStream()
             })
             .build()
@@ -143,7 +146,7 @@ class EdgeGapOrchestrationServiceIT {
                 .header("Authorization", "token $apiKey")
                 .delete()
         } catch (e: Exception) {
-            System.err.println("Warning: failed to stop EdgeGap deployment $requestId: ${e.message}")
+            logger.warn("Failed to stop EdgeGap deployment {}", requestId, e)
         }
     }
 

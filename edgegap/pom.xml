@@ -29,6 +29,13 @@
             <version>7.10.2</version>
             <scope>test</scope>
         </dependency>
+        <!-- Logback as SLF4J implementation for test logging -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Jersey JAX-RS client implementation required at test runtime for ClientBuilder -->
         <dependency>
             <groupId>org.glassfish.jersey.core</groupId>
