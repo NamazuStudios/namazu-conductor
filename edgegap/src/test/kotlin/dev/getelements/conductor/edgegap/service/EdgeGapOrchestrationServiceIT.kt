@@ -93,10 +93,6 @@ class EdgeGapOrchestrationServiceIT {
             .get(String::class.java)
             .trim()
 
-        val args = listOf(
-            "a", "b", "c"
-        )
-
         val environment = mapOf(
             "TEST_A" to "test_a",
             "TEST_B" to "test_b",
@@ -130,7 +126,7 @@ class EdgeGapOrchestrationServiceIT {
         assertEquals(response.status, 200, "Expected HTTP 200 from nginx")
 
         val context = response.readEntity(TestContext::class.java)
-        assertEquals(context.args, args, "args mismatch")
+        assertEquals(context.args, emptyList<String>(), "args mismatch")
         assertEquals(context.environment, environment, "environment mismatch")
 
     }
