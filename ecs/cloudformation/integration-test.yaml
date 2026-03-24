@@ -206,13 +206,13 @@ Resources:
             Resource: '*'
 
           # Task execution — execute()
+          # Resource is the task definition only; the cluster is enforced via condition.
           - Sid: EcsRunTask
             Effect: Allow
             Action:
               - ecs:RunTask
             Resource:
               - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${TaskFamily}:*'
-              - !GetAtt Cluster.Arn
             Condition:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn

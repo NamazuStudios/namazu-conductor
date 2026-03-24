@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Namazu Conductor — ECS integration test deployer.
+  Creates an IAM user with the minimum permissions required to deploy and
+  tear down the integration-test.yaml stack. Deploy this stack first, then
+  use its outputs to deploy integration-test.yaml.
+
+Parameters:
+
+  IntegrationTestStackName:
+    Type: String
+    Default: conductor-integration-test
+    Description: >
+      The name that will be given to the integration-test.yaml stack. Used to
+      scope CloudFormation and IAM resource permissions to that stack only.
+
+Resources:
+
+  DeployerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: conductor-integration-test-deployer
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-deployer
+
+  DeployerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: conductor-integration-test-deployer
+      Users:
+        - !Ref DeployerUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # ------------------------------------------------------------------
+          # CloudFormation — scoped to the integration test stack only.
+          # ValidateTemplate has no resource scope in the IAM model.
+          # ------------------------------------------------------------------
+          - Sid: CloudFormationStack
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResources
+              - cloudformation:GetTemplate
+              - cloudformation:GetTemplateSummary
+            Resource:
+              - !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/${IntegrationTestStackName}/*'
+
+          - Sid: CloudFormationValidate
+            Effect: Allow
+            Action:
+              - cloudformation:ValidateTemplate
+            Resource: '*'
+
+          # ------------------------------------------------------------------
+          # EC2 — VPC, subnets, IGW, route tables, security groups.
+          # Most EC2 networking actions do not support resource-level
+          # restrictions and require Resource: '*'.
+          # ------------------------------------------------------------------
+          - Sid: Ec2Networking
+            Effect: Allow
+            Action:
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeVpcs
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:ModifyVpcAttribute
+              - ec2:DescribeInternetGateways
+              - ec2:CreateInternetGateway
+              - ec2:DeleteInternetGateway
+              - ec2:AttachInternetGateway
+              - ec2:DetachInternetGateway
+              - ec2:DescribeSubnets
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:ModifySubnetAttribute
+              - ec2:DescribeRouteTables
+              - ec2:CreateRouteTable
+              - ec2:DeleteRouteTable
+              - ec2:CreateRoute
+              - ec2:DeleteRoute
+              - ec2:AssociateRouteTable
+              - ec2:DisassociateRouteTable
+              - ec2:DescribeSecurityGroups
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: '*'
+
+          # ------------------------------------------------------------------
+          # ECS — cluster and task definition for the integration test.
+          # ------------------------------------------------------------------
+          - Sid: EcsClusterAndTaskDefinition
+            Effect: Allow
+            Action:
+              - ecs:CreateCluster
+              - ecs:DeleteCluster
+              - ecs:DescribeClusters
+              - ecs:RegisterTaskDefinition
+              - ecs:DeregisterTaskDefinition
+              - ecs:DescribeTaskDefinition
+              - ecs:TagResource
+              - ecs:UntagResource
+              - ecs:ListTagsForResource
+            Resource: '*'
+
+          # ------------------------------------------------------------------
+          # IAM — scoped to resources whose names match the stack prefix.
+          # The deployer creates the task execution role, the integration test
+          # user, and its inline policy and access key.
+          # ------------------------------------------------------------------
+          - Sid: IamRole
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/conductor-integration-test*'
+
+          - Sid: IamUser
+            Effect: Allow
+            Action:
+              - iam:CreateUser
+              - iam:DeleteUser
+              - iam:GetUser
+              - iam:TagUser
+              - iam:UntagUser
+              - iam:PutUserPolicy
+              - iam:DeleteUserPolicy
+              - iam:GetUserPolicy
+              - iam:CreateAccessKey
+              - iam:DeleteAccessKey
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:user/conductor-integration-test*'
+
+          # Required for CloudFormation to pass the task execution role to ECS
+          # when registering the task definition.
+          - Sid: IamPassTaskExecutionRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/conductor-integration-test*'
+
+          # ------------------------------------------------------------------
+          # CloudWatch Logs — scoped to the integration test log group.
+          # ------------------------------------------------------------------
+          - Sid: Logs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+              - logs:PutRetentionPolicy
+              - logs:DeleteRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - logs:ListTagsForResource
+            Resource:
+              - !Sub 'arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/conductor-integration-test*'
+              - !Sub 'arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/conductor-integration-test*:*'
+
+  DeployerAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref DeployerUser
+
+Outputs:
+
+  AwsAccessKeyId:
+    Description: AWS_ACCESS_KEY_ID for the deployer user
+    Value: !Ref DeployerAccessKey
+
+  AwsSecretAccessKey:
+    Description: AWS_SECRET_ACCESS_KEY — only visible now, not retrievable later
+    Value: !GetAtt DeployerAccessKey.SecretAccessKey
+
+  DeployCommand:
+    Description: Command to deploy the integration-test.yaml stack
+    Value: !Sub >-
+      AWS_ACCESS_KEY_ID=${DeployerAccessKey}
+      AWS_SECRET_ACCESS_KEY=${DeployerAccessKey.SecretAccessKey}
+      aws cloudformation deploy
+      --template-file integration-test.yaml
+      --stack-name ${IntegrationTestStackName}
+      --capabilities CAPABILITY_NAMED_IAM
+      --region <region>
