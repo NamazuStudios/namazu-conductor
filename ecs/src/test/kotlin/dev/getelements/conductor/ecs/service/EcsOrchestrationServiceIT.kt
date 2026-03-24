@@ -57,6 +57,7 @@ class EcsOrchestrationServiceIT {
 
     @BeforeClass
     fun setUp() {
+
         val region = System.getenv("AWS_REGION")
             ?: throw SkipException("AWS_REGION environment variable is not set — skipping ECS integration tests")
 
