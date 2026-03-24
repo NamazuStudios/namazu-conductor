@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.ecs.model.NetworkConfiguration
 import software.amazon.awssdk.services.ecs.model.NetworkMode
 import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
+import software.amazon.awssdk.services.ecs.model.TaskDefinitionField
 import software.amazon.awssdk.services.ecs.model.TaskOverride
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
@@ -68,7 +69,10 @@ class EcsOrchestrationService @Inject constructor(
             }
 
             for (family in response.families()) {
-                val description = ecsClient.describeTaskDefinition { it.taskDefinition(family) }
+                val description = ecsClient.describeTaskDefinition {
+                    it.taskDefinition(family)
+                    it.include(TaskDefinitionField.TAGS)
+                }
                 val taskDef = description.taskDefinition()
 
                 val containerName = taskDef.containerDefinitions().firstOrNull()?.name() ?: continue

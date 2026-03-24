@@ -1,0 +1,303 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Namazu Conductor — ECS integration test infrastructure.
+  Creates a VPC, public subnet, ECS cluster, nginx task definition tagged for
+  Conductor, and an IAM user with the minimum permissions required to run
+  EcsOrchestrationServiceIT.
+
+Parameters:
+
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: CIDR block for the VPC created for integration testing.
+
+  SubnetCidr:
+    Type: String
+    Default: '10.0.1.0/24'
+    Description: CIDR block for the public subnet. Must fall within VpcCidr.
+
+  TaskFamily:
+    Type: String
+    Default: conductor-integration-test
+    Description: >
+      ECS task definition family name. Must match the ECS_TASK_FAMILY environment
+      variable used when running the integration test (defaults to
+      conductor-integration-test if that variable is unset).
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+Resources:
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref SubnetCidr
+      # Use the first AZ in the region — avoids the need for a parameter.
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: false   # Conductor controls this via conductor:assignPublicIp
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-public
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-public
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Allows inbound HTTP from anywhere and all outbound traffic. Outbound is
+  # required for Fargate to pull the nginx image from Docker Hub.
+  IntegrationTestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Conductor integration test — allows inbound TCP 80
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+# ---------------------------------------------------------------------------
+# ECS
+# ---------------------------------------------------------------------------
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: conductor-integration-test
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+  # Allows ECS to pull container images and write CloudWatch logs on behalf of
+  # the task. The AWS-managed policy covers Docker Hub and ECR public access.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: conductor-integration-test-task-execution
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-task-execution
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${TaskFamily}'
+      RetentionInDays: 7
+
+  # The task definition is tagged with the conductor:launchType and
+  # conductor:assignPublicIp tags that EcsOrchestrationService reads at
+  # profile-discovery time. Without these tags the service defaults to
+  # FARGATE and DISABLED respectively.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref TaskFamily
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: nginx
+          Image: nginx:latest
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: conductor:launchType
+          Value: FARGATE
+        - Key: conductor:assignPublicIp
+          Value: ENABLED
+
+# ---------------------------------------------------------------------------
+# IAM user for running the integration test
+# ---------------------------------------------------------------------------
+
+  IntegrationTestUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: conductor-integration-test
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+  IntegrationTestUserPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: conductor-integration-test
+      Users:
+        - !Ref IntegrationTestUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # Profile discovery — getAvailableProfiles()
+          - Sid: EcsListAndDescribeTaskDefinitions
+            Effect: Allow
+            Action:
+              - ecs:ListTaskDefinitionFamilies
+              - ecs:DescribeTaskDefinition
+            Resource: '*'
+
+          # Task execution — execute()
+          - Sid: EcsRunTask
+            Effect: Allow
+            Action:
+              - ecs:RunTask
+            Resource:
+              - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${TaskFamily}:*'
+              - !GetAtt Cluster.Arn
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Required so RunTask can pass the execution role to the task
+          - Sid: IamPassTaskExecutionRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt TaskExecutionRole.Arn
+
+          # Status polling — getFutureForStatus()
+          - Sid: EcsDescribeTasks
+            Effect: Allow
+            Action:
+              - ecs:DescribeTasks
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Teardown — stop()
+          - Sid: EcsStopTask
+            Effect: Allow
+            Action:
+              - ecs:StopTask
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Public IP lookup — fetchPublicIp() in the IT test
+          - Sid: Ec2DescribeNetworkInterfaces
+            Effect: Allow
+            Action:
+              - ec2:DescribeNetworkInterfaces
+            Resource: '*'
+
+  # The secret access key is only retrievable at stack creation time.
+  # Retrieve it from the stack Outputs immediately after deployment.
+  IntegrationTestAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref IntegrationTestUser
+
+# ---------------------------------------------------------------------------
+# Outputs — copy these directly into your environment for mvn verify
+# ---------------------------------------------------------------------------
+Outputs:
+
+  AwsRegion:
+    Description: AWS_REGION
+    Value: !Ref AWS::Region
+
+  EcsCluster:
+    Description: ECS_CLUSTER
+    Value: !Ref Cluster
+
+  EcsSubnets:
+    Description: ECS_SUBNETS
+    Value: !Ref PublicSubnet
+
+  EcsSecurityGroups:
+    Description: ECS_SECURITY_GROUPS
+    Value: !Ref IntegrationTestSecurityGroup
+
+  EcsTaskFamily:
+    Description: ECS_TASK_FAMILY (only needed if overriding the default)
+    Value: !Ref TaskFamily
+
+  AwsAccessKeyId:
+    Description: AWS_ACCESS_KEY_ID
+    Value: !Ref IntegrationTestAccessKey
+
+  AwsSecretAccessKey:
+    Description: AWS_SECRET_ACCESS_KEY — only visible now, not retrievable later
+    Value: !GetAtt IntegrationTestAccessKey.SecretAccessKey
+
+  MvnVerifyCommand:
+    Description: Ready-to-run mvn verify command
+    Value: !Sub >-
+      AWS_ACCESS_KEY_ID=${IntegrationTestAccessKey}
+      AWS_SECRET_ACCESS_KEY=${IntegrationTestAccessKey.SecretAccessKey}
+      AWS_REGION=${AWS::Region}
+      ECS_CLUSTER=${Cluster}
+      ECS_SUBNETS=${PublicSubnet}
+      ECS_SECURITY_GROUPS=${IntegrationTestSecurityGroup}
+      mvn verify -pl ecs
