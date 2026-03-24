@@ -92,7 +92,7 @@ Resources:
   IntegrationTestSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Conductor integration test — allows inbound TCP 80
+      GroupDescription: Conductor integration test - allows inbound TCP 80
       VpcId: !Ref Vpc
       SecurityGroupIngress:
         - IpProtocol: tcp
