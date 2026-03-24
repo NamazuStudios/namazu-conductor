@@ -8,7 +8,7 @@ Namazu Conductor is a container orchestration framework built on the [Namazu Ele
 |---|---|---|
 | `edgegap` | [EdgeGap](https://edgegap.com) | Geo-distributed game server orchestration; supports GPS-based placement |
 | `multiplay` | [Multiplay](https://unity.com/products/multiplay) (Rocket Science / formerly Unity) | Managed game server hosting |
-| `fargate` | [AWS Fargate](https://aws.amazon.com/fargate/) | Serverless container execution on AWS |
+| `ecs` | [AWS ECS](https://aws.amazon.com/ecs/) | Fargate and EC2 container execution on AWS — see [ecs/README.md](ecs/README.md) |
 
 ## Architecture
 
@@ -19,7 +19,7 @@ conductor/
 ├── api/          # Core interfaces and data types — the contract all providers implement
 ├── edgegap/      # EdgeGap OrchestrationService implementation
 ├── multiplay/    # Multiplay OrchestrationService implementation
-├── fargate/      # AWS Fargate OrchestrationService implementation
+├── ecs/          # AWS ECS OrchestrationService implementation (Fargate and EC2)
 └── debug/        # Local development runner
 ```
 
