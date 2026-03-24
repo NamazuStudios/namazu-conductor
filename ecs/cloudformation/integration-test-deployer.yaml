@@ -16,6 +16,19 @@ Parameters:
 
 Resources:
 
+  # Persistent ECR repository for the integration test image. Lives in the
+  # deployer stack rather than the integration-test stack so it survives
+  # create/destroy cycles and image layers remain cached between test runs.
+  IntegrationTestRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: conductor-integration-test
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
   DeployerUser:
     Type: AWS::IAM::User
     Properties:
@@ -159,6 +172,29 @@ Resources:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/conductor-integration-test*'
 
           # ------------------------------------------------------------------
+          # ECR — push access to the integration test repository.
+          # GetAuthorizationToken has no resource scope in the IAM model.
+          # ------------------------------------------------------------------
+          - Sid: EcrGetAuthToken
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: '*'
+
+          - Sid: EcrPush
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+              - ecr:DescribeRepositories
+              - ecr:DescribeImages
+            Resource:
+              - !GetAtt IntegrationTestRepository.Arn
+
+          # ------------------------------------------------------------------
           # CloudWatch Logs — scoped to the integration test log group.
           # ------------------------------------------------------------------
           - Sid: Logs
@@ -182,6 +218,10 @@ Resources:
       UserName: !Ref DeployerUser
 
 Outputs:
+
+  EcrRepositoryUri:
+    Description: ECR repository URI — use as the image base for docker build/push
+    Value: !GetAtt IntegrationTestRepository.RepositoryUri
 
   AwsAccessKeyId:
     Description: AWS_ACCESS_KEY_ID for the deployer user
