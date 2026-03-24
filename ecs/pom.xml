@@ -117,6 +117,12 @@
             <artifactId>ec2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- AWS SDK v2 CloudFormation client for stack deploy/destroy in IT setup -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudformation</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <properties>

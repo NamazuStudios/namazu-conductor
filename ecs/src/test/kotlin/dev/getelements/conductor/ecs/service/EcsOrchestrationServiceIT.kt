@@ -11,7 +11,12 @@ import org.testng.SkipException
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.cloudformation.CloudFormationClient
+import software.amazon.awssdk.services.cloudformation.model.AlreadyExistsException
+import software.amazon.awssdk.services.cloudformation.model.Capability
 import software.amazon.awssdk.services.ec2.Ec2Client
 import software.amazon.awssdk.services.ecs.EcsClient
 import java.util.concurrent.ExecutorService
@@ -19,33 +24,30 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Integration test for [EcsOrchestrationService]. Requires a real AWS account with an ECS task
- * definition family named `conductor-integration-test` (or overridden via `ECS_TASK_FAMILY`).
+ * Integration test for [EcsOrchestrationService].
  *
- * The task definition must be:
- * - Fargate-compatible with `awsvpc` network mode
- * - Running an HTTP server on port 80 (e.g. nginx)
- * - Tagged with `conductor:launchType=FARGATE` and `conductor:assignPublicIp=ENABLED`
- * - Associated with a security group that allows inbound TCP on port 80
+ * Before the suite runs, deploys `integration-test.yaml` (bundled on the test classpath) as a
+ * CloudFormation stack. The stack provisions the ECS cluster, task definition, VPC networking,
+ * and a least-privilege IAM user whose credentials are used for the ECS and EC2 API calls.
+ * After the suite the stack is destroyed.
  *
  * **Prerequisites — environment variables:**
- * - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` — AWS credentials (read by the SDK automatically)
- * - `AWS_REGION` — AWS region of the ECS cluster
- * - `ECS_CLUSTER` — short name or ARN of the ECS cluster
- * - `ECS_SUBNETS` — comma-separated VPC subnet IDs
- * - `ECS_SECURITY_GROUPS` — comma-separated security group IDs
- * - `ECS_TASK_FAMILY` — (optional) task definition family name; defaults to `conductor-integration-test`
+ * - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` — deployer credentials with permission to
+ *   create and delete the CloudFormation stack (see `integration-test-deployer.yaml`).
+ * - `AWS_REGION` — AWS region in which to deploy the stack.
+ * - `CFN_STACK_NAME` — (optional) stack name; defaults to `conductor-integration-test`.
  *
- * The test is skipped automatically if any required variable is absent. Run via:
+ * The test is skipped automatically if `AWS_REGION` is absent. Run via:
  * ```
- * AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1 \
- * ECS_CLUSTER=my-cluster ECS_SUBNETS=subnet-abc ECS_SECURITY_GROUPS=sg-xyz \
- * mvn verify -pl ecs
+ * AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1 mvn verify -pl ecs
  * ```
  */
 class EcsOrchestrationServiceIT {
 
+    private lateinit var stackName: String
+    private lateinit var taskFamily: String
     private lateinit var cluster: String
+    private lateinit var cfnClient: CloudFormationClient
     private lateinit var ecsClient: EcsClient
     private lateinit var ec2Client: Ec2Client
     private lateinit var executor: ExecutorService
@@ -58,25 +60,44 @@ class EcsOrchestrationServiceIT {
     fun setUp() {
         val region = System.getenv("AWS_REGION")
             ?: throw SkipException("AWS_REGION environment variable is not set — skipping ECS integration tests")
-        cluster = System.getenv("ECS_CLUSTER")
-            ?: throw SkipException("ECS_CLUSTER environment variable is not set — skipping ECS integration tests")
-        val subnets = System.getenv("ECS_SUBNETS")
-            ?: throw SkipException("ECS_SUBNETS environment variable is not set — skipping ECS integration tests")
-        val securityGroups = System.getenv("ECS_SECURITY_GROUPS")
-            ?: throw SkipException("ECS_SECURITY_GROUPS environment variable is not set — skipping ECS integration tests")
+
+        stackName = System.getenv("CFN_STACK_NAME") ?: "conductor-integration-test"
 
         val awsRegion = Region.of(region)
-        ecsClient = EcsClient.builder().region(awsRegion).build()
-        ec2Client = Ec2Client.builder().region(awsRegion).build()
-        executor = Executors.newCachedThreadPool()
+        cfnClient = CloudFormationClient.builder().region(awsRegion).build()
+
+        val templateBody = javaClass.getResourceAsStream("/integration-test.yaml")
+            ?.bufferedReader()?.readText()
+            ?: error("integration-test.yaml not found on test classpath")
+
+        deployStack(templateBody)
+
+        val outputs = cfnClient.describeStacks { it.stackName(stackName) }
+            .stacks().first().outputs()
+            .associateBy { it.outputKey() }
+
+        cluster     = outputs.getValue("EcsCluster").outputValue()
+        taskFamily  = outputs.getValue("EcsTaskFamily").outputValue()
+        val subnets         = outputs.getValue("EcsSubnets").outputValue()
+        val securityGroups  = outputs.getValue("EcsSecurityGroups").outputValue()
+        val keyId           = outputs.getValue("AwsAccessKeyId").outputValue()
+        val secretKey       = outputs.getValue("AwsSecretAccessKey").outputValue()
+
+        val testCredentials = StaticCredentialsProvider.create(
+            AwsBasicCredentials.create(keyId, secretKey)
+        )
+
+        ecsClient  = EcsClient.builder().region(awsRegion).credentialsProvider(testCredentials).build()
+        ec2Client  = Ec2Client.builder().region(awsRegion).credentialsProvider(testCredentials).build()
+        executor   = Executors.newCachedThreadPool()
         httpClient = ClientBuilder.newClient()
 
         service = EcsOrchestrationService(
-            cluster = cluster,
-            subnets = subnets,
+            cluster        = cluster,
+            subnets        = subnets,
             securityGroups = securityGroups,
-            ecsClient = ecsClient,
-            executor = executor
+            ecsClient      = ecsClient,
+            executor       = executor
         )
     }
 
@@ -89,18 +110,27 @@ class EcsOrchestrationServiceIT {
                 System.err.println("Warning: failed to stop ECS task $it: ${e.message}")
             }
         }
+
         if (::executor.isInitialized) executor.shutdownNow()
         if (::ecsClient.isInitialized) ecsClient.close()
         if (::ec2Client.isInitialized) ec2Client.close()
         if (::httpClient.isInitialized) httpClient.close()
+
+        if (::cfnClient.isInitialized) {
+            try {
+                cfnClient.deleteStack { it.stackName(stackName) }
+                cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
+            } catch (e: Exception) {
+                System.err.println("Warning: failed to delete stack '$stackName': ${e.message}")
+            }
+            cfnClient.close()
+        }
     }
 
     @Test
     fun launchNginxAndVerifyHttp() {
-        val taskFamily = System.getenv("ECS_TASK_FAMILY") ?: "conductor-integration-test"
-
         val profile = service.findAvailableProfile(taskFamily)
-            ?: throw AssertionError("Profile '$taskFamily' not found — ensure the task definition exists and is tagged with conductor:launchType")
+            ?: throw AssertionError("Profile '$taskFamily' not found — stack outputs may be stale")
 
         val execution = service.execute(JobRequest(profile = profile))
         executionId = execution.id
@@ -120,6 +150,22 @@ class EcsOrchestrationServiceIT {
             .get()
 
         assertEquals(response.status, 200, "Expected HTTP 200 from task on $publicIp:$port")
+    }
+
+    // -------------------------------------------------------------------------
+
+    private fun deployStack(templateBody: String) {
+        try {
+            cfnClient.createStack {
+                it.stackName(stackName)
+                it.templateBody(templateBody)
+                it.capabilities(Capability.CAPABILITY_NAMED_IAM)
+            }
+        } catch (e: AlreadyExistsException) {
+            System.err.println("Stack '$stackName' already exists — using existing outputs")
+            return
+        }
+        cfnClient.waiter().waitUntilStackCreateComplete { it.stackName(stackName) }
     }
 
     private fun fetchPublicIp(taskArn: String): String {
