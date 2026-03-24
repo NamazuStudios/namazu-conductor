@@ -91,6 +91,32 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ecs</artifactId>
         </dependency>
+        <!-- TestNG for integration tests -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>7.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Jersey JAX-RS client implementation required at test runtime for ClientBuilder -->
+        <dependency>
+            <groupId>org.glassfish.jersey.core</groupId>
+            <artifactId>jersey-client</artifactId>
+            <version>3.1.9</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jersey.inject</groupId>
+            <artifactId>jersey-hk2</artifactId>
+            <version>3.1.9</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- AWS SDK v2 EC2 client for public IP lookup via describeNetworkInterfaces -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <properties>
@@ -276,6 +302,30 @@ Element-Builtin-Spis=${elm.builtin.spis}
                     com.example.element:element:1.0-SNAPSHOT:elm
                 and can be published to a remote repository with mvn deploy.
             -->
+            <!--
+                Runs integration tests (*IT classes) during mvn verify.
+                Tests are skipped if required AWS environment variables are not set — the test
+                class handles this itself via TestNG's SkipException.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.class</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>build-helper-maven-plugin</artifactId>

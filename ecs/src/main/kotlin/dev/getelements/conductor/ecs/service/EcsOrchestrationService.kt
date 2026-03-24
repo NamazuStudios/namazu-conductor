@@ -47,7 +47,6 @@ class EcsOrchestrationService @Inject constructor(
     @Named(EcsAttributes.CLUSTER) private val cluster: String,
     @Named(EcsAttributes.SUBNETS) private val subnets: String,
     @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
-    @Named(EcsAttributes.ASSIGN_PUBLIC_IP) private val assignPublicIp: String,
     private val ecsClient: EcsClient,
     private val executor: ExecutorService
 ) : OrchestrationService {
@@ -78,11 +77,15 @@ class EcsOrchestrationService @Inject constructor(
                 val launchTypeTag = description.tags().firstOrNull { it.key() == TAG_LAUNCH_TYPE }?.value()
                 val launchType = if (launchTypeTag != null) LaunchType.fromValue(launchTypeTag) else LaunchType.FARGATE
 
+                val assignPublicIpTag = description.tags().firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }?.value()
+                val assignPublicIp = if (assignPublicIpTag != null) AssignPublicIp.fromValue(assignPublicIpTag) else AssignPublicIp.DISABLED
+
                 profiles += EcsJobProfile(
                     family = family,
                     containerName = containerName,
                     launchType = launchType,
-                    networkMode = networkMode
+                    networkMode = networkMode,
+                    assignPublicIp = assignPublicIp
                 )
             }
 
@@ -147,7 +150,7 @@ class EcsOrchestrationService @Inject constructor(
             it.cluster(cluster)
             it.taskDefinition(profile.family)
             it.launchType(profile.launchType)
-            if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig())
+            if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig(profile.assignPublicIp))
             it.overrides(
                 TaskOverride.builder()
                     .containerOverrides(containerOverride)
@@ -168,12 +171,12 @@ class EcsOrchestrationService @Inject constructor(
         }
     }
 
-    private fun buildNetworkConfig() = NetworkConfiguration.builder()
+    private fun buildNetworkConfig(assignPublicIp: AssignPublicIp) = NetworkConfiguration.builder()
         .awsvpcConfiguration(
             AwsVpcConfiguration.builder()
                 .subnets(subnets.split(",").map { it.trim() })
                 .securityGroups(securityGroups.split(",").map { it.trim() })
-                .assignPublicIp(AssignPublicIp.fromValue(assignPublicIp))
+                .assignPublicIp(assignPublicIp)
                 .build()
         )
         .build()
@@ -224,6 +227,7 @@ class EcsOrchestrationService @Inject constructor(
     companion object {
         private const val POLL_INTERVAL_MS = 5_000L
         const val TAG_LAUNCH_TYPE = "conductor:launchType"
+        const val TAG_ASSIGN_PUBLIC_IP = "conductor:assignPublicIp"
     }
 
 }

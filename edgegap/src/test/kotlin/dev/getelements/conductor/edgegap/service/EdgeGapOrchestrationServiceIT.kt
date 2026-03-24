@@ -104,7 +104,6 @@ class EdgeGapOrchestrationServiceIT {
             JobRequest(
                 profile = profile,
                 placement = listOf(IpPlacement(ip = publicIp)),
-//                args = args,
                 environment = environment
             )
         )

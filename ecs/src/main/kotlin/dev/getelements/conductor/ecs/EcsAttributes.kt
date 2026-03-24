@@ -37,11 +37,4 @@ object EcsAttributes {
     @ElementDefaultAttribute("")
     const val SECURITY_GROUPS = "dev.getelements.conductor.ecs.security.groups"
 
-    /**
-     * Whether to assign a public IP to launched tasks. Must be `"ENABLED"` or `"DISABLED"`.
-     * Only applies to tasks using `awsvpc` network mode. Defaults to `"ENABLED"`.
-     */
-    @ElementDefaultAttribute("ENABLED")
-    const val ASSIGN_PUBLIC_IP = "dev.getelements.conductor.ecs.assign.public.ip"
-
 }
