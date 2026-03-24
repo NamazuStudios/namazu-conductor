@@ -40,4 +40,9 @@ interface OrchestrationService {
      */
     fun getFutureForStatus(execution: JobExecution, status: JobStatus) : Future<JobExecution>;
 
+    /**
+     * Stops the running job identified by [execution].
+     */
+    fun stop(execution: JobExecution)
+
 }

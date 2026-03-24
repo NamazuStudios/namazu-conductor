@@ -1,5 +1,6 @@
 package dev.getelements.conductor.edgegap.model
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 
 /**
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
  * @property requestDns the stable FQDN assigned to this deployment (available immediately,
  *   before the container is ready)
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class EdgeGapDeployResponse(
     @JsonProperty("request_id") val requestId: String,
     @JsonProperty("request_dns") val requestDns: String? = null

@@ -1,5 +1,6 @@
 package dev.getelements.conductor.edgegap.model
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 
 /**
@@ -7,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
  * corresponding list endpoint. Each active version is surfaced as an
  * [dev.getelements.conductor.edgegap.EdgeGapJobProfile].
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class EdgeGapAppVersion(
     @JsonProperty("name") val name: String,
     @JsonProperty("is_active") val isActive: Boolean = false,
@@ -18,7 +20,8 @@ data class EdgeGapAppVersion(
 /**
  * Paginated response from `GET /v1/app/{app_name}/versions`.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class EdgeGapAppVersionList(
-    @JsonProperty("data") val data: List<EdgeGapAppVersion> = emptyList(),
+    @JsonProperty("versions") val data: List<EdgeGapAppVersion>? = null,
     @JsonProperty("pagination") val pagination: EdgeGapPagination = EdgeGapPagination()
 )

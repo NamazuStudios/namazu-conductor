@@ -193,6 +193,16 @@ class MultiplayOrchestrationService @Inject constructor(
         return JobExecution(id = response.allocationId, status = JobStatus.PENDING)
     }
 
+    override fun stop(execution: JobExecution) {
+        allocationTarget("/v1/allocations/projects/{project}/environments/{env}/allocations/{allocationId}")
+            .resolveTemplate("project", projectId)
+            .resolveTemplate("env", environmentId)
+            .resolveTemplate("allocationId", execution.id)
+            .request()
+            .header(AUTH_HEADER, authBearer())
+            .delete()
+    }
+
     private fun fetchAllocationStatus(allocationId: String): MultiplayAllocationStatus =
         allocationTarget("/v1/allocations/projects/{project}/environments/{env}/allocations/{allocationId}")
             .resolveTemplate("project", projectId)

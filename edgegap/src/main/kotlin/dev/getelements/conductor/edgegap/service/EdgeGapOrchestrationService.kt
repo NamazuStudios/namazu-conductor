@@ -46,6 +46,8 @@ import java.util.concurrent.Future
 class EdgeGapOrchestrationService @Inject constructor(
     @Named(EdgeGapAttributes.API_KEY) private val apiKey: String,
     @Named(EdgeGapAttributes.BASE_URL) private val baseUrl: String,
+    @Named(EdgeGapAttributes.POLL_INTERVAL) private val pollingIntervalMs: Long,
+    @Named(EdgeGapAttributes.API_KEY)
     private val client: Client,
     private val executor: ExecutorService
 ) : OrchestrationService {
@@ -59,6 +61,7 @@ class EdgeGapOrchestrationService @Inject constructor(
         var page = 1
 
         do {
+
             val apps = target("/v1/apps")
                 .queryParam("page", page)
                 .queryParam("limit", PAGE_SIZE)
@@ -66,11 +69,12 @@ class EdgeGapOrchestrationService @Inject constructor(
                 .header(AUTH_HEADER, authValue())
                 .get(EdgeGapAppsResponse::class.java)
 
-            for (app in apps.data) {
+            for (app in apps.data ?: emptyList()) {
                 if (app.isActive) profiles += getVersionsForApp(app.name)
             }
 
             page++
+
         } while (apps.pagination.hasNext)
 
         return profiles
@@ -89,7 +93,7 @@ class EdgeGapOrchestrationService @Inject constructor(
                 .header(AUTH_HEADER, authValue())
                 .get(EdgeGapAppVersionList::class.java)
 
-            versions.data
+            (versions.data ?: emptyList())
                 .filter { it.isActive }
                 .mapTo(profiles) { EdgeGapJobProfile(appName, it.name) }
 
@@ -146,8 +150,8 @@ class EdgeGapOrchestrationService @Inject constructor(
                 .map { EdgeGapGeoIp(latitude = it.latitude, longitude = it.longitude) },
             envVars = request.environment
                 .map { (k, v) -> EdgeGapEnvVar(key = k, value = v) },
-            command = request.command.joinToString(" ").ifBlank { null },
-            arguments = request.args.joinToString(" ").ifBlank { null }
+            command = (request.command + request.args).joinToString(" ").ifBlank { null },
+            arguments = null
         )
 
         val response = target("/v1/deploy")
@@ -156,6 +160,14 @@ class EdgeGapOrchestrationService @Inject constructor(
             .post(Entity.json(deployRequest), EdgeGapDeployResponse::class.java)
 
         return JobExecution(id = response.requestId, status = JobStatus.PENDING)
+    }
+
+    override fun stop(execution: JobExecution) {
+        target("/v1/stop/{request_id}")
+            .resolveTemplate("request_id", execution.id)
+            .request()
+            .header(AUTH_HEADER, authValue())
+            .delete()
     }
 
     private fun fetchStatus(requestId: String): EdgeGapStatusResponse =

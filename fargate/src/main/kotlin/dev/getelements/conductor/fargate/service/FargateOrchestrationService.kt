@@ -161,6 +161,13 @@ class FargateOrchestrationService @Inject constructor(
         return JobExecution(id = task.taskArn(), status = JobStatus.PENDING)
     }
 
+    override fun stop(execution: JobExecution) {
+        ecsClient.stopTask {
+            it.cluster(cluster)
+            it.task(execution.id)
+        }
+    }
+
     private fun fetchTask(taskArn: String): Task {
         val response = ecsClient.describeTasks {
             it.cluster(cluster)

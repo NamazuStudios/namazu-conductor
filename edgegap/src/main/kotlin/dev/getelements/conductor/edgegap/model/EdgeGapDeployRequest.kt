@@ -7,9 +7,9 @@ import com.fasterxml.jackson.annotation.JsonProperty
  * An environment variable to inject into the container at deployment time.
  */
 data class EdgeGapEnvVar(
-    @JsonProperty("key") val key: String,
-    @JsonProperty("value") val value: String,
-    @JsonProperty("is_hidden") val isHidden: Boolean = false
+    @field:JsonProperty("key") val key: String,
+    @field:JsonProperty("value") val value: String,
+    @field:JsonProperty("is_hidden") val isHidden: Boolean = false
 )
 
 /**
@@ -19,9 +19,9 @@ data class EdgeGapEnvVar(
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class EdgeGapGeoIp(
-    @JsonProperty("ip") val ip: String? = null,
-    @JsonProperty("latitude") val latitude: Double,
-    @JsonProperty("longitude") val longitude: Double
+    @field:JsonProperty("ip") val ip: String? = null,
+    @field:JsonProperty("latitude") val latitude: Double,
+    @field:JsonProperty("longitude") val longitude: Double
 )
 
 /**
@@ -38,11 +38,11 @@ data class EdgeGapGeoIp(
  */
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
 data class EdgeGapDeployRequest(
-    @JsonProperty("app_name") val appName: String,
-    @JsonProperty("version_name") val versionName: String,
-    @JsonProperty("ip_list") val ipList: List<String> = emptyList(),
-    @JsonProperty("geo_ip_list") val geoIpList: List<EdgeGapGeoIp> = emptyList(),
-    @JsonProperty("env_vars") val envVars: List<EdgeGapEnvVar> = emptyList(),
-    @JsonProperty("command") val command: String? = null,
-    @JsonProperty("arguments") val arguments: String? = null
+    @field:JsonProperty("app_name") val appName: String,
+    @field:JsonProperty("version_name") val versionName: String,
+    @field:JsonProperty("ip_list") val ipList: List<String> = emptyList(),
+    @field:JsonProperty("geo_ip_list") val geoIpList: List<EdgeGapGeoIp> = emptyList(),
+    @field:JsonProperty("env_vars") val envVars: List<EdgeGapEnvVar> = emptyList(),
+    @field:JsonProperty("command") val command: String? = null,
+    @field:JsonProperty("arguments") val arguments: String? = null
 )

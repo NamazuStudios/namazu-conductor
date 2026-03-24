@@ -15,7 +15,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class EdgeGapStatusResponse(
     @JsonProperty("request_id") val requestId: String,
-    @JsonProperty("status") val status: String,
+    @JsonProperty("current_status") val status: String,
     @JsonProperty("fqdn") val fqdn: String? = null,
     @JsonProperty("public_ip") val publicIp: String? = null,
     @JsonProperty("ports") val ports: Map<String, EdgeGapPort> = emptyMap()

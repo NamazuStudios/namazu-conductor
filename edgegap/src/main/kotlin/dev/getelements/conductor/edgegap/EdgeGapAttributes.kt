@@ -14,7 +14,7 @@ object EdgeGapAttributes {
      * `"token "` in the `Authorization` header per the EdgeGap authentication scheme.
      * No default — must be supplied by the operator.
      */
-    @ElementDefaultAttribute("")
+    @ElementDefaultAttribute(sensitive = true)
     const val API_KEY = "dev.getelements.conductor.edgegap.api.key"
 
     /**
@@ -23,5 +23,11 @@ object EdgeGapAttributes {
      */
     @ElementDefaultAttribute("https://api.edgegap.com")
     const val BASE_URL = "dev.getelements.conductor.edgegap.base.url"
+
+    /**
+     * Indicates the polling interval for checking when an EdgeGap instance starts.
+     */
+    @ElementDefaultAttribute("dev.getelements.conductor.edgegap.poll.interval.ms")
+    const val POLL_INTERVAL = "5000";
 
 }
