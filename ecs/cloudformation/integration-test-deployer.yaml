@@ -217,7 +217,25 @@ Resources:
     Properties:
       UserName: !Ref DeployerUser
 
+  DeployerSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: conductor-integration-test-deployer
+      Description: AWS credentials for the Conductor ECS integration test deployer user
+      SecretString: !Sub |
+        {
+          "AWS_ACCESS_KEY_ID": "${DeployerAccessKey}",
+          "AWS_SECRET_ACCESS_KEY": "${DeployerAccessKey.SecretAccessKey}"
+        }
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-deployer
+
 Outputs:
+
+  DeployerSecretArn:
+    Description: Secrets Manager ARN containing the deployer AWS credentials
+    Value: !Ref DeployerSecret
 
   EcrRepositoryUri:
     Description: ECR repository URI — use as the image base for docker build/push
