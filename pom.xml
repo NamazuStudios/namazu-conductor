@@ -86,7 +86,7 @@
       </dependency>
       <dependency>
         <groupId>dev.getelements.conductor</groupId>
-        <artifactId>fargate</artifactId>
+        <artifactId>ecs</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -98,7 +98,7 @@
   </dependencyManagement>
   <modules>
     <module>api</module>
-    <module>fargate</module>
+    <module>ecs</module>
     <module>edgegap</module>
     <module>multiplay</module>
     <module>debug</module>

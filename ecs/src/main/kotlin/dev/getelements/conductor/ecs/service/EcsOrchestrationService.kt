@@ -1,4 +1,4 @@
-package dev.getelements.conductor.fargate.service
+package dev.getelements.conductor.ecs.service
 
 import com.google.inject.Inject
 import com.google.inject.Singleton
@@ -7,9 +7,9 @@ import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.ecs.EcsAttributes
+import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
-import dev.getelements.conductor.fargate.FargateAttributes
-import dev.getelements.conductor.fargate.FargateJobProfile
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import software.amazon.awssdk.services.ecs.EcsClient
@@ -19,6 +19,7 @@ import software.amazon.awssdk.services.ecs.model.ContainerOverride
 import software.amazon.awssdk.services.ecs.model.KeyValuePair
 import software.amazon.awssdk.services.ecs.model.LaunchType
 import software.amazon.awssdk.services.ecs.model.NetworkConfiguration
+import software.amazon.awssdk.services.ecs.model.NetworkMode
 import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
 import software.amazon.awssdk.services.ecs.model.TaskOverride
@@ -27,36 +28,38 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 
 /**
- * [OrchestrationService] implementation backed by AWS Fargate via the AWS SDK v2 ECS client.
+ * [OrchestrationService] implementation backed by AWS ECS via the AWS SDK v2 ECS client.
  *
  * Profiles correspond to active ECS task definition families. Each family is described at
- * discovery time to capture the primary container name, which is needed for applying
- * [JobRequest] overrides at execution time.
+ * discovery time to capture the primary container name, network mode, and launch type. The
+ * launch type is read from the `conductor:launchType` tag on the task definition; if absent,
+ * [LaunchType.FARGATE] is used. Network configuration is only applied when the task definition's
+ * network mode is [NetworkMode.AWSVPC].
  *
- * All [dev.getelements.conductor.JobPlacement] hints are ignored — Fargate task placement is
- * governed entirely by the configured subnets and security groups.
+ * All [dev.getelements.conductor.JobPlacement] hints are ignored — task placement is governed
+ * entirely by the configured subnets and security groups (for `awsvpc` tasks) or the ECS
+ * container instance (for EC2 tasks).
  *
- * Configuration is provided by the Elements SDK via the attribute keys declared in
- * [FargateAttributes].
+ * Configuration is provided by the Elements SDK via the attribute keys declared in [EcsAttributes].
  */
 @Singleton
-class FargateOrchestrationService @Inject constructor(
-    @Named(FargateAttributes.CLUSTER) private val cluster: String,
-    @Named(FargateAttributes.SUBNETS) private val subnets: String,
-    @Named(FargateAttributes.SECURITY_GROUPS) private val securityGroups: String,
-    @Named(FargateAttributes.ASSIGN_PUBLIC_IP) private val assignPublicIp: String,
+class EcsOrchestrationService @Inject constructor(
+    @Named(EcsAttributes.CLUSTER) private val cluster: String,
+    @Named(EcsAttributes.SUBNETS) private val subnets: String,
+    @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
+    @Named(EcsAttributes.ASSIGN_PUBLIC_IP) private val assignPublicIp: String,
     private val ecsClient: EcsClient,
     private val executor: ExecutorService
 ) : OrchestrationService {
 
     /**
-     * Returns one [FargateJobProfile] per active ECS task definition family. Each family is
-     * described to obtain the primary container name required for override application in
-     * [execute].
+     * Returns one [EcsJobProfile] per active ECS task definition family. Each family is described
+     * to obtain the primary container name, network mode, and launch type tag required for
+     * execution in [execute].
      */
     override fun getAvailableProfiles(): List<JobProfile> {
 
-        val profiles = mutableListOf<FargateJobProfile>()
+        val profiles = mutableListOf<EcsJobProfile>()
         var nextToken: String? = null
 
         do {
@@ -67,12 +70,20 @@ class FargateOrchestrationService @Inject constructor(
 
             for (family in response.families()) {
                 val description = ecsClient.describeTaskDefinition { it.taskDefinition(family) }
-                val containerName = description.taskDefinition()
-                    .containerDefinitions()
-                    .firstOrNull()
-                    ?.name()
-                    ?: continue
-                profiles += FargateJobProfile(family = family, containerName = containerName)
+                val taskDef = description.taskDefinition()
+
+                val containerName = taskDef.containerDefinitions().firstOrNull()?.name() ?: continue
+                val networkMode = taskDef.networkMode() ?: NetworkMode.AWSVPC
+
+                val launchTypeTag = description.tags().firstOrNull { it.key() == TAG_LAUNCH_TYPE }?.value()
+                val launchType = if (launchTypeTag != null) LaunchType.fromValue(launchTypeTag) else LaunchType.FARGATE
+
+                profiles += EcsJobProfile(
+                    family = family,
+                    containerName = containerName,
+                    launchType = launchType,
+                    networkMode = networkMode
+                )
             }
 
             nextToken = response.nextToken()
@@ -105,19 +116,18 @@ class FargateOrchestrationService @Inject constructor(
     }, executor)
 
     /**
-     * Launches a Fargate task for the given [JobRequest] and returns a [JobExecution] with
+     * Launches an ECS task for the given [JobRequest] and returns a [JobExecution] with
      * status [JobStatus.PENDING].
      *
-     * [JobRequest.command] and [JobRequest.args] are concatenated and applied as the ECS command
-     * override on the primary container. [JobRequest.environment] is applied as environment
-     * variable overrides. All [JobRequest.placement] hints are silently ignored.
+     * The launch type and network configuration are driven entirely by the [EcsJobProfile].
+     * Network configuration is only applied when the task definition uses `awsvpc` network mode.
      *
-     * @throws JobException if [JobRequest.profile] is not a [FargateJobProfile], or if Fargate
-     *   does not return a task ARN in its response.
+     * @throws JobException if [JobRequest.profile] is not an [EcsJobProfile], or if ECS does not
+     *   return a task ARN in its response.
      */
     override fun execute(request: JobRequest): JobExecution {
-        val profile = request.profile as? FargateJobProfile
-            ?: throw JobException("JobProfile must be a ${FargateJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
+        val profile = request.profile as? EcsJobProfile
+            ?: throw JobException("JobProfile must be a ${EcsJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val envVars = request.environment.map { (k, v) ->
             KeyValuePair.builder().name(k).value(v).build()
@@ -133,21 +143,11 @@ class FargateOrchestrationService @Inject constructor(
             }
             .build()
 
-        val networkConfig = NetworkConfiguration.builder()
-            .awsvpcConfiguration(
-                AwsVpcConfiguration.builder()
-                    .subnets(subnets.split(",").map { it.trim() })
-                    .securityGroups(securityGroups.split(",").map { it.trim() })
-                    .assignPublicIp(AssignPublicIp.fromValue(assignPublicIp))
-                    .build()
-            )
-            .build()
-
         val taskResponse = ecsClient.runTask {
             it.cluster(cluster)
             it.taskDefinition(profile.family)
-            it.launchType(LaunchType.FARGATE)
-            it.networkConfiguration(networkConfig)
+            it.launchType(profile.launchType)
+            if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig())
             it.overrides(
                 TaskOverride.builder()
                     .containerOverrides(containerOverride)
@@ -156,7 +156,7 @@ class FargateOrchestrationService @Inject constructor(
         }
 
         val task = taskResponse.tasks().firstOrNull()
-            ?: throw JobException("Fargate returned no task for family '${profile.family}' on cluster '$cluster'")
+            ?: throw JobException("ECS returned no task for family '${profile.family}' on cluster '$cluster'")
 
         return JobExecution(id = task.taskArn(), status = JobStatus.PENDING)
     }
@@ -167,6 +167,16 @@ class FargateOrchestrationService @Inject constructor(
             it.task(execution.id)
         }
     }
+
+    private fun buildNetworkConfig() = NetworkConfiguration.builder()
+        .awsvpcConfiguration(
+            AwsVpcConfiguration.builder()
+                .subnets(subnets.split(",").map { it.trim() })
+                .securityGroups(securityGroups.split(",").map { it.trim() })
+                .assignPublicIp(AssignPublicIp.fromValue(assignPublicIp))
+                .build()
+        )
+        .build()
 
     private fun fetchTask(taskArn: String): Task {
         val response = ecsClient.describeTasks {
@@ -213,6 +223,7 @@ class FargateOrchestrationService @Inject constructor(
 
     companion object {
         private const val POLL_INTERVAL_MS = 5_000L
+        const val TAG_LAUNCH_TYPE = "conductor:launchType"
     }
 
 }
