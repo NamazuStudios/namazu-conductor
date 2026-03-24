@@ -38,9 +38,9 @@ Resources:
           Value: conductor-integration-test-deployer
 
   DeployerPolicy:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      PolicyName: conductor-integration-test-deployer
+      ManagedPolicyName: conductor-integration-test-deployer
       Users:
         - !Ref DeployerUser
       PolicyDocument:
