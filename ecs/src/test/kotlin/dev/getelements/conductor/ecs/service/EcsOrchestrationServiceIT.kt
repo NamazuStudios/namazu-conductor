@@ -49,7 +49,6 @@ class EcsOrchestrationServiceIT {
     private lateinit var cluster: String
     private lateinit var cfnClient: CloudFormationClient
     private lateinit var ecsClient: EcsClient
-    private lateinit var ec2Client: Ec2Client
     private lateinit var executor: ExecutorService
     private lateinit var service: EcsOrchestrationService
     private lateinit var httpClient: Client
@@ -87,9 +86,9 @@ class EcsOrchestrationServiceIT {
             AwsBasicCredentials.create(keyId, secretKey)
         )
 
-        ecsClient  = EcsClient.builder().region(awsRegion).credentialsProvider(testCredentials).build()
-        ec2Client  = Ec2Client.builder().region(awsRegion).credentialsProvider(testCredentials).build()
-        executor   = Executors.newCachedThreadPool()
+        ecsClient = EcsClient.builder().region(awsRegion).credentialsProvider(testCredentials).build()
+        val ec2Client = Ec2Client.builder().region(awsRegion).credentialsProvider(testCredentials).build()
+        executor  = Executors.newCachedThreadPool()
         httpClient = ClientBuilder.newClient()
 
         service = EcsOrchestrationService(
@@ -97,6 +96,7 @@ class EcsOrchestrationServiceIT {
             subnets        = subnets,
             securityGroups = securityGroups,
             ecsClient      = ecsClient,
+            ec2Client      = ec2Client,
             executor       = executor
         )
     }
@@ -113,7 +113,6 @@ class EcsOrchestrationServiceIT {
 
         if (::executor.isInitialized) executor.shutdownNow()
         if (::ecsClient.isInitialized) ecsClient.close()
-        if (::ec2Client.isInitialized) ec2Client.close()
         if (::httpClient.isInitialized) httpClient.close()
 
         if (::cfnClient.isInitialized) {
@@ -141,18 +140,15 @@ class EcsOrchestrationServiceIT {
 
         assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING")
 
-        val publicIp = fetchPublicIp(execution.id)
-        val port = running.endpoints.first().port
+        val endpoint = running.endpoints.first()
 
         val response = httpClient
-            .target("http://$publicIp:$port/")
+            .target("http://${endpoint.host}:${endpoint.port}/")
             .request()
             .get()
 
-        assertEquals(response.status, 200, "Expected HTTP 200 from task on $publicIp:$port")
+        assertEquals(response.status, 200, "Expected HTTP 200 from task on ${endpoint.host}:${endpoint.port}")
     }
-
-    // -------------------------------------------------------------------------
 
     private fun deployStack(templateBody: String) {
         try {
@@ -166,28 +162,6 @@ class EcsOrchestrationServiceIT {
             return
         }
         cfnClient.waiter().waitUntilStackCreateComplete { it.stackName(stackName) }
-    }
-
-    private fun fetchPublicIp(taskArn: String): String {
-        val task = ecsClient.describeTasks {
-            it.cluster(cluster)
-            it.tasks(taskArn)
-        }.tasks().firstOrNull()
-            ?: throw AssertionError("Task not found: $taskArn")
-
-        val eniId = task.attachments()
-            .firstOrNull { it.type() == "ElasticNetworkInterface" }
-            ?.details()
-            ?.firstOrNull { it.name() == "networkInterfaceId" }
-            ?.value()
-            ?: throw AssertionError("No ENI attachment found on task $taskArn")
-
-        return ec2Client.describeNetworkInterfaces {
-            it.networkInterfaceIds(eniId)
-        }.networkInterfaces().firstOrNull()
-            ?.association()
-            ?.publicIp()
-            ?: throw AssertionError("No public IP on ENI $eniId — ensure the task definition is tagged conductor:assignPublicIp=ENABLED")
     }
 
 }

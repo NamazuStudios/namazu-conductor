@@ -12,6 +12,7 @@ import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import software.amazon.awssdk.services.ec2.Ec2Client
 import software.amazon.awssdk.services.ecs.EcsClient
 import software.amazon.awssdk.services.ecs.model.AssignPublicIp
 import software.amazon.awssdk.services.ecs.model.AwsVpcConfiguration
@@ -49,6 +50,7 @@ class EcsOrchestrationService @Inject constructor(
     @Named(EcsAttributes.SUBNETS) private val subnets: String,
     @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
     private val ecsClient: EcsClient,
+    private val ec2Client: Ec2Client,
     private val executor: ExecutorService
 ) : OrchestrationService {
 
@@ -102,8 +104,9 @@ class EcsOrchestrationService @Inject constructor(
     /**
      * Polls `describeTasks` on a background thread until the task reaches [status] (or
      * [JobStatus.FAILED]). Once the target status is reached the returned [JobExecution] is
-     * populated with [JobEndpoint]s derived from the task's ENI private IP and the port mappings
-     * declared in its task definition.
+     * populated with [JobEndpoint]s derived from the task's port mappings. The host address used
+     * is the public IP when the task definition carries `conductor:assignPublicIp=ENABLED`,
+     * resolved via EC2 `describeNetworkInterfaces`; otherwise the ENI private IP is used.
      */
     override fun getFutureForStatus(
         execution: JobExecution,
@@ -206,21 +209,41 @@ class EcsOrchestrationService @Inject constructor(
     }
 
     private fun mapEndpoints(task: Task): List<JobEndpoint> {
-        val privateIp = task.attachments()
+        val eniDetails = task.attachments()
             .firstOrNull { it.type() == "ElasticNetworkInterface" }
             ?.details()
-            ?.firstOrNull { it.name() == "privateIPv4Address" }
-            ?.value()
+            ?.associateBy { it.name() }
             ?: return emptyList()
 
-        val taskDef = ecsClient.describeTaskDefinition { it.taskDefinition(task.taskDefinitionArn()) }
+        val privateIp = eniDetails["privateIPv4Address"]?.value() ?: return emptyList()
+        val eniId = eniDetails["networkInterfaceId"]?.value()
+
+        val taskDef = ecsClient.describeTaskDefinition {
+            it.taskDefinition(task.taskDefinitionArn())
+            it.include(TaskDefinitionField.TAGS)
+        }
+
+        val assignPublicIp = taskDef.tags()
+            .firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }
+            ?.value()
+            ?.let { AssignPublicIp.fromValue(it) }
+            ?: AssignPublicIp.DISABLED
+
+        val host = if (assignPublicIp == AssignPublicIp.ENABLED && eniId != null) {
+            ec2Client.describeNetworkInterfaces { it.networkInterfaceIds(eniId) }
+                .networkInterfaces().firstOrNull()
+                ?.association()?.publicIp()
+                ?: privateIp
+        } else {
+            privateIp
+        }
 
         return taskDef.taskDefinition()
             .containerDefinitions()
             .flatMap { container ->
                 container.portMappings().map { port ->
                     JobEndpoint(
-                        host = privateIp,
+                        host = host,
                         port = port.hostPort() ?: port.containerPort(),
                         protocol = port.protocolAsString() ?: "tcp"
                     )

@@ -91,6 +91,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ecs</artifactId>
         </dependency>
+        <!-- AWS SDK v2 EC2 client for public IP resolution via describeNetworkInterfaces -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
+        </dependency>
         <!-- TestNG for integration tests -->
         <dependency>
             <groupId>org.testng</groupId>
@@ -109,12 +114,6 @@
             <groupId>org.glassfish.jersey.inject</groupId>
             <artifactId>jersey-hk2</artifactId>
             <version>3.1.9</version>
-            <scope>test</scope>
-        </dependency>
-        <!-- AWS SDK v2 EC2 client for public IP lookup via describeNetworkInterfaces -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>ec2</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- AWS SDK v2 CloudFormation client for stack deploy/destroy in IT setup -->
