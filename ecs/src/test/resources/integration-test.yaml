@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Namazu Conductor — ECS integration test infrastructure.
+  Namazu Conductor - ECS integration test infrastructure.
   Creates a VPC, public subnet, ECS cluster, nginx task definition tagged for
   Conductor, and an IAM user with the minimum permissions required to run
   EcsOrchestrationServiceIT.
@@ -58,7 +58,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: !Ref SubnetCidr
-      # Use the first AZ in the region — avoids the need for a parameter.
+      # Use the first AZ in the region - avoids the need for a parameter.
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
       MapPublicIpOnLaunch: false   # Conductor controls this via conductor:assignPublicIp
       Tags:
@@ -197,7 +197,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
 
-          # Profile discovery — getAvailableProfiles()
+          # Profile discovery - getAvailableProfiles()
           - Sid: EcsListAndDescribeTaskDefinitions
             Effect: Allow
             Action:
@@ -205,7 +205,7 @@ Resources:
               - ecs:DescribeTaskDefinition
             Resource: '*'
 
-          # Task execution — execute()
+          # Task execution - execute()
           # Resource is the task definition only; the cluster is enforced via condition.
           - Sid: EcsRunTask
             Effect: Allow
@@ -224,7 +224,7 @@ Resources:
               - iam:PassRole
             Resource: !GetAtt TaskExecutionRole.Arn
 
-          # Status polling — getFutureForStatus()
+          # Status polling - getFutureForStatus()
           - Sid: EcsDescribeTasks
             Effect: Allow
             Action:
@@ -234,7 +234,7 @@ Resources:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn
 
-          # Teardown — stop()
+          # Teardown - stop()
           - Sid: EcsStopTask
             Effect: Allow
             Action:
@@ -244,7 +244,7 @@ Resources:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn
 
-          # Public IP lookup — fetchPublicIp() in the IT test
+          # Public IP lookup - fetchPublicIp() in the IT test
           - Sid: Ec2DescribeNetworkInterfaces
             Effect: Allow
             Action:
@@ -259,7 +259,7 @@ Resources:
       UserName: !Ref IntegrationTestUser
 
 # ---------------------------------------------------------------------------
-# Outputs — copy these directly into your environment for mvn verify
+# Outputs - copy these directly into your environment for mvn verify
 # ---------------------------------------------------------------------------
 Outputs:
 
@@ -288,7 +288,7 @@ Outputs:
     Value: !Ref IntegrationTestAccessKey
 
   AwsSecretAccessKey:
-    Description: AWS_SECRET_ACCESS_KEY — only visible now, not retrievable later
+    Description: AWS_SECRET_ACCESS_KEY - only visible now, not retrievable later
     Value: !GetAtt IntegrationTestAccessKey.SecretAccessKey
 
   MvnVerifyCommand:
