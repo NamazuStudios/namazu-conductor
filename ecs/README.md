@@ -10,12 +10,22 @@ The `ecs` module implements `OrchestrationService` for AWS ECS, supporting both 
 | Cluster | `dev.getelements.conductor.ecs.cluster` | _(required)_ | Short name or ARN of the ECS cluster |
 | Subnets | `dev.getelements.conductor.ecs.subnets` | _(required for `awsvpc`)_ | Comma-separated VPC subnet IDs |
 | Security Groups | `dev.getelements.conductor.ecs.security.groups` | _(required for `awsvpc`)_ | Comma-separated security group IDs |
+| Jobset | `dev.getelements.conductor.ecs.jobset` | `default` | Only task definitions tagged with `namazu.conductor:jobSet` matching this value are surfaced as profiles |
 
 ## Task Definition Tags
 
-The ECS provider reads the following tags from each task definition at profile-discovery time. Tags are set on the task definition in the AWS Console, via the AWS CLI, or in your infrastructure-as-code (Terraform, CDK, CloudFormation).
+All tags use the `namazu.conductor:` prefix. They are set on the task definition in the AWS Console, via the AWS CLI, or in your infrastructure-as-code (Terraform, CDK, CloudFormation).
 
-### `conductor:launchType`
+### `namazu.conductor:jobSet`
+
+**Required.** Identifies which conductor instance owns this task definition. Only task definitions whose `namazu.conductor:jobSet` value matches the conductor's configured `jobset` attribute are returned by `getAvailableProfiles()`. This prevents multiple conductor instances sharing a cluster from seeing each other's task definitions.
+
+**Example:**
+```
+namazu.conductor:jobSet = default
+```
+
+### `namazu.conductor:launchType`
 
 Controls the ECS launch type used when running the task.
 
@@ -27,10 +37,10 @@ Controls the ECS launch type used when running the task.
 
 **Example:**
 ```
-conductor:launchType = FARGATE
+namazu.conductor:launchType = FARGATE
 ```
 
-### `conductor:assignPublicIp`
+### `namazu.conductor:assignPublicIp`
 
 Controls whether a public IP is assigned to the task's elastic network interface. Only applies to tasks using `awsvpc` network mode. Defaults to `DISABLED` if the tag is absent.
 
@@ -41,7 +51,7 @@ Controls whether a public IP is assigned to the task's elastic network interface
 
 **Example:**
 ```
-conductor:assignPublicIp = ENABLED
+namazu.conductor:assignPublicIp = ENABLED
 ```
 
 ## Network Configuration
@@ -71,7 +81,7 @@ The test is skipped automatically if any required variable is absent.
 - Family name: `conductor-integration-test` (or the value of `ECS_TASK_FAMILY`)
 - Network mode: `awsvpc`, Fargate-compatible
 - Container: an HTTP server on port 80 (e.g. nginx)
-- Tags: `conductor:launchType=FARGATE`, `conductor:assignPublicIp=ENABLED`
+- Tags: `namazu.conductor:jobSet=default`, `namazu.conductor:launchType=FARGATE`, `namazu.conductor:assignPublicIp=ENABLED`
 - Security group: allows inbound TCP on port 80
 
 ```bash

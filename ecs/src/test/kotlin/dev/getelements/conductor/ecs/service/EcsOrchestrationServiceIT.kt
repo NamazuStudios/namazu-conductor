@@ -104,6 +104,7 @@ class EcsOrchestrationServiceIT {
             cluster        = cluster,
             subnets        = subnets,
             securityGroups = securityGroups,
+            jobSet         = "default",
             ecsClient      = ecsClient,
             ec2Client      = ec2Client,
             executor       = executor

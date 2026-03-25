@@ -73,7 +73,7 @@ Resources:
       CidrBlock: !Ref SubnetCidr
       # Use the first AZ in the region - avoids the need for a parameter.
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
-      MapPublicIpOnLaunch: false   # Conductor controls this via conductor:assignPublicIp
+      MapPublicIpOnLaunch: false   # Conductor controls this via namazu.conductor:assignPublicIp
       Tags:
         - Key: Name
           Value: conductor-integration-test-public
@@ -156,10 +156,11 @@ Resources:
       LogGroupName: !Sub '/ecs/${TaskFamily}'
       RetentionInDays: 7
 
-  # The task definition is tagged with the conductor:launchType and
-  # conductor:assignPublicIp tags that EcsOrchestrationService reads at
-  # profile-discovery time. Without these tags the service defaults to
-  # FARGATE and DISABLED respectively.
+  # The task definition is tagged with the namazu.conductor:jobSet,
+  # namazu.conductor:launchType, and namazu.conductor:assignPublicIp tags that
+  # EcsOrchestrationService reads at profile-discovery time. The jobset tag
+  # must match the conductor's configured jobset attribute (default: "default")
+  # or the task definition will be excluded from profile discovery.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -183,9 +184,11 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
       Tags:
-        - Key: conductor:launchType
+        - Key: namazu.conductor:jobSet
+          Value: default
+        - Key: namazu.conductor:launchType
           Value: FARGATE
-        - Key: conductor:assignPublicIp
+        - Key: namazu.conductor:assignPublicIp
           Value: ENABLED
 
 # ---------------------------------------------------------------------------

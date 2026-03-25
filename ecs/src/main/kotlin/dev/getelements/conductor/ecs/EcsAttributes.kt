@@ -37,4 +37,12 @@ object EcsAttributes {
     @ElementDefaultAttribute("")
     const val SECURITY_GROUPS = "dev.getelements.conductor.ecs.security.groups"
 
+    /**
+     * The job set name used to filter task definitions. Only task definitions tagged with
+     * `namazu.conductor:jobSet=<value>` matching this attribute are surfaced as profiles.
+     * Defaults to `"default"`.
+     */
+    @ElementDefaultAttribute("default")
+    const val JOBSET = "dev.getelements.conductor.ecs.job.set"
+
 }

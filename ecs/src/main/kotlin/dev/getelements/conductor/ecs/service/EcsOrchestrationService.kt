@@ -34,7 +34,7 @@ import java.util.concurrent.Future
  *
  * Profiles correspond to active ECS task definition families. Each family is described at
  * discovery time to capture the primary container name, network mode, and launch type. The
- * launch type is read from the `conductor:launchType` tag on the task definition; if absent,
+ * launch type is read from the `namazu.conductor:launchType` tag on the task definition; if absent,
  * [LaunchType.FARGATE] is used. Network configuration is only applied when the task definition's
  * network mode is [NetworkMode.AWSVPC].
  *
@@ -49,15 +49,17 @@ class EcsOrchestrationService @Inject constructor(
     @Named(EcsAttributes.CLUSTER) private val cluster: String,
     @Named(EcsAttributes.SUBNETS) private val subnets: String,
     @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
+    @Named(EcsAttributes.JOBSET) private val jobSet: String,
     private val ecsClient: EcsClient,
     private val ec2Client: Ec2Client,
     private val executor: ExecutorService
 ) : OrchestrationService {
 
     /**
-     * Returns one [EcsJobProfile] per active ECS task definition family. Each family is described
-     * to obtain the primary container name, network mode, and launch type tag required for
-     * execution in [execute].
+     * Returns one [EcsJobProfile] per active ECS task definition family whose
+     * `namazu.conductor:jobSet` tag matches the configured [jobset]. Families without the tag
+     * or with a different value are excluded, so each conductor instance only surfaces the task
+     * definitions that belong to it.
      */
     override fun getAvailableProfiles(): List<JobProfile> {
 
@@ -76,14 +78,19 @@ class EcsOrchestrationService @Inject constructor(
                     it.include(TaskDefinitionField.TAGS)
                 }
                 val taskDef = description.taskDefinition()
+                val tags = description.tags()
+
+                // Only include task definitions tagged for this jobset.
+                val jobsetTag = tags.firstOrNull { it.key() == TAG_JOBSET }?.value()
+                if (jobsetTag != jobSet) continue
 
                 val containerName = taskDef.containerDefinitions().firstOrNull()?.name() ?: continue
                 val networkMode = taskDef.networkMode() ?: NetworkMode.AWSVPC
 
-                val launchTypeTag = description.tags().firstOrNull { it.key() == TAG_LAUNCH_TYPE }?.value()
+                val launchTypeTag = tags.firstOrNull { it.key() == TAG_LAUNCH_TYPE }?.value()
                 val launchType = if (launchTypeTag != null) LaunchType.fromValue(launchTypeTag) else LaunchType.FARGATE
 
-                val assignPublicIpTag = description.tags().firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }?.value()
+                val assignPublicIpTag = tags.firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }?.value()
                 val assignPublicIp = if (assignPublicIpTag != null) AssignPublicIp.fromValue(assignPublicIpTag) else AssignPublicIp.DISABLED
 
                 profiles += EcsJobProfile(
@@ -105,7 +112,7 @@ class EcsOrchestrationService @Inject constructor(
      * Polls `describeTasks` on a background thread until the task reaches [status] (or
      * [JobStatus.FAILED]). Once the target status is reached the returned [JobExecution] is
      * populated with [JobEndpoint]s derived from the task's port mappings. The host address used
-     * is the public IP when the task definition carries `conductor:assignPublicIp=ENABLED`,
+     * is the public IP when the task definition carries `namazu.conductor:assignPublicIp=ENABLED`,
      * resolved via EC2 `describeNetworkInterfaces`; otherwise the ENI private IP is used.
      */
     override fun getFutureForStatus(
@@ -252,9 +259,15 @@ class EcsOrchestrationService @Inject constructor(
     }
 
     companion object {
+
         private const val POLL_INTERVAL_MS = 5_000L
-        const val TAG_LAUNCH_TYPE = "conductor:launchType"
-        const val TAG_ASSIGN_PUBLIC_IP = "conductor:assignPublicIp"
+
+        const val TAG_JOBSET = "namazu.conductor:jobSet"
+
+        const val TAG_LAUNCH_TYPE = "namazu.conductor:launchType"
+
+        const val TAG_ASSIGN_PUBLIC_IP = "namazu.conductor:assignPublicIp"
+
     }
 
 }

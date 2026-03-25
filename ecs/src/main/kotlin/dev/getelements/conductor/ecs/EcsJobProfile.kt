@@ -13,10 +13,11 @@ import software.amazon.awssdk.services.ecs.model.NetworkMode
  * in that task definition and is used when applying environment, command, and argument overrides at
  * execution time.
  *
- * [launchType] is derived from the `conductor:launchType` tag on the task definition family, defaulting
- * to [LaunchType.FARGATE] if the tag is absent. [networkMode] is read directly from the task definition
- * and determines whether VPC network configuration is applied at execution time. [assignPublicIp] is
- * derived from the `conductor:assignPublicIp` tag, defaulting to [AssignPublicIp.DISABLED] if absent.
+     * [launchType] is derived from the `namazu.conductor:launchType` tag on the task definition family,
+ * defaulting to [LaunchType.FARGATE] if the tag is absent. [networkMode] is read directly from the
+ * task definition and determines whether VPC network configuration is applied at execution time.
+ * [assignPublicIp] is derived from the `namazu.conductor:assignPublicIp` tag, defaulting to
+ * [AssignPublicIp.DISABLED] if absent.
  */
 data class EcsJobProfile(
     val family: String,
