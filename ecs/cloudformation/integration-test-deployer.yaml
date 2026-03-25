@@ -64,6 +64,7 @@ Resources:
               - cloudformation:GetTemplateSummary
             Resource:
               - !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/${IntegrationTestStackName}/*'
+              - !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/${AWS::StackName}/*'
 
           - Sid: CloudFormationValidate
             Effect: Allow

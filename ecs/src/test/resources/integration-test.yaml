@@ -264,6 +264,22 @@ Resources:
               - ec2:DescribeNetworkInterfaces
             Resource: '*'
 
+          # ECR pull - required to verify the image exists and for any direct
+          # ECR calls from the test; task image pull itself is handled by the
+          # task execution role via AmazonECSTaskExecutionRolePolicy.
+          - Sid: EcrPull
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: '*'
+          - Sid: EcrPullRepository
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+            Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/conductor-integration-test'
+
   # The secret access key is only retrievable at stack creation time.
   # Retrieve it from the stack Outputs immediately after deployment.
   IntegrationTestAccessKey:

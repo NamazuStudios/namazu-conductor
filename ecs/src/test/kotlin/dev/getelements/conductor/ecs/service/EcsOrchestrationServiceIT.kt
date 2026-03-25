@@ -153,7 +153,7 @@ class EcsOrchestrationServiceIT {
         val endpoint = running.endpoints.first()
 
         val response = httpClient
-            .target("http://${endpoint.host}:${endpoint.port}/")
+            .target("http://${endpoint.host}:${endpoint.port}/test_context.json")
             .request()
             .get()
 
