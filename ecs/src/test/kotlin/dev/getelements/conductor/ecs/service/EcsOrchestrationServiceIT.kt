@@ -38,6 +38,10 @@ import java.util.concurrent.TimeUnit
  *   create and delete the CloudFormation stack (see `integration-test-deployer.yaml`).
  * - `AWS_REGION` — AWS region in which to deploy the stack.
  * - `CFN_STACK_NAME` — (optional) stack name; defaults to `conductor-integration-test`.
+ * - `CFN_DEPLOYER_STACK_NAME` — (optional) name of the deployer stack to read the ECR registry URL
+ *   from; defaults to `conductor-integration-test-deployer`.
+ * - `CFN_IMAGE_NAME` — (optional) image name and tag within the ECR registry;
+ *   defaults to `conductor-integration-test:latest`.
  *
  * The test is skipped automatically if `AWS_REGION` is absent. Run via:
  * ```
@@ -157,20 +161,36 @@ class EcsOrchestrationServiceIT {
 
     }
 
+    private fun resolveRepositoryUrl(): String {
+        val deployerStackName = System.getenv("CFN_DEPLOYER_STACK_NAME")
+            ?: "conductor-integration-test-deployer"
+        logger.info("Resolving ECR registry URL from deployer stack '{}'", deployerStackName)
+        val ecrRepoUri = cfnClient.describeStacks { it.stackName(deployerStackName) }
+            .stacks().first().outputs()
+            .first { it.outputKey() == "EcrRepositoryUri" }
+            .outputValue()
+        // EcrRepositoryUri is the full repo URI, e.g.
+        // 123456789012.dkr.ecr.us-east-1.amazonaws.com/conductor-integration-test
+        // Strip the repo name to get the registry URL.
+        return ecrRepoUri.substringBeforeLast("/")
+    }
+
     private fun deployStack(templateBody: String) {
-        val params = buildList {
-            System.getenv("CFN_IMAGE_URI")?.let { imageUri ->
-                logger.info("Using custom image URI: {}", imageUri)
-                add(Parameter.builder().parameterKey("ImageUri").parameterValue(imageUri).build())
-            }
-        }
+        val repositoryUrl = resolveRepositoryUrl()
+        val imageName = System.getenv("CFN_IMAGE_NAME") ?: "conductor-integration-test:latest"
+        logger.info("Deploying stack with image {}/{}", repositoryUrl, imageName)
+
+        val params = listOf(
+            Parameter.builder().parameterKey("RepositoryUrl").parameterValue(repositoryUrl).build(),
+            Parameter.builder().parameterKey("ImageName").parameterValue(imageName).build(),
+        )
 
         try {
             cfnClient.createStack {
                 it.stackName(stackName)
                 it.templateBody(templateBody)
                 it.capabilities(Capability.CAPABILITY_NAMED_IAM)
-                if (params.isNotEmpty()) it.parameters(params)
+                it.parameters(params)
             }
         } catch (e: AlreadyExistsException) {
             logger.info("Stack '{}' already exists - using existing outputs", stackName)

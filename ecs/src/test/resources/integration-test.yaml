@@ -25,13 +25,18 @@ Parameters:
       variable used when running the integration test (defaults to
       conductor-integration-test if that variable is unset).
 
-  ImageUri:
+  RepositoryUrl:
     Type: String
-    Default: 'nginx:latest'
     Description: >
-      Container image URI for the integration test task. Defaults to nginx:latest
-      from Docker Hub. Override with an ECR URI to test a custom image, e.g.
-      123456789012.dkr.ecr.us-east-1.amazonaws.com/conductor-integration-test:latest.
+      Container registry URL, e.g.
+      123456789012.dkr.ecr.us-east-1.amazonaws.com.
+      The task image is resolved as {RepositoryUrl}/{ImageName}.
+
+  ImageName:
+    Type: String
+    Default: 'conductor-integration-test:latest'
+    Description: >
+      Image name and tag within RepositoryUrl, e.g. conductor-integration-test:latest.
 
 # ---------------------------------------------------------------------------
 # Networking
@@ -167,7 +172,7 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: nginx
-          Image: !Ref ImageUri
+          Image: !Sub '${RepositoryUrl}/${ImageName}'
           PortMappings:
             - ContainerPort: 80
               Protocol: tcp
@@ -300,22 +305,5 @@ Outputs:
     Value: !GetAtt IntegrationTestAccessKey.SecretAccessKey
 
   ImageUri:
-    Description: Container image URI used by the task definition
-    Value: !Ref ImageUri
-
-  EcrRepositoryUri:
-    Description: >
-      ECR repository URI for the integration test image (from the deployer stack).
-      Push your custom image here, then re-deploy this stack with ImageUri=<uri>:<tag>.
-    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/conductor-integration-test'
-
-  MvnVerifyCommand:
-    Description: Ready-to-run mvn verify command
-    Value: !Sub >-
-      AWS_ACCESS_KEY_ID=${IntegrationTestAccessKey}
-      AWS_SECRET_ACCESS_KEY=${IntegrationTestAccessKey.SecretAccessKey}
-      AWS_REGION=${AWS::Region}
-      ECS_CLUSTER=${Cluster}
-      ECS_SUBNETS=${PublicSubnet}
-      ECS_SECURITY_GROUPS=${IntegrationTestSecurityGroup}
-      mvn verify -pl ecs
+    Description: Full image URI used by the task definition
+    Value: !Sub '${RepositoryUrl}/${ImageName}'
