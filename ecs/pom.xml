@@ -110,6 +110,17 @@
             <version>${logback.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Jackson for JSON deserialization in IT tests -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.jakarta.rs</groupId>
+            <artifactId>jackson-jakarta-rs-json-provider</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Jersey JAX-RS client implementation required at test runtime for ClientBuilder -->
         <dependency>
             <groupId>org.glassfish.jersey.core</groupId>

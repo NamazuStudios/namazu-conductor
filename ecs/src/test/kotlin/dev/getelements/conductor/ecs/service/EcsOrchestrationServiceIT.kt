@@ -1,5 +1,8 @@
 package dev.getelements.conductor.ecs.service
 
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.jakarta.rs.json.JacksonJsonProvider
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
@@ -98,7 +101,9 @@ class EcsOrchestrationServiceIT {
         ecsClient = EcsClient.builder().region(awsRegion).credentialsProvider(testCredentials).build()
         val ec2Client = Ec2Client.builder().region(awsRegion).credentialsProvider(testCredentials).build()
         executor  = Executors.newCachedThreadPool()
-        httpClient = ClientBuilder.newClient()
+        httpClient = ClientBuilder.newBuilder()
+            .register(JacksonJsonProvider::class.java)
+            .build()
 
         service = EcsOrchestrationService(
             cluster        = cluster,
@@ -137,12 +142,22 @@ class EcsOrchestrationServiceIT {
     }
 
     @Test
-    fun launchNginxAndVerifyHttp() {
+    fun launchAndVerifyTestContext() {
 
         val profile = service.findAvailableProfile(taskFamily)
             ?: throw AssertionError("Profile '$taskFamily' not found — stack outputs may be stale")
 
-        val execution = service.execute(JobRequest(profile = profile))
+        val environment = mapOf(
+            "TEST_A" to "test_a",
+            "TEST_B" to "test_b",
+            "TEST_C" to "test_c",
+            "TEST_D" to "test_d"
+        )
+
+        val execution = service.execute(JobRequest(
+            profile = profile,
+            environment = environment
+        ))
         executionId = execution.id
 
         val running = service
@@ -159,6 +174,10 @@ class EcsOrchestrationServiceIT {
             .get()
 
         assertEquals(response.status, 200, "Expected HTTP 200 from task on ${endpoint.host}:${endpoint.port}")
+
+        val context = response.readEntity(TestContext::class.java)
+        assertEquals(context.args, emptyList<String>(), "args mismatch")
+        assertEquals(context.environment, environment, "environment mismatch")
 
     }
 
@@ -201,3 +220,8 @@ class EcsOrchestrationServiceIT {
     }
 
 }
+
+private data class TestContext @JsonCreator constructor(
+    @JsonProperty("args") val args: List<String>,
+    @JsonProperty("environment") val environment: Map<String, String>
+)
