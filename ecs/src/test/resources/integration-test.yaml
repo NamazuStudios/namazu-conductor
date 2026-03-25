@@ -38,6 +38,18 @@ Parameters:
     Description: >
       Image name and tag within RepositoryUrl, e.g. conductor-integration-test:latest.
 
+  Ec2TaskFamily:
+    Type: String
+    Default: conductor-integration-test-ec2
+    Description: >
+      ECS task definition family name for the EC2 spot-backed task.
+
+  EcsOptimizedAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    Description: >
+      ECS-optimized Amazon Linux 2 AMI, resolved from SSM at deploy time.
+
 # ---------------------------------------------------------------------------
 # Networking
 # ---------------------------------------------------------------------------
@@ -192,6 +204,146 @@ Resources:
           Value: ENABLED
 
 # ---------------------------------------------------------------------------
+# EC2 spot-backed capacity
+# ---------------------------------------------------------------------------
+
+  # IAM role assumed by EC2 container instances so the ECS agent can register
+  # with the cluster and pull task images from ECR.
+  Ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: conductor-integration-test-ec2-instance
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test-ec2-instance
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: conductor-integration-test-ec2-instance
+      Roles:
+        - !Ref Ec2InstanceRole
+
+  # Spot launch template — t3.small, ECS-optimized AMI, public IP enabled so
+  # the IT test can reach the container over HTTP.
+  Ec2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: conductor-integration-test
+      LaunchTemplateData:
+        ImageId: !Ref EcsOptimizedAmi
+        InstanceType: t3.small
+        IamInstanceProfile:
+          Arn: !GetAtt Ec2InstanceProfile.Arn
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            SpotInstanceType: one-time
+            InstanceInterruptionBehavior: terminate
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref IntegrationTestSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo ECS_CLUSTER=${Cluster} >> /etc/ecs/ecs.config
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: conductor-integration-test
+
+  Ec2AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      AutoScalingGroupName: conductor-integration-test
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Ec2LaunchTemplate
+        Version: !GetAtt Ec2LaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+          PropagateAtLaunch: true
+
+  Ec2CapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      Name: conductor-integration-test
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref Ec2AutoScalingGroup
+        ManagedScaling:
+          Status: ENABLED
+          TargetCapacity: 100
+        ManagedTerminationProtection: DISABLED
+      Tags:
+        - Key: Name
+          Value: conductor-integration-test
+
+  ClusterCapacityProviderAssociations:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref Cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+        - !Ref Ec2CapacityProvider
+      DefaultCapacityProviderStrategy: []
+
+  Ec2LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${Ec2TaskFamily}'
+      RetentionInDays: 7
+
+  # EC2/bridge task definition. Runs on the spot ASG instances. Uses bridge
+  # network mode so the container port maps directly to port 80 on the host.
+  Ec2TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref Ec2TaskFamily
+      NetworkMode: bridge
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: nginx
+          Image: !Sub '${RepositoryUrl}/${ImageName}'
+          Memory: 256
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref Ec2LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: namazu.conductor:jobSet
+          Value: default
+        - Key: namazu.conductor:launchType
+          Value: EC2
+
+# ---------------------------------------------------------------------------
 # IAM user for running the integration test
 # ---------------------------------------------------------------------------
 
@@ -222,13 +374,15 @@ Resources:
             Resource: '*'
 
           # Task execution - execute()
-          # Resource is the task definition only; the cluster is enforced via condition.
+          # Resource covers both Fargate and EC2 task definitions; cluster
+          # enforced via condition.
           - Sid: EcsRunTask
             Effect: Allow
             Action:
               - ecs:RunTask
             Resource:
               - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${TaskFamily}:*'
+              - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${Ec2TaskFamily}:*'
             Condition:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn
@@ -260,11 +414,27 @@ Resources:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn
 
-          # Public IP lookup - fetchPublicIp() in the IT test
+          # Public IP lookup for awsvpc tasks - resolveAwsVpcHost()
           - Sid: Ec2DescribeNetworkInterfaces
             Effect: Allow
             Action:
               - ec2:DescribeNetworkInterfaces
+            Resource: '*'
+
+          # Public IP lookup for EC2/bridge tasks - resolveContainerInstanceHost()
+          - Sid: EcsDescribeContainerInstances
+            Effect: Allow
+            Action:
+              - ecs:DescribeContainerInstances
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          - Sid: Ec2DescribeInstances
+            Effect: Allow
+            Action:
+              - ec2:DescribeInstances
             Resource: '*'
 
           # ECR pull - required to verify the image exists and for any direct
@@ -314,6 +484,10 @@ Outputs:
   EcsTaskFamily:
     Description: ECS_TASK_FAMILY (only needed if overriding the default)
     Value: !Ref TaskFamily
+
+  EcsEc2TaskFamily:
+    Description: EC2 spot task definition family
+    Value: !Ref Ec2TaskFamily
 
   AwsAccessKeyId:
     Description: AWS_ACCESS_KEY_ID

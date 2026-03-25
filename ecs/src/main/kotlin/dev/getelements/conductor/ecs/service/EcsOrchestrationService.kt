@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.ecs.model.KeyValuePair
 import software.amazon.awssdk.services.ecs.model.LaunchType
 import software.amazon.awssdk.services.ecs.model.NetworkConfiguration
 import software.amazon.awssdk.services.ecs.model.NetworkMode
+import software.amazon.awssdk.services.ecs.model.DescribeTaskDefinitionResponse
 import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionField
@@ -216,34 +217,16 @@ class EcsOrchestrationService @Inject constructor(
     }
 
     private fun mapEndpoints(task: Task): List<JobEndpoint> {
-        val eniDetails = task.attachments()
-            .firstOrNull { it.type() == "ElasticNetworkInterface" }
-            ?.details()
-            ?.associateBy { it.name() }
-            ?: return emptyList()
-
-        val privateIp = eniDetails["privateIPv4Address"]?.value() ?: return emptyList()
-        val eniId = eniDetails["networkInterfaceId"]?.value()
-
         val taskDef = ecsClient.describeTaskDefinition {
             it.taskDefinition(task.taskDefinitionArn())
             it.include(TaskDefinitionField.TAGS)
         }
-
-        val assignPublicIp = taskDef.tags()
-            .firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }
-            ?.value()
-            ?.let { AssignPublicIp.fromValue(it) }
-            ?: AssignPublicIp.DISABLED
-
-        val host = if (assignPublicIp == AssignPublicIp.ENABLED && eniId != null) {
-            ec2Client.describeNetworkInterfaces { it.networkInterfaceIds(eniId) }
-                .networkInterfaces().firstOrNull()
-                ?.association()?.publicIp()
-                ?: privateIp
+        val networkMode = taskDef.taskDefinition().networkMode()
+        val host = if (networkMode == NetworkMode.AWSVPC) {
+            resolveAwsVpcHost(task, taskDef)
         } else {
-            privateIp
-        }
+            resolveContainerInstanceHost(task)
+        } ?: return emptyList()
 
         return taskDef.taskDefinition()
             .containerDefinitions()
@@ -256,6 +239,47 @@ class EcsOrchestrationService @Inject constructor(
                     )
                 }
             }
+    }
+
+    private fun resolveAwsVpcHost(task: Task, taskDef: DescribeTaskDefinitionResponse): String? {
+        val eniDetails = task.attachments()
+            .firstOrNull { it.type() == "ElasticNetworkInterface" }
+            ?.details()
+            ?.associateBy { it.name() }
+            ?: return null
+
+        val privateIp = eniDetails["privateIPv4Address"]?.value() ?: return null
+        val eniId = eniDetails["networkInterfaceId"]?.value()
+
+        val assignPublicIp = taskDef.tags()
+            .firstOrNull { it.key() == TAG_ASSIGN_PUBLIC_IP }
+            ?.value()
+            ?.let { AssignPublicIp.fromValue(it) }
+            ?: AssignPublicIp.DISABLED
+
+        return if (assignPublicIp == AssignPublicIp.ENABLED && eniId != null) {
+            ec2Client.describeNetworkInterfaces { it.networkInterfaceIds(eniId) }
+                .networkInterfaces().firstOrNull()
+                ?.association()?.publicIp()
+                ?: privateIp
+        } else {
+            privateIp
+        }
+    }
+
+    private fun resolveContainerInstanceHost(task: Task): String? {
+        val containerInstanceArn = task.containerInstanceArn() ?: return null
+
+        val ec2InstanceId = ecsClient.describeContainerInstances {
+            it.cluster(cluster)
+            it.containerInstances(containerInstanceArn)
+        }.containerInstances().firstOrNull()?.ec2InstanceId() ?: return null
+
+        val instance = ec2Client.describeInstances {
+            it.instanceIds(ec2InstanceId)
+        }.reservations().firstOrNull()?.instances()?.firstOrNull() ?: return null
+
+        return instance.publicIpAddress() ?: instance.privateIpAddress()
     }
 
     companion object {

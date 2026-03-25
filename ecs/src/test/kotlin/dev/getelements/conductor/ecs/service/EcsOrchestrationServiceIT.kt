@@ -57,6 +57,7 @@ class EcsOrchestrationServiceIT {
 
     private lateinit var stackName: String
     private lateinit var taskFamily: String
+    private lateinit var ec2TaskFamily: String
     private lateinit var cluster: String
     private lateinit var cfnClient: CloudFormationClient
     private lateinit var ecsClient: EcsClient
@@ -64,7 +65,8 @@ class EcsOrchestrationServiceIT {
     private lateinit var service: EcsOrchestrationService
     private lateinit var httpClient: Client
 
-    private var executionId: String? = null
+    private var fargateExecutionId: String? = null
+    private var ec2ExecutionId: String? = null
 
     @BeforeClass
     fun setUp() {
@@ -87,8 +89,9 @@ class EcsOrchestrationServiceIT {
             .stacks().first().outputs()
             .associateBy { it.outputKey() }
 
-        cluster     = outputs.getValue("EcsCluster").outputValue()
-        taskFamily  = outputs.getValue("EcsTaskFamily").outputValue()
+        cluster       = outputs.getValue("EcsCluster").outputValue()
+        taskFamily    = outputs.getValue("EcsTaskFamily").outputValue()
+        ec2TaskFamily = outputs.getValue("EcsEc2TaskFamily").outputValue()
         val subnets         = outputs.getValue("EcsSubnets").outputValue()
         val securityGroups  = outputs.getValue("EcsSecurityGroups").outputValue()
         val keyId           = outputs.getValue("AwsAccessKeyId").outputValue()
@@ -118,11 +121,13 @@ class EcsOrchestrationServiceIT {
 
     @AfterClass(alwaysRun = true)
     fun tearDown() {
-        executionId?.let {
-            try {
-                service.stop(JobExecution(id = it, status = JobStatus.RUNNING))
-            } catch (e: Exception) {
-                logger.warn("Failed to stop ECS task {}", it, e)
+        for ((label, id) in listOf("fargate" to fargateExecutionId, "ec2" to ec2ExecutionId)) {
+            id?.let {
+                try {
+                    service.stop(JobExecution(id = it, status = JobStatus.RUNNING))
+                } catch (e: Exception) {
+                    logger.warn("Failed to stop {} ECS task {}", label, it, e)
+                }
             }
         }
 
@@ -142,10 +147,9 @@ class EcsOrchestrationServiceIT {
     }
 
     @Test
-    fun launchAndVerifyTestContext() {
-
+    fun launchFargateAndVerifyTestContext() {
         val profile = service.findAvailableProfile(taskFamily)
-            ?: throw AssertionError("Profile '$taskFamily' not found — stack outputs may be stale")
+            ?: throw AssertionError("Fargate profile '$taskFamily' not found")
 
         val environment = mapOf(
             "TEST_A" to "test_a",
@@ -154,31 +158,50 @@ class EcsOrchestrationServiceIT {
             "TEST_D" to "test_d"
         )
 
-        val execution = service.execute(JobRequest(
-            profile = profile,
-            environment = environment
-        ))
-        executionId = execution.id
+        val execution = service.execute(JobRequest(profile = profile, environment = environment))
+        fargateExecutionId = execution.id
 
-        val running = service
-            .getFutureForStatus(execution, JobStatus.RUNNING)
-            .get(10, TimeUnit.MINUTES)
-
-        assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING")
+        val running = service.getFutureForStatus(execution, JobStatus.RUNNING).get(10, TimeUnit.MINUTES)
+        assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING (Fargate)")
 
         val endpoint = running.endpoints.first()
-
         val response = httpClient
             .target("http://${endpoint.host}:${endpoint.port}/test_context.json")
-            .request()
-            .get()
+            .request().get()
 
-        assertEquals(response.status, 200, "Expected HTTP 200 from task on ${endpoint.host}:${endpoint.port}")
-
+        assertEquals(response.status, 200, "Expected HTTP 200 from Fargate task on ${endpoint.host}:${endpoint.port}")
         val context = response.readEntity(TestContext::class.java)
-        assertEquals(context.args, emptyList<String>(), "args mismatch")
-        assertEquals(context.environment, environment, "environment mismatch")
+        assertEquals(context.args, emptyList<String>(), "args mismatch (Fargate)")
+        assertEquals(context.environment, environment, "environment mismatch (Fargate)")
+    }
 
+    @Test
+    fun launchEc2SpotAndVerifyTestContext() {
+        val profile = service.findAvailableProfile(ec2TaskFamily)
+            ?: throw AssertionError("EC2 profile '$ec2TaskFamily' not found")
+
+        val environment = mapOf(
+            "TEST_A" to "test_a",
+            "TEST_B" to "test_b",
+            "TEST_C" to "test_c",
+            "TEST_D" to "test_d"
+        )
+
+        val execution = service.execute(JobRequest(profile = profile, environment = environment))
+        ec2ExecutionId = execution.id
+
+        val running = service.getFutureForStatus(execution, JobStatus.RUNNING).get(10, TimeUnit.MINUTES)
+        assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING (EC2)")
+
+        val endpoint = running.endpoints.first()
+        val response = httpClient
+            .target("http://${endpoint.host}:${endpoint.port}/test_context.json")
+            .request().get()
+
+        assertEquals(response.status, 200, "Expected HTTP 200 from EC2 spot task on ${endpoint.host}:${endpoint.port}")
+        val context = response.readEntity(TestContext::class.java)
+        assertEquals(context.args, emptyList<String>(), "args mismatch (EC2)")
+        assertEquals(context.environment, environment, "environment mismatch (EC2)")
     }
 
     private fun resolveRepositoryUrl(): String {

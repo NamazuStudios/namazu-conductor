@@ -73,6 +73,17 @@ Resources:
             Resource: '*'
 
           # ------------------------------------------------------------------
+          # SSM - read ECS-optimized AMI ID from the public AWS SSM path.
+          # The parameter is owned by AWS (no account ID in the ARN).
+          # ------------------------------------------------------------------
+          - Sid: SsmGetEcsAmi
+            Effect: Allow
+            Action:
+              - ssm:GetParameters
+            Resource:
+              - 'arn:aws:ssm:*::parameter/aws/service/ecs/*'
+
+          # ------------------------------------------------------------------
           # EC2 - VPC, subnets, IGW, route tables, security groups.
           # Most EC2 networking actions do not support resource-level
           # restrictions and require Resource: '*'.
@@ -110,10 +121,11 @@ Resources:
               - ec2:RevokeSecurityGroupEgress
               - ec2:CreateTags
               - ec2:DeleteTags
+              - ec2:DescribeImages
             Resource: '*'
 
           # ------------------------------------------------------------------
-          # ECS - cluster and task definition for the integration test.
+          # ECS - cluster, task definitions, and capacity providers.
           # ------------------------------------------------------------------
           - Sid: EcsClusterAndTaskDefinition
             Effect: Allow
@@ -124,9 +136,58 @@ Resources:
               - ecs:RegisterTaskDefinition
               - ecs:DeregisterTaskDefinition
               - ecs:DescribeTaskDefinition
+              - ecs:CreateCapacityProvider
+              - ecs:DeleteCapacityProvider
+              - ecs:DescribeCapacityProviders
+              - ecs:PutClusterCapacityProviders
               - ecs:TagResource
               - ecs:UntagResource
               - ecs:ListTagsForResource
+            Resource: '*'
+
+          # ------------------------------------------------------------------
+          # EC2 - launch templates for the spot ASG.
+          # ------------------------------------------------------------------
+          - Sid: Ec2LaunchTemplate
+            Effect: Allow
+            Action:
+              - ec2:CreateLaunchTemplate
+              - ec2:DeleteLaunchTemplate
+              - ec2:DescribeLaunchTemplates
+              - ec2:DescribeLaunchTemplateVersions
+              - ec2:ModifyLaunchTemplate
+            Resource: '*'
+
+          # AutoScaling requires ec2:RunInstances on the launch template resource
+          # (and associated resources) to authorise use of the template when
+          # creating an ASG. Without this you get "not authorized to use
+          # launch template" even though AutoScaling itself launches instances.
+          - Sid: Ec2RunInstancesForAsg
+            Effect: Allow
+            Action:
+              - ec2:RunInstances
+            Resource: '*'
+
+          # ------------------------------------------------------------------
+          # AutoScaling - spot ASG for ECS EC2 capacity.
+          # ------------------------------------------------------------------
+          - Sid: AutoScaling
+            Effect: Allow
+            Action:
+              - autoscaling:CreateAutoScalingGroup
+              - autoscaling:UpdateAutoScalingGroup
+              - autoscaling:DeleteAutoScalingGroup
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:DescribeAutoScalingInstances
+              - autoscaling:DescribeScalingActivities
+              - autoscaling:DescribePolicies
+              - autoscaling:DescribeLaunchConfigurations
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:TerminateInstanceInAutoScalingGroup
+              - autoscaling:EnableMetricsCollection
+              - autoscaling:DisableMetricsCollection
+              - autoscaling:CreateOrUpdateTags
+              - autoscaling:DeleteTags
             Resource: '*'
 
           # ------------------------------------------------------------------
@@ -146,6 +207,30 @@ Resources:
               - iam:UntagRole
             Resource:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/conductor-integration-test*'
+
+          # ECS and AutoScaling create service-linked roles on first use in an
+          # account. CloudFormation triggers this automatically; the deployer
+          # user needs permission to initiate the creation.
+          - Sid: IamCreateServiceLinkedRole
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+            Resource:
+              - 'arn:aws:iam::*:role/aws-service-role/ecs.amazonaws.com/*'
+              - 'arn:aws:iam::*:role/aws-service-role/autoscaling.amazonaws.com/*'
+
+          - Sid: IamInstanceProfile
+            Effect: Allow
+            Action:
+              - iam:CreateInstanceProfile
+              - iam:DeleteInstanceProfile
+              - iam:GetInstanceProfile
+              - iam:AddRoleToInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:TagInstanceProfile
+              - iam:UntagInstanceProfile
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/conductor-integration-test*'
 
           - Sid: IamUser
             Effect: Allow
