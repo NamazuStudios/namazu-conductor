@@ -1,4 +1,4 @@
-name: Publish Snapshot to Sonatype
+name: Snapshot Build
 
 on:
   push:
