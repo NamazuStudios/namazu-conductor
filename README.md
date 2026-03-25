@@ -61,9 +61,11 @@ Optional hints that influence where a job is scheduled. Unsupported placement ty
 
 | Implementation | `PlacementType` | Fields | Supported by |
 |---|---|---|---|
-| `RegionPlacement` | `REGION` | `id: String` | EdgeGap, Multiplay |
-| `IpPlacement` | `IP_ADDRESS` | `ip: String` | Any |
+| `RegionPlacement` | `REGION` | `id: String` | Multiplay |
+| `IpPlacement` | `IP_ADDRESS` | `ip: String` | EdgeGap |
 | `LatitudeLongitudePlacement` | `LAT_LON` | `latitude: Double`, `longitude: Double` | EdgeGap |
+
+ECS ignores all placement hints — task placement is governed entirely by the subnets and security groups configured on the Element.
 
 #### `JobExecution`
 
