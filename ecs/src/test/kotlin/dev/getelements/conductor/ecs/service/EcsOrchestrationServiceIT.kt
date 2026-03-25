@@ -18,6 +18,7 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient
 import software.amazon.awssdk.services.cloudformation.model.AlreadyExistsException
 import software.amazon.awssdk.services.cloudformation.model.Capability
+import software.amazon.awssdk.services.cloudformation.model.Parameter
 import software.amazon.awssdk.services.ec2.Ec2Client
 import software.amazon.awssdk.services.ecs.EcsClient
 import java.util.concurrent.ExecutorService
@@ -133,35 +134,43 @@ class EcsOrchestrationServiceIT {
     @Test
     fun launchNginxAndVerifyHttp() {
 
-//        val profile = service.findAvailableProfile(taskFamily)
-//            ?: throw AssertionError("Profile '$taskFamily' not found — stack outputs may be stale")
-//
-//        val execution = service.execute(JobRequest(profile = profile))
-//        executionId = execution.id
-//
-//        val running = service
-//            .getFutureForStatus(execution, JobStatus.RUNNING)
-//            .get(10, TimeUnit.MINUTES)
-//
-//        assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING")
-//
-//        val endpoint = running.endpoints.first()
-//
-//        val response = httpClient
-//            .target("http://${endpoint.host}:${endpoint.port}/")
-//            .request()
-//            .get()
-//
-//        assertEquals(response.status, 200, "Expected HTTP 200 from task on ${endpoint.host}:${endpoint.port}")
+        val profile = service.findAvailableProfile(taskFamily)
+            ?: throw AssertionError("Profile '$taskFamily' not found — stack outputs may be stale")
+
+        val execution = service.execute(JobRequest(profile = profile))
+        executionId = execution.id
+
+        val running = service
+            .getFutureForStatus(execution, JobStatus.RUNNING)
+            .get(10, TimeUnit.MINUTES)
+
+        assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING")
+
+        val endpoint = running.endpoints.first()
+
+        val response = httpClient
+            .target("http://${endpoint.host}:${endpoint.port}/")
+            .request()
+            .get()
+
+        assertEquals(response.status, 200, "Expected HTTP 200 from task on ${endpoint.host}:${endpoint.port}")
 
     }
 
     private fun deployStack(templateBody: String) {
+        val params = buildList {
+            System.getenv("CFN_IMAGE_URI")?.let { imageUri ->
+                logger.info("Using custom image URI: {}", imageUri)
+                add(Parameter.builder().parameterKey("ImageUri").parameterValue(imageUri).build())
+            }
+        }
+
         try {
             cfnClient.createStack {
                 it.stackName(stackName)
                 it.templateBody(templateBody)
                 it.capabilities(Capability.CAPABILITY_NAMED_IAM)
+                if (params.isNotEmpty()) it.parameters(params)
             }
         } catch (e: AlreadyExistsException) {
             logger.info("Stack '{}' already exists - using existing outputs", stackName)

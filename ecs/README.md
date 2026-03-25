@@ -63,6 +63,7 @@ The module includes an integration test (`EcsOrchestrationServiceIT`) that launc
 | `ECS_SUBNETS` | Comma-separated VPC subnet IDs |
 | `ECS_SECURITY_GROUPS` | Comma-separated security group IDs |
 | `ECS_TASK_FAMILY` | _(optional)_ Task definition family name. Defaults to `conductor-integration-test`. |
+| `CFN_IMAGE_URI` | _(optional)_ Container image URI passed to the CloudFormation stack as `ImageUri`. Defaults to `nginx:latest`. Set this to your ECR image URI to test a custom image. |
 
 The test is skipped automatically if any required variable is absent.
 
