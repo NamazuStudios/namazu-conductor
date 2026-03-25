@@ -40,7 +40,7 @@ jobs:
         id: version
         run: |
           set -x
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -DforceStdout)
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           if [[ "$VERSION" == *-SNAPSHOT ]]; then
             RELEASE_VERSION="${VERSION%-SNAPSHOT}"
           else
