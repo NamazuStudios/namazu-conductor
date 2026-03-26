@@ -130,7 +130,7 @@ jobs:
 
       - name: Generate API documentation
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
-        run: mvn -B --no-transfer-progress dokka:aggregate -pl '!:multiplay'
+        run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
       - name: Publish versioned docs to GitHub Pages
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}

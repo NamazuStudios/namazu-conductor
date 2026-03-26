@@ -63,7 +63,7 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Generate API documentation
-        run: mvn -B --no-transfer-progress dokka:aggregate -pl '!:multiplay'
+        run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
       - name: Publish snapshot docs to GitHub Pages
         run: |
