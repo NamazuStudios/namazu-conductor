@@ -20,6 +20,7 @@ jobs:
       - name: Get current version
         id: version
         run: |
+          mvn --version
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current project version: $VERSION"
