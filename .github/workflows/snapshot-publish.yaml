@@ -5,6 +5,10 @@ on:
     branches: [ main, "maintenance/*" ]
   workflow_dispatch:
 
+concurrency:
+  group: conductor-integration
+  cancel-in-progress: false
+
 jobs:
 
   snapshot:

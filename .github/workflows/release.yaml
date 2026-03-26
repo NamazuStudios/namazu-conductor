@@ -8,6 +8,10 @@ on:
         required: false
         default: 'false'
 
+concurrency:
+  group: conductor-integration
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Publish Maven Release
