@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
 
     steps:
 
@@ -48,18 +49,14 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-          server-id: central
-          server-username: CENTRAL_USERNAME
-          server-password: CENTRAL_PASSWORD
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: GPG_PASSPHRASE
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
 
       - name: Build and Publish Snapshot
-        run: mvn -B --no-transfer-progress -Pcentral-publish clean deploy -pl '!:multiplay'
+        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
         env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EDGEGAP_API_KEY: ${{ secrets.EDGEGAP_API_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

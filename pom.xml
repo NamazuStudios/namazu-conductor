@@ -180,6 +180,15 @@
 
   <profiles>
     <profile>
+      <id>github-publish</id>
+      <distributionManagement>
+        <snapshotRepository>
+          <id>github</id>
+          <url>https://maven.pkg.github.com/NamazuStudios/namazu-conductor</url>
+        </snapshotRepository>
+      </distributionManagement>
+    </profile>
+    <profile>
       <id>central-publish</id>
       <build>
         <plugins>
