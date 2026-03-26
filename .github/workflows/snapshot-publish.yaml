@@ -16,6 +16,12 @@ jobs:
     permissions:
       contents: write
       packages: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
 
@@ -34,7 +40,7 @@ jobs:
         run: |
 
           CURRENT=${{ steps.version.outputs.version }}
-      
+
           # Exit if NOT a snapshot
           if [[ "$CURRENT" != *-SNAPSHOT ]]; then
             echo "::error::Expected a -SNAPSHOT version, but found '$CURRENT'."
@@ -65,7 +71,7 @@ jobs:
       - name: Generate API documentation
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
-      - name: Publish snapshot docs to GitHub Pages
+      - name: Update gh-pages version store
         run: |
           set -e
           VERSION="${{ steps.version.outputs.version }}"
@@ -92,8 +98,18 @@ jobs:
 
           cd /tmp/gh-pages
           git add .
-          git diff --cached --quiet && echo "No doc changes." && exit 0
-          git commit -m "Snapshot docs for ${VERSION}"
-          git push origin gh-pages
+          if ! git diff --cached --quiet; then
+            git commit -m "Snapshot docs for ${VERSION}"
+            git push origin gh-pages
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/gh-pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

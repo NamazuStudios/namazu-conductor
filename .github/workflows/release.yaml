@@ -20,7 +20,12 @@ jobs:
     permissions:
       contents: write
       packages: write
+      pages: write
       id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
@@ -196,8 +201,20 @@ jobs:
 
           cd /tmp/gh-pages
           git add .
-          git diff --cached --quiet && echo "No doc changes." && exit 0
-          git commit -m "API docs for v${VERSION}"
-          git push origin gh-pages
+          if ! git diff --cached --quiet; then
+            git commit -m "API docs for v${VERSION}"
+            git push origin gh-pages
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Pages artifact
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/gh-pages
+
+      - name: Deploy to GitHub Pages
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        id: deployment
+        uses: actions/deploy-pages@v4
