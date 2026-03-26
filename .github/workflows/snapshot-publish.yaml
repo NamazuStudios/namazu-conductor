@@ -60,7 +60,7 @@ jobs:
           server-password: GITHUB_TOKEN
 
       - name: Build and Publish Snapshot
-        run: mvn -DskipTests -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
+        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EDGEGAP_API_KEY: ${{ secrets.EDGEGAP_API_KEY }}
