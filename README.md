@@ -8,7 +8,7 @@ Namazu Conductor is a container orchestration framework built on the [Namazu Ele
 |---|---|---|---|
 | `edgegap` | [EdgeGap](https://edgegap.com) | Complete — see [edgegap/README.md](edgegap/README.md) | Geo-distributed game server orchestration; supports IP and coordinate-based placement |
 | `ecs` | [AWS ECS](https://aws.amazon.com/ecs/) | Complete — see [ecs/README.md](ecs/README.md) | Fargate and EC2 container execution on AWS; supports spot ASG capacity |
-| `multiplay` | [Multiplay](https://unity.com/products/multiplay) (Unity / Rocket Science) | In development — untested | Managed game server hosting |
+| `multiplay` | [Multiplay](https://unity.com/products/multiplay) (Unity / Rocket Science) | In development — untested, not published to Maven Central | Managed game server hosting |
 
 ## Architecture
 

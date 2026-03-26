@@ -14,6 +14,8 @@
     <artifactId>multiplay</artifactId>
     <version>1.0-SNAPSHOT</version>
 
+    <name>Namazu Conductor Multiplay Provider</name>
+
     <!--
         This includes a variety of dependencies which the Element uses. An Element may use some or all of these. Note
         that we do not specify version, nor wo we specify the scope. By including the bom in the parent project,
@@ -89,10 +91,29 @@
     </dependencies>
 
     <properties>
+        <!-- Multiplay implementation is incomplete; exclude from Maven Central publishing. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
         <elm.builtin.spis>DEFAULT</elm.builtin.spis>
         <elm.staging.dir>${project.build.directory}/${project.groupId}.${project.artifactId}-${project.version}</elm.staging.dir>
         <elm.element.dir>${elm.staging.dir}/${project.groupId}.${project.artifactId}</elm.element.dir>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>central-publish</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>

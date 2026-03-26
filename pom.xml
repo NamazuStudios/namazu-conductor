@@ -7,10 +7,27 @@
   <description>Multi-platform Container Orchestration System for Namazu Elements</description>
   <url>https://github.com/NamazuStudios/namazu-conductor</url>
 
+  <licenses>
+    <license>
+      <name>BSD 3-Clause License</name>
+      <url>https://opensource.org/licenses/BSD-3-Clause</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Patrick Twohig</name>
+      <email>patrick@namazustudios.com</email>
+      <organization>Namazu Studios LLC</organization>
+      <organizationUrl>https://namazustudios.com</organizationUrl>
+    </developer>
+  </developers>
+
   <scm>
-    <url>https://github.com/NamazuStudios/crossfire</url>
-    <connection>scm:git:https://github.com/NamazuStudios/crossfire.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/NamazuStudios/crossfire.git</developerConnection>
+    <url>https://github.com/NamazuStudios/namazu-conductor</url>
+    <connection>scm:git:https://github.com/NamazuStudios/namazu-conductor.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/NamazuStudios/namazu-conductor.git</developerConnection>
     <tag>HEAD</tag>
   </scm>
 
@@ -26,6 +43,7 @@
     <maven.compiler.source>21</maven.compiler.source>
     <maven.compiler.target>21</maven.compiler.target>
     <kotlin.version>2.1.0</kotlin.version>
+    <dokka.version>2.0.0</dokka.version>
     <swagger.version>2.2.22</swagger.version>
     <guice.version>7.0.0</guice.version>
     <rs.api>4.0.0</rs.api>
@@ -74,24 +92,16 @@
           </execution>
         </executions>
       </plugin>
-      <!-- Build Javadoc Jars -->
+      <!-- Build Javadoc Jars using Dokka (supports Kotlin sources natively) -->
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-javadoc-plugin</artifactId>
-        <version>3.6.3</version>
-        <configuration>
-          <!-- package-info.java files are annotation-only and reference Kotlin types
-               that the javadoc tool cannot resolve from Java source analysis. -->
-          <sourceFileExcludes>
-            <sourceFileExclude>**/package-info.java</sourceFileExclude>
-          </sourceFileExcludes>
-        </configuration>
+        <groupId>org.jetbrains.dokka</groupId>
+        <artifactId>dokka-maven-plugin</artifactId>
+        <version>${dokka.version}</version>
         <executions>
           <execution>
-            <id>attach-javadocs</id>
             <phase>prepare-package</phase>
             <goals>
-              <goal>jar</goal>
+              <goal>javadocJar</goal>
             </goals>
           </execution>
         </executions>

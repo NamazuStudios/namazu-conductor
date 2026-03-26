@@ -12,9 +12,9 @@
   <artifactId>api</artifactId>
   <version>1.0-SNAPSHOT</version>
 
-  <url>http://www.example.com</url>
-  <name>Example API</name>
-  <description>SDK and Interfaces for the Example Element</description>
+  <url>https://github.com/NamazuStudios/namazu-conductor</url>
+  <name>Namazu Conductor API</name>
+  <description>Interfaces and data types for the Namazu Conductor orchestration system</description>
 
   <build>
     <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
