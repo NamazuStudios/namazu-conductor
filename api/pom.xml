@@ -6,11 +6,11 @@
   <parent>
     <artifactId>conductor</artifactId>
     <groupId>dev.getelements.conductor</groupId>
-    <version>1.0.5</version>
+    <version>1.0.6-SNAPSHOT</version>
   </parent>
 
   <artifactId>api</artifactId>
-  <version>1.0.5</version>
+  <version>1.0.6-SNAPSHOT</version>
 
   <url>https://github.com/NamazuStudios/namazu-conductor</url>
   <name>Namazu Conductor API</name>
