@@ -16,12 +16,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-      pages: write
-      id-token: write
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
 
@@ -60,7 +54,7 @@ jobs:
           server-password: GITHUB_TOKEN
 
       - name: Build and Publish Snapshot
-        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
+        run: mvn -DskipTests -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EDGEGAP_API_KEY: ${{ secrets.EDGEGAP_API_KEY }}
@@ -71,7 +65,7 @@ jobs:
       - name: Generate API documentation
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
-      - name: Update gh-pages version store
+      - name: Publish snapshot docs to GitHub Pages
         run: |
           set -e
           VERSION="${{ steps.version.outputs.version }}"
@@ -104,12 +98,3 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: /tmp/gh-pages
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
