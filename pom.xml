@@ -58,6 +58,45 @@
         </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <!-- Build Source Jars -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Build Javadoc Jars -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.6.3</version>
+        <configuration>
+          <!-- package-info.java files are annotation-only and reference Kotlin types
+               that the javadoc tool cannot resolve from Java source analysis. -->
+          <sourceFileExcludes>
+            <sourceFileExclude>**/package-info.java</sourceFileExclude>
+          </sourceFileExcludes>
+        </configuration>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 
   <!--
@@ -129,36 +168,6 @@
       <id>central-publish</id>
       <build>
         <plugins>
-          <!-- Build Source Jars -->
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-source-plugin</artifactId>
-            <version>3.3.1</version>
-            <executions>
-              <execution>
-                <id>attach-sources</id>
-                <phase>prepare-package</phase>
-                <goals>
-                  <goal>jar</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-          <!-- Build Javadoc Jars -->
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <version>3.6.3</version>
-            <executions>
-              <execution>
-                <id>attach-javadocs</id>
-                <phase>prepare-package</phase>
-                <goals>
-                  <goal>jar</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
           <!-- Central Publishing Plugin -->
           <plugin>
             <groupId>org.sonatype.central</groupId>
