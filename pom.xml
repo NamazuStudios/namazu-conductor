@@ -1,9 +1,26 @@
-<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <name>Namazu Elements Conductor</name>
+  <description>Multi-platform Container Orchestration System for Namazu Elements</description>
+  <url>https://github.com/NamazuStudios/namazu-conductor</url>
+
+  <scm>
+    <url>https://github.com/NamazuStudios/crossfire</url>
+    <connection>scm:git:https://github.com/NamazuStudios/crossfire.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/NamazuStudios/crossfire.git</developerConnection>
+    <tag>HEAD</tag>
+  </scm>
+
   <modelVersion>4.0.0</modelVersion>
   <groupId>dev.getelements.conductor</groupId>
   <artifactId>conductor</artifactId>
   <version>1.0-SNAPSHOT</version>
+
   <packaging>pom</packaging>
+
   <properties>
     <encoding>UTF-8</encoding>
     <maven.compiler.source>21</maven.compiler.source>
@@ -22,6 +39,7 @@
     <awssdk.version>2.30.0</awssdk.version>
     <api.classifier>${project.groupId}.api</api.classifier>
   </properties>
+
   <build>
     <pluginManagement>
       <plugins>
@@ -41,6 +59,7 @@
       </plugins>
     </pluginManagement>
   </build>
+
   <!--
         Everything in dependencyManagement serves the purpose of centralizing the versions and configurations of
         artifacts used. Every project will refer to this section when including them on the classpath. This is
@@ -96,6 +115,7 @@
       </dependency>
     </dependencies>
   </dependencyManagement>
+
   <modules>
     <module>api</module>
     <module>ecs</module>
@@ -103,4 +123,79 @@
     <module>multiplay</module>
     <module>debug</module>
   </modules>
+
+  <profiles>
+    <profile>
+      <id>central-publish</id>
+      <build>
+        <plugins>
+          <!-- Build Source Jars -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.3.1</version>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- Build Javadoc Jars -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.6.3</version>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- Central Publishing Plugin -->
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.9.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+              <waitUntil>published</waitUntil>
+              <waitMaxTime>3600</waitMaxTime>
+            </configuration>
+          </plugin>
+          <!-- GPG Plugin (Required for Maven Central) -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.4</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+                <configuration>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+
 </project>
