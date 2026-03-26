@@ -4,18 +4,14 @@ import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.jakarta.rs.json.JacksonJsonProvider
 import dev.getelements.conductor.IpPlacement
-import jakarta.ws.rs.client.ClientResponseContext
-import jakarta.ws.rs.client.ClientRequestContext
-import jakarta.ws.rs.client.ClientResponseFilter
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
-import jakarta.ws.rs.client.Client
-import jakarta.ws.rs.client.ClientBuilder
+import jakarta.ws.rs.client.*
+import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
-import org.testng.Assert.assertTrue
+import org.testng.Assert.fail
 import org.testng.SkipException
-import org.slf4j.LoggerFactory
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
@@ -54,9 +50,8 @@ class EdgeGapOrchestrationServiceIT {
     @BeforeClass
     fun setUp() {
 
-        apiKey = (System.getenv("EDGEGAP_API_KEY")
-            ?: throw SkipException("EDGEGAP_API_KEY environment variable is not set — skipping EdgeGap integration tests"))
-            .removePrefix("token ")
+        apiKey = System.getenv("EDGEGAP_API_KEY")
+            ?: throw SkipException("EDGEGAP_API_KEY environment variable is not set — skipping EdgeGap integration tests")
 
         client = ClientBuilder.newBuilder()
             .register(JacksonJsonProvider::class.java)
