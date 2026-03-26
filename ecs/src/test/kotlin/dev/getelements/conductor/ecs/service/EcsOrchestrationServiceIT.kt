@@ -10,7 +10,6 @@ import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.ClientBuilder
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
-import org.testng.SkipException
 import org.slf4j.LoggerFactory
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
@@ -72,7 +71,7 @@ class EcsOrchestrationServiceIT {
     fun setUp() {
 
         val region = System.getenv("AWS_REGION")
-            ?: throw SkipException("AWS_REGION environment variable is not set — skipping ECS integration tests")
+            ?: error("AWS_REGION environment variable is not set")
 
         stackName = System.getenv("CFN_STACK_NAME") ?: "conductor-integration-test"
 
