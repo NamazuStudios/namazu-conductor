@@ -44,11 +44,6 @@ import java.util.concurrent.TimeUnit
  *   from; defaults to `conductor-integration-test-deployer`.
  * - `CFN_IMAGE_NAME` — (optional) image name and tag within the ECR registry;
  *   defaults to `conductor-integration-test:latest`.
- *
- * The test is skipped automatically if `AWS_REGION` is absent. Run via:
- * ```
- * AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1 mvn verify -pl ecs
- * ```
  */
 class EcsOrchestrationServiceIT {
 
