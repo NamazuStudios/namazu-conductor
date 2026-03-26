@@ -215,7 +215,8 @@ class EcsOrchestrationServiceIT {
     private fun deployStack(templateBody: String) {
         val repositoryUrl = resolveRepositoryUrl()
         val imageName = System.getenv("CFN_IMAGE_NAME") ?: "conductor-integration-test:latest"
-        logger.info("Deploying stack with image {}/{}", repositoryUrl, imageName)
+        val redactedUrl = repositoryUrl.replace(Regex("^\\d+\\."), "<account-id>.")
+        logger.info("Deploying stack with image {}/{}", redactedUrl, imageName)
 
         val params = listOf(
             Parameter.builder().parameterKey("RepositoryUrl").parameterValue(repositoryUrl).build(),
