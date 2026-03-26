@@ -14,7 +14,7 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -61,3 +61,39 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Generate API documentation
+        run: mvn -B --no-transfer-progress dokka:aggregate -pl '!:multiplay'
+
+      - name: Publish snapshot docs to GitHub Pages
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Clone gh-pages branch, or create it fresh if it doesn't exist yet
+          if git ls-remote --exit-code --heads "$REMOTE_URL" gh-pages > /dev/null 2>&1; then
+            git clone --branch gh-pages --depth 1 "$REMOTE_URL" /tmp/gh-pages
+          else
+            mkdir /tmp/gh-pages
+            cd /tmp/gh-pages
+            git init
+            git remote add origin "$REMOTE_URL"
+            git checkout --orphan gh-pages
+            cd -
+          fi
+
+          # Always overwrite snapshot/ with the latest docs
+          rm -rf /tmp/gh-pages/snapshot
+          cp -r target/dokka/. /tmp/gh-pages/snapshot/
+
+          cd /tmp/gh-pages
+          git add .
+          git diff --cached --quiet && echo "No doc changes." && exit 0
+          git commit -m "Snapshot docs for ${VERSION}"
+          git push origin gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
