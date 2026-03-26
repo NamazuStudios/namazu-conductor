@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -61,7 +61,7 @@ jobs:
 
       - name: Update version in POM
         run: |
-          mvn versions:set -DnewVersion=${{ steps.next_version.outputs.next }} -B
+          mvn versions:set -DnewVersion=${{ steps.next_version.outputs.next }} -B --no-transfer-progress
           mvn versions:commit
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
