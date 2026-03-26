@@ -14,6 +14,8 @@
     <artifactId>edgegap</artifactId>
     <version>1.0.2-SNAPSHOT</version>
 
+    <name>Namazu Conductor EdgeGap Provider</name>
+
     <!--
         This includes a variety of dependencies which the Element uses. An Element may use some or all of these. Note
         that we do not specify version, nor wo we specify the scope. By including the bom in the parent project,

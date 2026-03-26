@@ -43,7 +43,7 @@
     <maven.compiler.source>21</maven.compiler.source>
     <maven.compiler.target>21</maven.compiler.target>
     <kotlin.version>2.1.0</kotlin.version>
-    <dokka.version>2.0.0</dokka.version>
+    <dokka.version>1.9.20</dokka.version>
     <swagger.version>2.2.22</swagger.version>
     <guice.version>7.0.0</guice.version>
     <rs.api>4.0.0</rs.api>
