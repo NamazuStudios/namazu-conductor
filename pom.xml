@@ -97,6 +97,11 @@
         <groupId>org.jetbrains.dokka</groupId>
         <artifactId>dokka-maven-plugin</artifactId>
         <version>${dokka.version}</version>
+        <configuration>
+          <sourceDirectories>
+            <dir>${project.basedir}/src/main/kotlin</dir>
+          </sourceDirectories>
+        </configuration>
         <executions>
           <execution>
             <phase>prepare-package</phase>
