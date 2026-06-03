@@ -295,7 +295,9 @@ Element-Builtin-Spis=${elm.builtin.spis}
             </plugin>
 
             <!--
-                Runs integration tests (*IT classes) during mvn verify.
+                Runs integration tests (*IT classes) during mvn verify. Always runs — there is no
+                skip switch; the test fails (rather than skips) when no cluster is reachable. CI
+                provisions minikube before the build.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

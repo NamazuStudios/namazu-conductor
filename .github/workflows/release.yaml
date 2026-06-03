@@ -96,6 +96,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # The kubernetes module's integration test always runs during verify and requires a cluster.
+      - name: Start minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          driver: docker
+
+      - name: Start minikube tunnel (LoadBalancer support)
+        run: |
+          minikube tunnel &> /tmp/minikube-tunnel.log &
+          echo "Started minikube tunnel (pid $!)"
+
       - name: Build and Publish Release
         run: mvn -B --no-transfer-progress -Pcentral-publish clean deploy -pl '!:multiplay'
         env:
