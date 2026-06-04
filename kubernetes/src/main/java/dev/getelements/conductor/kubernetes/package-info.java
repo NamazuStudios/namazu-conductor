@@ -1,0 +1,7 @@
+@ElementDefinition(recursive = true)
+@GuiceElementModule(KubernetesOrchestrationModule.class)
+package dev.getelements.conductor.kubernetes;
+
+import dev.getelements.conductor.kubernetes.guice.KubernetesOrchestrationModule;
+import dev.getelements.elements.sdk.annotation.ElementDefinition;
+import dev.getelements.elements.sdk.spi.guice.annotations.GuiceElementModule;

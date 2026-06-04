@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://namazustudios.com/docs). It abstracts provider-specific APIs (EdgeGap, Multiplay, AWS Fargate) behind a common `OrchestrationService` interface.
+Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://namazustudios.com/docs). It abstracts provider-specific APIs (EdgeGap, AWS ECS, Kubernetes, Multiplay) behind a common `OrchestrationService` interface.
 
 ## Build & Run
 
@@ -24,8 +24,9 @@ Each provider module produces both a JAR and a `.elm` archive (Namazu Elements m
 |---|---|---|
 | `api` | Core interfaces and data types — `OrchestrationService`, `JobRequest`, `JobExecution`, `JobProfile`, `JobPlacement`, `JobStatus` | Complete |
 | `edgegap` | EdgeGap REST API v1 implementation | Complete |
+| `ecs` | AWS ECS implementation (AWS SDK v2; Fargate and EC2 launch types) | Complete |
+| `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job` workloads) | Complete |
 | `multiplay` | Multiplay (Unity/Rocket Science) implementation | Skeleton (TODOs) |
-| `fargate` | AWS Fargate implementation | Skeleton (TODOs) |
 | `debug` | Local runner — boots MongoDB replica set then starts Elements runtime | Complete |
 
 ## Key Abstractions
@@ -45,7 +46,25 @@ When implementing a new provider (e.g., Multiplay, Fargate):
 4. Bind everything in a Guice `PrivateModule`, exposing only `OrchestrationService` to the parent injector
 5. Annotate `package-info.java` with `@ElementDefinition` and `@GuiceElementModule` (must be Java, not Kotlin)
 
-See `edgegap/` for the reference implementation.
+See `edgegap/` (REST-based) or `ecs/` (typed-SDK-based) for reference implementations.
+
+## Kubernetes Provider Conventions
+
+The `kubernetes` provider maps a `PodTemplate` resource to a `JobProfile`. Behaviour is driven by
+labels and annotations on the `PodTemplate`:
+
+- **Label** `namazu.conductor/job-set=<value>` — only templates matching the configured `JOBSET`
+  attribute are surfaced as profiles (the per-instance filter; analogous to the ECS `jobSet` tag).
+- **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`) or
+  `job` (one-off, `batch/v1 Job`). Pod phases / Job status map onto `JobStatus`.
+- **Annotation** `namazu.conductor/expose-ports` — e.g. `"7777/udp,8080/tcp"`. Present → a `Service`
+  is created selecting the workload; absent → no `Service`, endpoints fall back to the pod IP.
+- **Annotation** `namazu.conductor/service-type` — `NodePort` (default), `LoadBalancer`, or `ClusterIP`.
+
+Created Services carry a `namazu.conductor/owned-by=<workload-name>` label so `stop()` can delete them
+without persisting state. Only `RegionPlacement` is honoured (→ `topology.kubernetes.io/region` node
+selector). Client config comes from Fabric8 auto-detection (in-cluster or `~/.kube/config`) unless
+`KUBECONFIG_PATH` / `MASTER_URL` attributes are set.
 
 ## Dependency Injection
 

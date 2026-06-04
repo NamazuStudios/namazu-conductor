@@ -8,6 +8,7 @@ Namazu Conductor is a container orchestration framework built on the [Namazu Ele
 |---|---|---|---|
 | `edgegap` | [EdgeGap](https://edgegap.com) | Complete — see [edgegap/README.md](edgegap/README.md) | Geo-distributed game server orchestration; supports IP and coordinate-based placement |
 | `ecs` | [AWS ECS](https://aws.amazon.com/ecs/) | Complete — see [ecs/README.md](ecs/README.md) | Fargate and EC2 container execution on AWS; supports spot ASG capacity |
+| `kubernetes` | [Kubernetes](https://kubernetes.io) | Complete — see [kubernetes/README.md](kubernetes/README.md) | `PodTemplate`-driven Pod/Job execution; on-demand Services for exposed ports; region placement |
 | `multiplay` | [Multiplay](https://unity.com/products/multiplay) (Unity / Rocket Science) | In development — untested, not published to Maven Central | Managed game server hosting |
 
 ## Architecture
@@ -20,6 +21,7 @@ conductor/
 ├── edgegap/      # EdgeGap OrchestrationService implementation
 ├── multiplay/    # Multiplay OrchestrationService implementation
 ├── ecs/          # AWS ECS OrchestrationService implementation (Fargate and EC2)
+├── kubernetes/   # Kubernetes OrchestrationService implementation (Fabric8; Pod/Job + Service)
 └── debug/        # Local development runner
 ```
 
@@ -61,7 +63,7 @@ Optional hints that influence where a job is scheduled. Unsupported placement ty
 
 | Implementation | `PlacementType` | Fields | Supported by |
 |---|---|---|---|
-| `RegionPlacement` | `REGION` | `id: String` | Multiplay |
+| `RegionPlacement` | `REGION` | `id: String` | Multiplay, Kubernetes (`topology.kubernetes.io/region` node selector) |
 | `IpPlacement` | `IP_ADDRESS` | `ip: String` | EdgeGap |
 | `LatitudeLongitudePlacement` | `LAT_LON` | `latitude: Double`, `longitude: Double` | EdgeGap |
 
