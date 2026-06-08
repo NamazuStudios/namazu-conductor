@@ -73,7 +73,7 @@ When a template declares `expose-ports`, `execute()` creates the workload and a 
 
 Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
 
-Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/region` node selector. `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
+Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/zone` node selector (zone is finer-grained than region; its `id` is the target zone). `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
 
 ## Defining Jobs with PodTemplates
 

@@ -62,7 +62,7 @@ labels and annotations on the `PodTemplate`:
 - **Annotation** `namazu.conductor/service-type` — `NodePort` (default), `LoadBalancer`, or `ClusterIP`.
 
 Created Services carry a `namazu.conductor/owned-by=<workload-name>` label so `stop()` can delete them
-without persisting state. Only `RegionPlacement` is honoured (→ `topology.kubernetes.io/region` node
+without persisting state. Only `RegionPlacement` is honoured (→ `topology.kubernetes.io/zone` node
 selector). Client config comes from Fabric8 auto-detection (in-cluster or `~/.kube/config`) unless
 `KUBECONFIG_PATH` / `MASTER_URL` attributes are set.
 

@@ -63,7 +63,7 @@ Optional hints that influence where a job is scheduled. Unsupported placement ty
 
 | Implementation | `PlacementType` | Fields | Supported by |
 |---|---|---|---|
-| `RegionPlacement` | `REGION` | `id: String` | Multiplay, Kubernetes (`topology.kubernetes.io/region` node selector) |
+| `RegionPlacement` | `REGION` | `id: String` | Multiplay, Kubernetes (`topology.kubernetes.io/zone` node selector) |
 | `IpPlacement` | `IP_ADDRESS` | `ip: String` | EdgeGap |
 | `LatitudeLongitudePlacement` | `LAT_LON` | `latitude: Double`, `longitude: Double` | EdgeGap |
 

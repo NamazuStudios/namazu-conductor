@@ -43,7 +43,7 @@ import java.util.concurrent.Future
  * template declares the `namazu.conductor/expose-ports` annotation; its type defaults to `NodePort`
  * and may be overridden via `namazu.conductor/service-type`.
  *
- * Only [RegionPlacement] is honoured (mapped to a `topology.kubernetes.io/region` node selector); other
+ * Only [RegionPlacement] is honoured (mapped to a `topology.kubernetes.io/zone` node selector); other
  * [dev.getelements.conductor.JobPlacement] types are silently ignored.
  *
  * Configuration is provided by the Elements SDK via the attribute keys declared in
@@ -325,7 +325,7 @@ class KubernetesOrchestrationService @Inject constructor(
     private fun applyPlacement(spec: PodSpec, request: JobRequest) {
         val region = request.placement.filterIsInstance<RegionPlacement>().firstOrNull() ?: return
         val selector = spec.nodeSelector.orEmpty().toMutableMap()
-        selector[REGION_LABEL] = region.id
+        selector[ZONE_LABEL] = region.id
         spec.nodeSelector = selector
     }
 
@@ -374,7 +374,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
         const val ANN_SERVICE_TYPE = "namazu.conductor/service-type"
 
-        const val REGION_LABEL = "topology.kubernetes.io/region"
+        const val ZONE_LABEL = "topology.kubernetes.io/zone"
 
     }
 
