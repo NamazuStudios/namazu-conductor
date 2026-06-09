@@ -122,6 +122,8 @@ Resources:
               - ec2:CreateTags
               - ec2:DeleteTags
               - ec2:DescribeImages
+              - ec2:DescribeVpcEndpoints
+              - ec2:DeleteVpcEndpoints
             Resource: '*'
 
           # ------------------------------------------------------------------

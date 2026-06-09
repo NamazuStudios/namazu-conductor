@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.cloudformation.model.AlreadyExistsExcepti
 import software.amazon.awssdk.services.cloudformation.model.Capability
 import software.amazon.awssdk.services.cloudformation.model.Parameter
 import software.amazon.awssdk.services.ec2.Ec2Client
+import software.amazon.awssdk.services.ec2.model.Filter
 import software.amazon.awssdk.services.ecs.EcsClient
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -54,7 +55,9 @@ class EcsOrchestrationServiceIT {
     private lateinit var taskFamily: String
     private lateinit var ec2TaskFamily: String
     private lateinit var cluster: String
+    private lateinit var vpcId: String
     private lateinit var cfnClient: CloudFormationClient
+    private lateinit var deployerEc2Client: Ec2Client
     private lateinit var ecsClient: EcsClient
     private lateinit var executor: ExecutorService
     private lateinit var service: EcsOrchestrationService
@@ -73,6 +76,7 @@ class EcsOrchestrationServiceIT {
 
         val awsRegion = Region.of(region)
         cfnClient = CloudFormationClient.builder().region(awsRegion).build()
+        deployerEc2Client = Ec2Client.builder().region(awsRegion).build()
 
         val templateBody = javaClass.getResourceAsStream("/integration-test.yaml")
             ?.bufferedReader()?.readText()
@@ -88,6 +92,8 @@ class EcsOrchestrationServiceIT {
         taskFamily    = outputs.getValue("EcsTaskFamily").outputValue()
         ec2TaskFamily = outputs.getValue("EcsEc2TaskFamily").outputValue()
         val subnets         = outputs.getValue("EcsSubnets").outputValue()
+        vpcId = deployerEc2Client.describeSubnets { it.subnetIds(subnets.split(",").first()) }
+            .subnets().first().vpcId()
         val securityGroups  = outputs.getValue("EcsSecurityGroups").outputValue()
         val keyId           = outputs.getValue("AwsAccessKeyId").outputValue()
         val secretKey       = outputs.getValue("AwsSecretAccessKey").outputValue()
@@ -130,6 +136,10 @@ class EcsOrchestrationServiceIT {
         if (::ecsClient.isInitialized) ecsClient.close()
         if (::httpClient.isInitialized) httpClient.close()
 
+        if (::deployerEc2Client.isInitialized && ::vpcId.isInitialized) {
+            scrubVpcDependencies(vpcId)
+        }
+
         if (::cfnClient.isInitialized) {
             try {
                 cfnClient.deleteStack { it.stackName(stackName) }
@@ -139,6 +149,8 @@ class EcsOrchestrationServiceIT {
             }
             cfnClient.close()
         }
+
+        if (::deployerEc2Client.isInitialized) deployerEc2Client.close()
     }
 
     @Test
@@ -197,6 +209,40 @@ class EcsOrchestrationServiceIT {
         val context = response.readEntity(TestContext::class.java)
         assertEquals(context.args, emptyList<String>(), "args mismatch (EC2)")
         assertEquals(context.environment, environment, "environment mismatch (EC2)")
+    }
+
+    private fun scrubVpcDependencies(vpcId: String) {
+        val vpcFilter = Filter.builder().name("vpc-id").values(vpcId).build()
+
+        val endpointIds = deployerEc2Client
+            .describeVpcEndpoints { it.filters(vpcFilter) }
+            .vpcEndpoints().map { it.vpcEndpointId() }
+        if (endpointIds.isNotEmpty()) {
+            logger.info("Deleting {} VPC endpoint(s) before stack teardown", endpointIds.size)
+            deployerEc2Client.deleteVpcEndpoints { it.vpcEndpointIds(endpointIds) }
+            // Wait for endpoints to finish deleting so the subnet becomes free
+            val deadline = System.currentTimeMillis() + 120_000
+            while (System.currentTimeMillis() < deadline) {
+                val remaining = deployerEc2Client
+                    .describeVpcEndpoints { it.filters(vpcFilter) }
+                    .vpcEndpoints().filter { it.stateAsString() != "deleted" }
+                if (remaining.isEmpty()) break
+                logger.info("Waiting for {} VPC endpoint(s) to finish deleting", remaining.size)
+                Thread.sleep(5_000)
+            }
+        }
+
+        deployerEc2Client.describeSecurityGroups { it.filters(vpcFilter) }
+            .securityGroups()
+            .filter { it.groupName() != "default" && !it.groupName().startsWith("conductor-integration-test") }
+            .forEach { sg ->
+                try {
+                    logger.info("Deleting unmanaged security group {} ({})", sg.groupId(), sg.groupName())
+                    deployerEc2Client.deleteSecurityGroup { it.groupId(sg.groupId()) }
+                } catch (e: Exception) {
+                    logger.warn("Failed to delete security group {}", sg.groupId(), e)
+                }
+            }
     }
 
     private fun resolveRepositoryUrl(): String {
