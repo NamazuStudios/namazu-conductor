@@ -124,6 +124,47 @@ $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#/
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.String?#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.String?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice////PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/index.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/index.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule/KubernetesOrchestrationModule/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/-kubernetes-orchestration-module.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule/configure/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/configure.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule/provideExecutorService/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/provide-executor-service.html
+$dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule/provideKubernetesClient/#kotlin.String#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/provide-kubernetes-client.html
+$dokka.location:dev.getelements.conductor.kubernetes.service////PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/index.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/index.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/ANN_EXPOSE_PORTS/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-a-n-n_-e-x-p-o-s-e_-p-o-r-t-s.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/ANN_SERVICE_TYPE/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-a-n-n_-s-e-r-v-i-c-e_-t-y-p-e.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/ANN_WORKLOAD_KIND/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-a-n-n_-w-o-r-k-l-o-a-d_-k-i-n-d.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/LABEL_JOB_SET/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-l-a-b-e-l_-j-o-b_-s-e-t.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/LABEL_OWNED_BY/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-l-a-b-e-l_-o-w-n-e-d_-b-y.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService.Companion/ZONE_LABEL/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-companion/-z-o-n-e_-l-a-b-e-l.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/index.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/KubernetesOrchestrationService/#kotlin.String#kotlin.String#kotlin.String#[Error type: Unresolved type for KubernetesClient]#java.util.concurrent.ExecutorService/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/-kubernetes-orchestration-service.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/execute/#dev.getelements.conductor.JobRequest/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/execute.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/getAvailableProfiles/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/get-available-profiles.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/getFutureForStatus/#dev.getelements.conductor.JobExecution#dev.getelements.conductor.JobStatus/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/get-future-for-status.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/stop/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/stop.html
+$dokka.location:dev.getelements.conductor.kubernetes////PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/JOBSET/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-j-o-b-s-e-t.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/KUBECONFIG_PATH/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-k-u-b-e-c-o-n-f-i-g_-p-a-t-h.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/MASTER_URL/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-m-a-s-t-e-r_-u-r-l.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/NAMESPACE/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-n-a-m-e-s-p-a-c-e.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/POLL_INTERVAL/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-p-o-l-l_-i-n-t-e-r-v-a-l.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/KubernetesJobProfile/#kotlin.String#kotlin.String#kotlin.String#dev.getelements.conductor.kubernetes.WorkloadKind#kotlin.String#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/-kubernetes-job-profile.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/exposePorts/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/expose-ports.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/id/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/id.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/name/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/name.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/namespace/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/namespace.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/primaryContainer/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/primary-container.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/serviceType/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/service-type.html
+$dokka.location:dev.getelements.conductor.kubernetes/KubernetesJobProfile/workloadKind/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-job-profile/workload-kind.html
+$dokka.location:dev.getelements.conductor.kubernetes/WorkloadKind.JOB///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor.kubernetes/-workload-kind/-j-o-b/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/WorkloadKind.POD///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor.kubernetes/-workload-kind/-p-o-d/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/WorkloadKind///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-workload-kind/index.html
+$dokka.location:dev.getelements.conductor.kubernetes/WorkloadKind/valueOf/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-workload-kind/value-of.html
+$dokka.location:dev.getelements.conductor.kubernetes/WorkloadKind/values/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-workload-kind/values.html
 $dokka.location:dev.getelements.conductor.service////PointingToDeclaration/conductor/dev.getelements.conductor.service/index.html
 $dokka.location:dev.getelements.conductor.service/JobProfile///PointingToDeclaration/conductor/dev.getelements.conductor.service/-job-profile/index.html
 $dokka.location:dev.getelements.conductor.service/JobProfile/id/#/PointingToDeclaration/conductor/dev.getelements.conductor.service/-job-profile/id.html
@@ -188,5 +229,7 @@ dev.getelements.conductor.edgegap.guice
 dev.getelements.conductor.edgegap.model
 dev.getelements.conductor.edgegap.service
 dev.getelements.conductor.exception
+dev.getelements.conductor.kubernetes
+dev.getelements.conductor.kubernetes.guice
+dev.getelements.conductor.kubernetes.service
 dev.getelements.conductor.service
-
