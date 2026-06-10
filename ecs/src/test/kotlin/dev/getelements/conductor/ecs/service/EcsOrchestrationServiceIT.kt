@@ -144,7 +144,19 @@ class EcsOrchestrationServiceIT {
         if (::cfnClient.isInitialized) {
             try {
                 cfnClient.deleteStack { it.stackName(stackName) }
-                cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
+                try {
+                    cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
+                } catch (e: Exception) {
+                    val status = runCatching {
+                        cfnClient.describeStacks { it.stackName(stackName) }.stacks().firstOrNull()?.stackStatus()
+                    }.getOrNull()
+                    if (status == StackStatus.DELETE_FAILED && ::deployerEc2Client.isInitialized) {
+                        logger.warn("Stack '{}' is DELETE_FAILED — scrubbing remaining VPC dependencies and retrying", stackName)
+                        scrubAndDeleteStack()
+                    } else {
+                        throw e
+                    }
+                }
             } catch (e: Exception) {
                 logger.warn("Failed to delete stack '{}'", stackName, e)
             }
@@ -237,11 +249,23 @@ class EcsOrchestrationServiceIT {
             .securityGroups()
             .filter { it.groupName() != "default" && !it.groupName().startsWith("conductor-integration-test") }
             .forEach { sg ->
-                try {
-                    logger.info("Deleting unmanaged security group {} ({})", sg.groupId(), sg.groupName())
-                    deployerEc2Client.deleteSecurityGroup { it.groupId(sg.groupId()) }
-                } catch (e: Exception) {
-                    logger.warn("Failed to delete security group {}", sg.groupId(), e)
+                // Retry deletion — external agents (e.g. GuardDuty) may still hold the SG briefly
+                var lastException: Exception? = null
+                repeat(6) { attempt ->
+                    if (lastException != null) Thread.sleep(10_000)
+                    try {
+                        logger.info("Deleting unmanaged security group {} ({}) attempt {}", sg.groupId(), sg.groupName(), attempt + 1)
+                        deployerEc2Client.deleteSecurityGroup { it.groupId(sg.groupId()) }
+                        logger.info("Deleted security group {} ({}) successfully", sg.groupId(), sg.groupName())
+                        lastException = null
+                        return@repeat
+                    } catch (e: Exception) {
+                        logger.warn("Attempt {} failed to delete security group {} ({}): {}", attempt + 1, sg.groupId(), sg.groupName(), e.message)
+                        lastException = e
+                    }
+                }
+                if (lastException != null) {
+                    logger.error("Gave up deleting security group {} ({}) after 6 attempts", sg.groupId(), sg.groupName())
                 }
             }
     }
@@ -286,7 +310,7 @@ class EcsOrchestrationServiceIT {
                     logger.info("Stack '{}' is {} — reusing existing resources", stackName, status)
                 StackStatus.DELETE_FAILED -> {
                     logger.warn("Stack '{}' is DELETE_FAILED — scrubbing VPC dependencies and recreating", stackName)
-                    recoverDeleteFailedStack()
+                    scrubAndDeleteStack()
                     cfnClient.createStack {
                         it.stackName(stackName)
                         it.templateBody(templateBody)
@@ -300,7 +324,7 @@ class EcsOrchestrationServiceIT {
         }
     }
 
-    private fun recoverDeleteFailedStack() {
+    private fun scrubAndDeleteStack() {
         val nameFilter = Filter.builder().name("tag:Name").values(stackName).build()
         deployerEc2Client.describeVpcs { it.filters(nameFilter) }
             .vpcs()
