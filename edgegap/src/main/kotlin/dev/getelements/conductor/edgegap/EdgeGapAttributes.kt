@@ -10,9 +10,8 @@ import dev.getelements.elements.sdk.annotation.ElementDefaultAttribute
 object EdgeGapAttributes {
 
     /**
-     * The EdgeGap API token used to authenticate all requests. Supplied as the literal value after
-     * `"token "` in the `Authorization` header per the EdgeGap authentication scheme.
-     * No default — must be supplied by the operator.
+     * The EdgeGap API key used to authenticate all requests. Passed as the bare value in the
+     * `Authorization` header. No default — must be supplied by the operator.
      */
     @ElementDefaultAttribute(sensitive = true)
     const val API_KEY = "dev.getelements.conductor.edgegap.api.key"

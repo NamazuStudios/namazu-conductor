@@ -138,7 +138,7 @@ class EdgeGapOrchestrationServiceIT {
                 .path("/v1/stop/{request_id}")
                 .resolveTemplate("request_id", requestId)
                 .request()
-                .header("Authorization", "token $apiKey")
+                .header("Authorization", apiKey)
                 .delete()
         } catch (e: Exception) {
             logger.warn("Failed to stop EdgeGap deployment {}", requestId, e)

@@ -193,7 +193,7 @@ class EdgeGapOrchestrationService @Inject constructor(
 
     private fun target(path: String) = client.target(baseUrl).path(path)
 
-    private fun authValue() = "token $apiKey"
+    private fun authValue() = apiKey
 
     companion object {
         private const val AUTH_HEADER = "Authorization"
