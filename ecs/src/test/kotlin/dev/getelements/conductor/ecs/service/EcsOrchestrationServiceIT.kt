@@ -259,13 +259,18 @@ class EcsOrchestrationServiceIT {
                         logger.info("Deleted security group {} ({}) successfully", sg.groupId(), sg.groupName())
                         lastException = null
                         return@repeat
-                    } catch (e: Exception) {
+                    } catch (e: software.amazon.awssdk.services.ec2.model.Ec2Exception) {
+                        if (e.awsErrorDetails().errorCode() == "InvalidGroup.NotFound") {
+                            logger.info("Security group {} ({}) no longer exists — treating as success", sg.groupId(), sg.groupName())
+                            lastException = null
+                            return@repeat
+                        }
                         logger.warn("Attempt {} failed to delete security group {} ({}): {}", attempt + 1, sg.groupId(), sg.groupName(), e.message)
                         lastException = e
                     }
                 }
                 if (lastException != null) {
-                    logger.error("Gave up deleting security group {} ({}) after 6 attempts", sg.groupId(), sg.groupName())
+                    throw IllegalStateException("Failed to delete security group ${sg.groupId()} (${sg.groupName()}) after 6 attempts", lastException)
                 }
             }
     }
