@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.cloudformation.CloudFormationClient
 import software.amazon.awssdk.services.cloudformation.model.AlreadyExistsException
 import software.amazon.awssdk.services.cloudformation.model.Capability
 import software.amazon.awssdk.services.cloudformation.model.Parameter
+import software.amazon.awssdk.services.cloudformation.model.StackStatus
 import software.amazon.awssdk.services.ec2.Ec2Client
 import software.amazon.awssdk.services.ec2.model.Filter
 import software.amazon.awssdk.services.ecs.EcsClient
@@ -277,11 +278,35 @@ class EcsOrchestrationServiceIT {
                 it.capabilities(Capability.CAPABILITY_NAMED_IAM)
                 it.parameters(params)
             }
+            cfnClient.waiter().waitUntilStackCreateComplete { it.stackName(stackName) }
         } catch (e: AlreadyExistsException) {
-            logger.info("Stack '{}' already exists - using existing outputs", stackName)
-            return
+            val stack = cfnClient.describeStacks { it.stackName(stackName) }.stacks().first()
+            when (val status = stack.stackStatus()) {
+                StackStatus.CREATE_COMPLETE, StackStatus.UPDATE_COMPLETE ->
+                    logger.info("Stack '{}' is {} — reusing existing resources", stackName, status)
+                StackStatus.DELETE_FAILED -> {
+                    logger.warn("Stack '{}' is DELETE_FAILED — scrubbing VPC dependencies and recreating", stackName)
+                    recoverDeleteFailedStack()
+                    cfnClient.createStack {
+                        it.stackName(stackName)
+                        it.templateBody(templateBody)
+                        it.capabilities(Capability.CAPABILITY_NAMED_IAM)
+                        it.parameters(params)
+                    }
+                    cfnClient.waiter().waitUntilStackCreateComplete { it.stackName(stackName) }
+                }
+                else -> error("Stack '$stackName' is in unexpected state $status — manual intervention required")
+            }
         }
-        cfnClient.waiter().waitUntilStackCreateComplete { it.stackName(stackName) }
+    }
+
+    private fun recoverDeleteFailedStack() {
+        val nameFilter = Filter.builder().name("tag:Name").values(stackName).build()
+        deployerEc2Client.describeVpcs { it.filters(nameFilter) }
+            .vpcs()
+            .forEach { scrubVpcDependencies(it.vpcId()) }
+        cfnClient.deleteStack { it.stackName(stackName) }
+        cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
     }
 
 }
