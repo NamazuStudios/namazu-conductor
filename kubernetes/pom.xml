@@ -8,11 +8,11 @@
     <parent>
         <groupId>dev.getelements.conductor</groupId>
         <artifactId>conductor</artifactId>
-        <version>1.0.6-SNAPSHOT</version>
+        <version>1.0.6</version>
     </parent>
 
     <artifactId>kubernetes</artifactId>
-    <version>1.0.6-SNAPSHOT</version>
+    <version>1.0.6</version>
 
     <name>Namazu Conductor Kubernetes Provider</name>
 
