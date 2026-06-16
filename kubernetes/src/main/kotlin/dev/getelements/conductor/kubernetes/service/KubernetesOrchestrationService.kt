@@ -16,6 +16,7 @@ import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import io.fabric8.kubernetes.api.model.EnvVar
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder
+import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder
 import io.fabric8.kubernetes.api.model.Pod
 import io.fabric8.kubernetes.api.model.PodBuilder
 import io.fabric8.kubernetes.api.model.PodSpec
@@ -121,7 +122,7 @@ class KubernetesOrchestrationService @Inject constructor(
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
 
-        when (profile.workloadKind) {
+        val ownerRef = when (profile.workloadKind) {
             WorkloadKind.POD -> {
                 val pod = PodBuilder()
                     .withMetadata(
@@ -134,7 +135,15 @@ class KubernetesOrchestrationService @Inject constructor(
                     )
                     .withSpec(spec)
                     .build()
-                client.pods().inNamespace(profile.namespace).resource(pod).create()
+                val created = client.pods().inNamespace(profile.namespace).resource(pod).create()
+                OwnerReferenceBuilder()
+                    .withApiVersion("v1")
+                    .withKind("Pod")
+                    .withName(runName)
+                    .withUid(created.metadata.uid)
+                    .withController(true)
+                    .withBlockOwnerDeletion(true)
+                    .build()
             }
             WorkloadKind.JOB -> {
                 val podMeta = ObjectMetaBuilder()
@@ -155,11 +164,19 @@ class KubernetesOrchestrationService @Inject constructor(
                     )
                     .endSpec()
                     .build()
-                client.batch().v1().jobs().inNamespace(profile.namespace).resource(job).create()
+                val created = client.batch().v1().jobs().inNamespace(profile.namespace).resource(job).create()
+                OwnerReferenceBuilder()
+                    .withApiVersion("batch/v1")
+                    .withKind("Job")
+                    .withName(runName)
+                    .withUid(created.metadata.uid)
+                    .withController(true)
+                    .withBlockOwnerDeletion(true)
+                    .build()
             }
         }
 
-        createServiceIfRequested(profile, runName)
+        createServiceIfRequested(profile, runName, ownerRef)
 
         return JobExecution(id = encodeId(profile.namespace, profile.workloadKind, runName), status = JobStatus.PENDING)
     }
@@ -277,7 +294,11 @@ class KubernetesOrchestrationService @Inject constructor(
     private fun locatePod(ns: String, jobName: String): Pod? =
         client.pods().inNamespace(ns).withLabel(LABEL_OWNED_BY, jobName).list().items.firstOrNull()
 
-    private fun createServiceIfRequested(profile: KubernetesJobProfile, runName: String) {
+    private fun createServiceIfRequested(
+        profile: KubernetesJobProfile,
+        runName: String,
+        ownerRef: io.fabric8.kubernetes.api.model.OwnerReference
+    ) {
         val ports = parseExposePorts(profile.exposePorts)
         if (ports.isEmpty()) return
 
@@ -296,6 +317,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     .withName(runName)
                     .withNamespace(profile.namespace)
                     .addToLabels(LABEL_OWNED_BY, runName)
+                    .addToOwnerReferences(ownerRef)
                     .build()
             )
             .withNewSpec()
