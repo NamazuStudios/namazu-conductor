@@ -1,0 +1,11 @@
+{
+  "schema": "1",
+  "entries": [
+    {
+      "label": "Conductor",
+      "icon": "Layers",
+      "bundlePath": "plugin.bundle.js",
+      "route": "conductor-admin"
+    }
+  ]
+}

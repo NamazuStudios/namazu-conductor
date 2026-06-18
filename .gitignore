@@ -39,3 +39,7 @@ build/
 
 ### Claude Code — local settings may contain secrets and must not be committed ###
 .claude/settings.local.json
+
+/ecs.properties
+/edgegap.properties
+/kubernetes.properties

@@ -92,15 +92,36 @@ Each provider module produces a `.elm` archive suitable for deployment into a Na
 
 ## Local Development
 
-The `debug` module provides a local runner that boots a MongoDB replica set via Docker Compose and starts a local Elements environment:
+The `debug` module provides a local runner that boots a MongoDB replica set via Docker Compose and starts a local Elements environment.
+
+### Prerequisites
+
+Docker must be running. The `services-dev/docker-compose.yml` starts MongoDB 6.0 with a replica set configured for local use.
+
+### Provider configuration
+
+Each provider is opt-in: the runner only loads a provider if its properties file is present in the working directory (the project root). Create one or more of the following files — they are listed in `.gitignore` and will not be committed:
+
+| File | Provider | Required keys |
+|---|---|---|
+| `ecs.properties` | AWS ECS | See [ecs/README.md](ecs/README.md) for all attribute keys |
+| `edgegap.properties` | EdgeGap | See [edgegap/README.md](edgegap/README.md) for all attribute keys |
+| `kubernetes.properties` | Kubernetes | See [kubernetes/README.md](kubernetes/README.md) for all attribute keys |
+
+Example `edgegap.properties`:
+```properties
+dev.getelements.conductor.edgegap.api.key=YOUR_API_KEY
+```
+
+Providers with no properties file are silently skipped. The `admin` element is always loaded.
+
+### Running
 
 ```bash
 # From the project root
 mvn install
 cd debug && mvn exec:java
 ```
-
-Docker must be running. The `services-dev/docker-compose.yml` starts MongoDB 6.0 with a replica set configured for local use.
 
 ## License
 
