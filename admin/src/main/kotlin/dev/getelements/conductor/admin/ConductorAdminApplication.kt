@@ -20,6 +20,9 @@ class ConductorAdminApplication : Application() {
 
     }
 
-    override fun getClasses(): Set<Class<*>> = setOf(ConductorAdminResource::class.java)
+    override fun getClasses(): Set<Class<*>> = setOf(
+        ConductorAdminResource::class.java,
+        ConductorAdminJobsResource::class.java
+    )
 
 }
