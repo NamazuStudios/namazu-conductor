@@ -8,7 +8,13 @@ import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
 import dev.getelements.elements.sdk.jakarta.rs.AuthSchemes
 import dev.getelements.elements.sdk.model.user.User
 import dev.getelements.elements.sdk.service.user.UserService
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.parameters.RequestBody
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -18,6 +24,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.slf4j.LoggerFactory
 
+@Tag(name = "Conductor Admin")
 @Path("/jobs")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -27,6 +34,23 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
 
     @POST
     @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
+    @Operation(
+        summary = "Execute a job",
+        description = "Dispatches a job to the specified provider element using the named profile. " +
+            "Returns a JobExecution immediately — the job will typically be PENDING at this point. " +
+            "Requires SUPERUSER level."
+    )
+    @RequestBody(
+        description = "Job execution request",
+        required = true,
+        content = [Content(schema = Schema(implementation = ExecuteJobRequest::class))]
+    )
+    @ApiResponse(responseCode = "200", description = "Job submitted. Returns a JobExecution with id, status, and any initial endpoints.")
+    @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
+    @ApiResponse(responseCode = "404", description = "Element or profile not found.",
+        content = [Content(schema = Schema(example = """{"error":"Profile not found: my-profile"}"""))])
+    @ApiResponse(responseCode = "500", description = "The provider accepted the request but execution failed.",
+        content = [Content(schema = Schema(example = """{"error":"Connection refused"}"""))])
     fun execute(request: ExecuteJobRequest): Response {
         val user = userService.currentUser
             ?: return Response.status(Response.Status.FORBIDDEN).build()

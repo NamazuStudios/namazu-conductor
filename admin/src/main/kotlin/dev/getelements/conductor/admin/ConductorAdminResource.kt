@@ -6,7 +6,12 @@ import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
 import dev.getelements.elements.sdk.jakarta.rs.AuthSchemes
 import dev.getelements.elements.sdk.model.user.User
 import dev.getelements.elements.sdk.service.user.UserService
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -22,6 +27,7 @@ data class ProviderResult(
     val error: String?
 )
 
+@Tag(name = "Conductor Admin")
 @Path("/profiles")
 @Produces(MediaType.APPLICATION_JSON)
 class ConductorAdminResource @Inject constructor(private val userService: UserService) {
@@ -30,6 +36,16 @@ class ConductorAdminResource @Inject constructor(private val userService: UserSe
 
     @GET
     @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
+    @Operation(
+        summary = "List job profiles across all providers",
+        description = "Returns the available JobProfiles from every deployed OrchestrationService provider. " +
+            "Providers that fail to respond are included with a non-null error field. " +
+            "Requires SUPERUSER level."
+    )
+    @ApiResponse(responseCode = "200", description = "Profile list retrieved. Check the 'status' field: ok | partial | error.")
+    @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
+    @ApiResponse(responseCode = "503", description = "No OrchestrationService providers are currently deployed.",
+        content = [Content(schema = Schema(example = """{"status":"error","message":"No OrchestrationService providers are deployed"}"""))])
     fun getProfiles(): Response {
         val user = userService.currentUser
             ?: return Response.status(Response.Status.FORBIDDEN).build()
