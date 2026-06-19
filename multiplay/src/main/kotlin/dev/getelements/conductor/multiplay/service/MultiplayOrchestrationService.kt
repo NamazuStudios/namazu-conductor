@@ -10,10 +10,12 @@ import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.multiplay.MultiplayAttributes
+import dev.getelements.conductor.multiplay.MultiplayExecutionDetails
 import dev.getelements.conductor.multiplay.MultiplayJobProfile
 import dev.getelements.conductor.multiplay.model.MultiplayAllocationRequest
 import dev.getelements.conductor.multiplay.model.MultiplayAllocationResponse
 import dev.getelements.conductor.multiplay.model.MultiplayAllocationStatus
+import dev.getelements.conductor.multiplay.model.MultiplayAllocationPage
 import dev.getelements.conductor.multiplay.model.MultiplayBuildConfiguration
 import dev.getelements.conductor.multiplay.model.MultiplayBuildConfigurationPage
 import dev.getelements.conductor.multiplay.model.MultiplayFleet
@@ -190,7 +192,47 @@ class MultiplayOrchestrationService @Inject constructor(
             .header(AUTH_HEADER, authBearer())
             .post(Entity.json(allocationRequest), MultiplayAllocationResponse::class.java)
 
-        return JobExecution(id = response.allocationId, status = JobStatus.PENDING)
+        return JobExecution(
+            id = response.allocationId,
+            status = JobStatus.PENDING,
+            details = MultiplayExecutionDetails(
+                fleetId = profile.fleetId,
+                buildConfigurationId = profile.buildConfigurationId,
+                regionId = regionId
+            )
+        )
+    }
+
+    override fun listExecutions(): List<JobExecution> {
+        val executions = mutableListOf<JobExecution>()
+        for (fleet in listAllFleets()) {
+            var offset = 0
+            var total: Int
+            do {
+                val page = allocationTarget("/v1/allocations/projects/{project}/environments/{env}/fleets/{fleet}/allocations")
+                    .resolveTemplate("project", projectId)
+                    .resolveTemplate("env", environmentId)
+                    .resolveTemplate("fleet", fleet.fleetId)
+                    .queryParam("limit", PAGE_SIZE)
+                    .queryParam("offset", offset)
+                    .request(MediaType.APPLICATION_JSON)
+                    .header(AUTH_HEADER, authBearer())
+                    .get(MultiplayAllocationPage::class.java)
+                page.results
+                    .filter { it.status in ACTIVE_STATUSES }
+                    .mapTo(executions) { allocation ->
+                        JobExecution(
+                            id = allocation.allocationId,
+                            status = mapStatus(allocation.status),
+                            endpoints = mapEndpoints(allocation),
+                            details = MultiplayExecutionDetails(fleetId = fleet.fleetId)
+                        )
+                    }
+                total = page.total
+                offset += page.results.size
+            } while (offset < total)
+        }
+        return executions
     }
 
     override fun stop(execution: JobExecution) {
@@ -251,6 +293,8 @@ class MultiplayOrchestrationService @Inject constructor(
         private const val PAGE_SIZE = 100
         private const val TOKEN_TTL_MS = 55 * 60 * 1000L // 55 minutes; tokens expire after 1 hour
         private const val POLL_INTERVAL_MS = 5_000L
+
+        private val ACTIVE_STATUSES = setOf("PENDING", "ALLOCATED")
     }
 
 }

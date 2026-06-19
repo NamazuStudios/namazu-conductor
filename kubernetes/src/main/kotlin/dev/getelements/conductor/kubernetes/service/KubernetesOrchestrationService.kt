@@ -10,6 +10,7 @@ import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
+import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
 import dev.getelements.conductor.kubernetes.KubernetesJobProfile
 import dev.getelements.conductor.kubernetes.WorkloadKind
 import dev.getelements.conductor.service.JobProfile
@@ -178,7 +179,50 @@ class KubernetesOrchestrationService @Inject constructor(
 
         createServiceIfRequested(profile, runName, ownerRef)
 
-        return JobExecution(id = encodeId(profile.namespace, profile.workloadKind, runName), status = JobStatus.PENDING)
+        return JobExecution(
+            id = encodeId(profile.namespace, profile.workloadKind, runName),
+            status = JobStatus.PENDING,
+            details = KubernetesExecutionDetails(
+                namespace = profile.namespace,
+                workloadKind = profile.workloadKind.name.lowercase(),
+                name = runName
+            )
+        )
+    }
+
+    override fun listExecutions(): List<JobExecution> {
+        val executions = mutableListOf<JobExecution>()
+
+        // Standalone pods (those not owned by a batch Job)
+        client.pods().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
+            .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
+            .forEach { pod ->
+                val name = pod.metadata?.name ?: return@forEach
+                val id = encodeId(namespace, WorkloadKind.POD, name)
+                val status = mapPodPhase(pod.status?.phase)
+                executions += JobExecution(
+                    id = id,
+                    status = status,
+                    endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
+                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = name)
+                )
+            }
+
+        // Batch Jobs
+        client.batch().v1().jobs().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
+            .forEach { job ->
+                val name = job.metadata?.name ?: return@forEach
+                val id = encodeId(namespace, WorkloadKind.JOB, name)
+                val status = mapJobStatus(namespace, name, job)
+                executions += JobExecution(
+                    id = id,
+                    status = status,
+                    endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
+                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name)
+                )
+            }
+
+        return executions
     }
 
     /**

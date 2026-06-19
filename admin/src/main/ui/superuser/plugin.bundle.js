@@ -30,7 +30,7 @@
     );
   }
 
-  // ── Execution result ──────────────────────────────────────────────────────────
+  // ── Execution result (post-launch) ────────────────────────────────────────────
 
   function ExecutionResult(props) {
     var ex = props.execution;
@@ -51,6 +51,28 @@
               ep.host + ':' + ep.port + '/' + ep.protocol);
           })
         )
+    );
+  }
+
+  // ── Generic detail grid ───────────────────────────────────────────────────────
+
+  function DetailGrid(props) {
+    var obj = props.obj;
+    if (!obj || typeof obj !== 'object') return null;
+    var keys = Object.keys(obj).filter(function (k) { return obj[k] != null; });
+    if (keys.length === 0) return null;
+    return React.createElement('div', {
+      className: 'grid gap-x-6 gap-y-1 text-xs font-mono mt-2',
+      style: { gridTemplateColumns: 'auto 1fr' }
+    },
+      keys.map(function (k) {
+        var val = obj[k];
+        var display = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        return [
+          React.createElement('span', { key: k + '_k', className: 'text-muted-foreground whitespace-nowrap' }, k),
+          React.createElement('span', { key: k + '_v', className: 'break-all' }, display)
+        ];
+      }).flat()
     );
   }
 
@@ -349,6 +371,114 @@
     );
   }
 
+  // ── Running job row ───────────────────────────────────────────────────────────
+
+  function RunningJobRow(props) {
+    var ex = props.execution;
+    var element = props.element;
+    var expandedState = React.useState(false);
+    var isExpanded = expandedState[0], setExpanded = expandedState[1];
+    var stoppingState = React.useState(false);
+    var isStopping = stoppingState[0], setStopping = stoppingState[1];
+
+    var statusColor = ex.status === 'RUNNING'   ? 'text-green-700 bg-green-50'
+                    : ex.status === 'PENDING'   ? 'text-yellow-700 bg-yellow-50'
+                    : ex.status === 'FAILED'    ? 'text-destructive bg-destructive/10'
+                    : 'text-muted-foreground bg-muted';
+
+    function handleStop() {
+      setStopping(true);
+      fetch('/conductor/admin/jobs/stop', {
+        method: 'POST', credentials: 'include',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ element: element, id: ex.id })
+      }).finally(function () {
+        setStopping(false);
+        props.onRefresh();
+      });
+    }
+
+    return React.createElement('div', { className: 'rounded-lg border bg-card' },
+      React.createElement('div', { className: 'flex items-center gap-3 px-4 py-2.5 flex-wrap' },
+        React.createElement('button', {
+          className: 'text-xs opacity-50 shrink-0',
+          onClick: function () { setExpanded(function (v) { return !v; }); }
+        }, isExpanded ? '▼' : '▶'),
+        React.createElement('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
+        React.createElement('span', {
+          className: 'text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ' + statusColor
+        }, ex.status),
+        ex.endpoints && ex.endpoints.length > 0 &&
+          React.createElement('span', { className: 'font-mono text-xs text-muted-foreground shrink-0' },
+            ex.endpoints.map(function (ep) { return ep.host + ':' + ep.port + '/' + ep.protocol; }).join(', ')
+          ),
+        React.createElement('button', {
+          disabled: isStopping,
+          onClick: handleStop,
+          className: 'shrink-0 px-2.5 py-1 rounded border text-xs text-destructive border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors'
+        }, isStopping ? 'Stopping…' : 'Stop')
+      ),
+      isExpanded && ex.details &&
+        React.createElement('div', { className: 'border-t px-4 py-3' },
+          React.createElement(DetailGrid, { obj: ex.details })
+        )
+    );
+  }
+
+  // ── Running jobs section ──────────────────────────────────────────────────────
+
+  function RunningJobsSection(props) {
+    var stateHolder = React.useState({ loading: true, providers: [], error: null });
+    var data = stateHolder[0], setData = stateHolder[1];
+
+    function load() {
+      fetch('/conductor/admin/jobs', { credentials: 'include', headers: authHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (body) { setData({ loading: false, providers: body.providers || [], error: null }); })
+        .catch(function (e) { setData({ loading: false, providers: [], error: e.message }); });
+    }
+
+    React.useEffect(function () {
+      load();
+      var interval = setInterval(load, 10000);
+      return function () { clearInterval(interval); };
+    }, []);
+
+    var allExecutions = data.providers.reduce(function (acc, p) {
+      if (!p.executions) return acc;
+      return acc.concat(p.executions.map(function (ex) { return { element: p.element, execution: ex }; }));
+    }, []);
+
+    return React.createElement('div', { className: 'space-y-3' },
+      React.createElement('div', { className: 'flex items-center justify-between' },
+        React.createElement('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
+        React.createElement('div', { className: 'flex items-center gap-3' },
+          data.loading && React.createElement('span', { className: 'text-xs text-muted-foreground animate-pulse' }, 'Refreshing…'),
+          React.createElement('button', {
+            onClick: load,
+            className: 'text-xs text-primary hover:underline'
+          }, '↺ Refresh')
+        )
+      ),
+      data.error && React.createElement('p', { className: 'text-xs text-destructive' }, data.error),
+      !data.loading && allExecutions.length === 0 &&
+        React.createElement('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
+      allExecutions.length > 0 &&
+        React.createElement('div', { className: 'space-y-2' },
+          allExecutions.map(function (item, i) {
+            return React.createElement('div', { key: item.element + ':' + item.execution.id },
+              React.createElement('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.element),
+              React.createElement(RunningJobRow, {
+                execution: item.execution,
+                element: item.element,
+                onRefresh: load
+              })
+            );
+          })
+        )
+    );
+  }
+
   // ── Root ──────────────────────────────────────────────────────────────────────
 
   function ConductorAdmin() {
@@ -370,21 +500,28 @@
       })();
     }, []);
 
-    return React.createElement('div', { className: 'p-6 max-w-3xl space-y-6' },
-      React.createElement('div', { className: 'flex items-center justify-between' },
-        React.createElement('h1', { className: 'text-2xl font-bold' }, 'Namazu Conductor Jobs'),
-        React.createElement(StatusIndicator, { loading: data.loading, status: data.status, error: data.error })
+    return React.createElement('div', { className: 'p-6 max-w-3xl space-y-8' },
+
+      React.createElement('div', { className: 'space-y-6' },
+        React.createElement('div', { className: 'flex items-center justify-between' },
+          React.createElement('h1', { className: 'text-2xl font-bold' }, 'Namazu Conductor Jobs'),
+          React.createElement(StatusIndicator, { loading: data.loading, status: data.status, error: data.error })
+        ),
+        !data.loading && data.status === 'error' && data.providers.length === 0 &&
+          React.createElement('div', {
+            className: 'rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive'
+          }, data.error || 'Failed to load profiles.'),
+        !data.loading && data.providers.length > 0 &&
+          React.createElement('div', { className: 'space-y-6' },
+            data.providers.map(function (p) {
+              return React.createElement(ProviderSection, { key: p.element, provider: p });
+            })
+          )
       ),
-      !data.loading && data.status === 'error' && data.providers.length === 0 &&
-        React.createElement('div', {
-          className: 'rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive'
-        }, data.error || 'Failed to load profiles.'),
-      !data.loading && data.providers.length > 0 &&
-        React.createElement('div', { className: 'space-y-6' },
-          data.providers.map(function (p) {
-            return React.createElement(ProviderSection, { key: p.element, provider: p });
-          })
-        )
+
+      React.createElement('hr', { className: 'border-border' }),
+
+      React.createElement(RunningJobsSection, null)
     );
   }
 

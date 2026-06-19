@@ -15,7 +15,9 @@ import dev.getelements.conductor.edgegap.model.EdgeGapAppVersionList
 import dev.getelements.conductor.edgegap.model.EdgeGapAppsResponse
 import dev.getelements.conductor.edgegap.model.EdgeGapDeployRequest
 import dev.getelements.conductor.edgegap.model.EdgeGapDeployResponse
+import dev.getelements.conductor.edgegap.model.EdgeGapDeploymentListResponse
 import dev.getelements.conductor.edgegap.model.EdgeGapEnvVar
+import dev.getelements.conductor.edgegap.model.EdgeGapExecutionDetails
 import dev.getelements.conductor.edgegap.model.EdgeGapGeoIp
 import dev.getelements.conductor.edgegap.model.EdgeGapStatusResponse
 import dev.getelements.conductor.exception.JobException
@@ -159,7 +161,39 @@ class EdgeGapOrchestrationService @Inject constructor(
             .header(AUTH_HEADER, authValue())
             .post(Entity.json(deployRequest), EdgeGapDeployResponse::class.java)
 
-        return JobExecution(id = response.requestId, status = JobStatus.PENDING)
+        return JobExecution(
+            id = response.requestId,
+            status = JobStatus.PENDING,
+            details = EdgeGapExecutionDetails(appName = profile.appName, versionName = profile.versionName)
+        )
+    }
+
+    override fun listExecutions(): List<JobExecution> {
+        val executions = mutableListOf<JobExecution>()
+        var page = 1
+        do {
+            val response = target("/v1/deployments")
+                .queryParam("page", page)
+                .queryParam("limit", PAGE_SIZE)
+                .request(MediaType.APPLICATION_JSON)
+                .header(AUTH_HEADER, authValue())
+                .get(EdgeGapDeploymentListResponse::class.java)
+            for (deployment in response.data) {
+                executions += JobExecution(
+                    id = deployment.requestId,
+                    status = mapStatus(deployment.status),
+                    endpoints = mapEndpoints(deployment.fqdn, deployment.publicIp, deployment.ports),
+                    details = EdgeGapExecutionDetails(
+                        appName = deployment.appName,
+                        versionName = deployment.versionName,
+                        fqdn = deployment.fqdn,
+                        publicIp = deployment.publicIp
+                    )
+                )
+            }
+            page++
+        } while (response.pagination.hasNext)
+        return executions
     }
 
     override fun stop(execution: JobExecution) {
@@ -184,9 +218,16 @@ class EdgeGapOrchestrationService @Inject constructor(
         else -> JobStatus.FAILED
     }
 
-    private fun mapEndpoints(response: EdgeGapStatusResponse): List<JobEndpoint> {
-        val host = response.fqdn ?: response.publicIp ?: return emptyList()
-        return response.ports.values.map { port ->
+    private fun mapEndpoints(response: EdgeGapStatusResponse): List<JobEndpoint> =
+        mapEndpoints(response.fqdn, response.publicIp, response.ports)
+
+    private fun mapEndpoints(
+        fqdn: String?,
+        publicIp: String?,
+        ports: Map<String, dev.getelements.conductor.edgegap.model.EdgeGapPort>
+    ): List<JobEndpoint> {
+        val host = fqdn ?: publicIp ?: return emptyList()
+        return ports.values.map { port ->
             JobEndpoint(host = host, port = port.external, protocol = port.protocol)
         }
     }

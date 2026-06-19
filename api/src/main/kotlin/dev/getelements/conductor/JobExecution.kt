@@ -21,6 +21,12 @@ data class JobExecution(
      * The network endpoints exposed by the running job, populated once the job reaches
      * [JobStatus.RUNNING]. Empty while the job is [JobStatus.PENDING].
      */
-    val endpoints : List<JobEndpoint> = emptyList()
+    val endpoints : List<JobEndpoint> = emptyList(),
+
+    /**
+     * Provider-specific detail object. The shape is determined by the [dev.getelements.conductor.service.OrchestrationService]
+     * implementation and is opaque to this module. Serialised as-is by the REST layer.
+     */
+    val details : Any? = null
 
 )

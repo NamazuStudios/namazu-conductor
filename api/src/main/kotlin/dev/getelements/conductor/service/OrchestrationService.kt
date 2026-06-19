@@ -41,6 +41,15 @@ interface OrchestrationService {
     fun getFutureForStatus(execution: JobExecution, status: JobStatus) : Future<JobExecution>;
 
     /**
+     * Lists all executions currently visible to this provider (pending, running, and recently
+     * completed workloads, depending on what the underlying platform surfaces). The returned
+     * list is a point-in-time snapshot.
+     *
+     * @return a list of [JobExecution]s known to this provider
+     */
+    fun listExecutions(): List<JobExecution>
+
+    /**
      * Stops the running job identified by [execution].
      */
     fun stop(execution: JobExecution)

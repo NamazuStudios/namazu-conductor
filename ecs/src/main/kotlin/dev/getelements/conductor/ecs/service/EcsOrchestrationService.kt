@@ -8,6 +8,7 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.ecs.EcsAttributes
+import dev.getelements.conductor.ecs.EcsExecutionDetails
 import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.service.JobProfile
@@ -17,6 +18,7 @@ import software.amazon.awssdk.services.ecs.EcsClient
 import software.amazon.awssdk.services.ecs.model.AssignPublicIp
 import software.amazon.awssdk.services.ecs.model.AwsVpcConfiguration
 import software.amazon.awssdk.services.ecs.model.ContainerOverride
+import software.amazon.awssdk.services.ecs.model.DesiredStatus
 import software.amazon.awssdk.services.ecs.model.KeyValuePair
 import software.amazon.awssdk.services.ecs.model.LaunchType
 import software.amazon.awssdk.services.ecs.model.NetworkConfiguration
@@ -176,7 +178,53 @@ class EcsOrchestrationService @Inject constructor(
         val task = taskResponse.tasks().firstOrNull()
             ?: throw JobException("ECS returned no task for family '${profile.family}' on cluster '$cluster'")
 
-        return JobExecution(id = task.taskArn(), status = JobStatus.PENDING)
+        return JobExecution(
+            id = task.taskArn(),
+            status = JobStatus.PENDING,
+            details = EcsExecutionDetails(
+                cluster = cluster,
+                taskDefinitionArn = task.taskDefinitionArn() ?: profile.family,
+                launchType = profile.launchType.name,
+                lastStatus = task.lastStatus()
+            )
+        )
+    }
+
+    override fun listExecutions(): List<JobExecution> {
+        val families = getAvailableProfiles().mapTo(mutableSetOf()) { (it as EcsJobProfile).family }
+        val executions = mutableListOf<JobExecution>()
+        for (family in families) {
+            var nextToken: String? = null
+            do {
+                val listResponse = ecsClient.listTasks {
+                    it.cluster(cluster)
+                    it.family(family)
+                    it.desiredStatus(DesiredStatus.RUNNING)
+                    if (nextToken != null) it.nextToken(nextToken)
+                }
+                val arns = listResponse.taskArns()
+                if (arns.isNotEmpty()) {
+                    ecsClient.describeTasks {
+                        it.cluster(cluster)
+                        it.tasks(arns)
+                    }.tasks().forEach { task ->
+                        executions += JobExecution(
+                            id = task.taskArn(),
+                            status = mapStatus(task),
+                            endpoints = mapEndpoints(task),
+                            details = EcsExecutionDetails(
+                                cluster = cluster,
+                                taskDefinitionArn = task.taskDefinitionArn() ?: "",
+                                launchType = task.launchTypeAsString(),
+                                lastStatus = task.lastStatus()
+                            )
+                        )
+                    }
+                }
+                nextToken = listResponse.nextToken()
+            } while (nextToken != null)
+        }
+        return executions
     }
 
     override fun stop(execution: JobExecution) {
