@@ -19,7 +19,17 @@ data class KubernetesJobProfile(
     val primaryContainer: String,
     val workloadKind: WorkloadKind,
     val exposePorts: String,
-    val serviceType: String
+    val serviceType: String,
+    /** `namazu.conductor/ttl-seconds-after-finished` → `spec.ttlSecondsAfterFinished` */
+    val ttlSecondsAfterFinished: Int? = null,
+    /** `namazu.conductor/backoff-limit` → `spec.backoffLimit` */
+    val backoffLimit: Int? = null,
+    /** `namazu.conductor/active-deadline-seconds` → `spec.activeDeadlineSeconds` */
+    val activeDeadlineSeconds: Long? = null,
+    /** `namazu.conductor/completions` → `spec.completions` */
+    val completions: Int? = null,
+    /** `namazu.conductor/parallelism` → `spec.parallelism` */
+    val parallelism: Int? = null
 ) : JobProfile {
 
     override val id: String

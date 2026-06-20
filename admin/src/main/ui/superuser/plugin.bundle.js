@@ -380,6 +380,8 @@
     var isExpanded = expandedState[0], setExpanded = expandedState[1];
     var stoppingState = React.useState(false);
     var isStopping = stoppingState[0], setStopping = stoppingState[1];
+    var stopErrorState = React.useState(null);
+    var stopError = stopErrorState[0], setStopError = stopErrorState[1];
 
     var statusColor = ex.status === 'RUNNING'   ? 'text-green-700 bg-green-50'
                     : ex.status === 'PENDING'   ? 'text-yellow-700 bg-yellow-50'
@@ -388,13 +390,24 @@
 
     function handleStop() {
       setStopping(true);
+      setStopError(null);
       fetch('/conductor/admin/jobs/stop', {
         method: 'POST', credentials: 'include',
         headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
         body: JSON.stringify({ element: element, id: ex.id })
+      }).then(function (res) {
+        if (!res.ok) {
+          return res.json().then(function (body) {
+            setStopError(body.error || ('Stop failed: ' + res.status));
+          }).catch(function () {
+            setStopError('Stop failed: ' + res.status);
+          });
+        }
+        props.onRefresh();
+      }).catch(function (e) {
+        setStopError(e.message || 'Network error');
       }).finally(function () {
         setStopping(false);
-        props.onRefresh();
       });
     }
 
@@ -418,6 +431,8 @@
           className: 'shrink-0 px-2.5 py-1 rounded border text-xs text-destructive border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors'
         }, isStopping ? 'Stopping…' : 'Stop')
       ),
+      stopError &&
+        React.createElement('div', { className: 'border-t px-4 py-2 text-xs text-destructive font-mono' }, stopError),
       isExpanded && ex.details &&
         React.createElement('div', { className: 'border-t px-4 py-3' },
           React.createElement(DetailGrid, { obj: ex.details })
@@ -452,12 +467,15 @@
     return React.createElement('div', { className: 'space-y-3' },
       React.createElement('div', { className: 'flex items-center justify-between' },
         React.createElement('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
-        React.createElement('div', { className: 'flex items-center gap-3' },
-          data.loading && React.createElement('span', { className: 'text-xs text-muted-foreground animate-pulse' }, 'Refreshing…'),
-          React.createElement('button', {
-            onClick: load,
-            className: 'text-xs text-primary hover:underline'
-          }, '↺ Refresh')
+        React.createElement('button', {
+          onClick: load,
+          disabled: data.loading,
+          className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50'
+        },
+          data.loading
+            ? React.createElement('span', { className: 'w-3 h-3 rounded-full bg-gray-400 animate-pulse inline-block' })
+            : '↺',
+          data.loading ? ' Refreshing…' : ' Refresh'
         )
       ),
       data.error && React.createElement('p', { className: 'text-xs text-destructive' }, data.error),

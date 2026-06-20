@@ -72,6 +72,17 @@ labels and annotations on the `PodTemplate`:
 - **Annotation** `namazu.conductor/expose-ports` — e.g. `"7777/udp,8080/tcp"`. Present → a `Service`
   is created selecting the workload; absent → no `Service`, endpoints fall back to the pod IP.
 - **Annotation** `namazu.conductor/service-type` — `NodePort` (default), `LoadBalancer`, or `ClusterIP`.
+The following annotations apply to `job` workloads only (`namazu.conductor/workload-kind: job`).
+All are optional integer strings; absent → field omitted (Kubernetes default applies); invalid
+(non-numeric or negative) → warning logged, field omitted.
+
+| Annotation | Job field | K8s default |
+|---|---|---|
+| `namazu.conductor/ttl-seconds-after-finished` | `spec.ttlSecondsAfterFinished` | none |
+| `namazu.conductor/backoff-limit` | `spec.backoffLimit` | 6 |
+| `namazu.conductor/active-deadline-seconds` | `spec.activeDeadlineSeconds` | none |
+| `namazu.conductor/completions` | `spec.completions` | 1 |
+| `namazu.conductor/parallelism` | `spec.parallelism` | 1 |
 
 Created Services carry a `namazu.conductor/owned-by=<workload-name>` label so `stop()` can delete them
 without persisting state. Only `RegionPlacement` is honoured (→ `topology.kubernetes.io/zone` node

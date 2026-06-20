@@ -30,6 +30,7 @@ import io.fabric8.kubernetes.api.model.ServicePortBuilder
 import io.fabric8.kubernetes.api.model.batch.v1.Job
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
+import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
@@ -60,6 +61,8 @@ class KubernetesOrchestrationService @Inject constructor(
     private val executor: ExecutorService
 ) : OrchestrationService {
 
+    private val logger = LoggerFactory.getLogger(KubernetesOrchestrationService::class.java)
+
     private val pollIntervalMs: Long = pollInterval.toLongOrNull() ?: DEFAULT_POLL_INTERVAL_MS
 
     /**
@@ -82,13 +85,20 @@ class KubernetesOrchestrationService @Inject constructor(
             ?.let { runCatching { WorkloadKind.valueOf(it.trim().uppercase()) }.getOrNull() }
             ?: WorkloadKind.POD
 
+        val templateName = template.metadata?.name ?: return null
+
         return KubernetesJobProfile(
             namespace = template.metadata?.namespace ?: namespace,
-            name = template.metadata?.name ?: return null,
+            name = templateName,
             primaryContainer = container.name,
             workloadKind = kind,
             exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
-            serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE
+            serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
+            ttlSecondsAfterFinished = parseIntAnnotation(templateName, annotations, ANN_TTL_SECONDS_AFTER_FINISHED),
+            backoffLimit = parseIntAnnotation(templateName, annotations, ANN_BACKOFF_LIMIT),
+            activeDeadlineSeconds = parseLongAnnotation(templateName, annotations, ANN_ACTIVE_DEADLINE_SECONDS),
+            completions = parseIntAnnotation(templateName, annotations, ANN_COMPLETIONS),
+            parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM)
         )
     }
 
@@ -160,6 +170,13 @@ class KubernetesOrchestrationService @Inject constructor(
                             .build()
                     )
                     .withNewSpec()
+                    .apply {
+                        if (profile.ttlSecondsAfterFinished != null) withTtlSecondsAfterFinished(profile.ttlSecondsAfterFinished)
+                        if (profile.backoffLimit != null)            withBackoffLimit(profile.backoffLimit)
+                        if (profile.activeDeadlineSeconds != null)   withActiveDeadlineSeconds(profile.activeDeadlineSeconds)
+                        if (profile.completions != null)             withCompletions(profile.completions)
+                        if (profile.parallelism != null)             withParallelism(profile.parallelism)
+                    }
                     .withTemplate(
                         PodTemplateSpecBuilder().withMetadata(podMeta).withSpec(spec).build()
                     )
@@ -193,9 +210,13 @@ class KubernetesOrchestrationService @Inject constructor(
     override fun listExecutions(): List<JobExecution> {
         val executions = mutableListOf<JobExecution>()
 
-        // Standalone pods (those not owned by a batch Job)
+        // Standalone pods: not owned by a batch Job, and not already terminating.
+        // Terminating pods (deletionTimestamp set) are excluded so that the list reflects
+        // the intended state immediately after stop() is called rather than waiting for the
+        // full graceful-termination period (default 30 s) to elapse.
         client.pods().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
             .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
+            .filter { pod -> pod.metadata?.deletionTimestamp == null }
             .forEach { pod ->
                 val name = pod.metadata?.name ?: return@forEach
                 val id = encodeId(namespace, WorkloadKind.POD, name)
@@ -248,16 +269,28 @@ class KubernetesOrchestrationService @Inject constructor(
 
     /**
      * Deletes the workload identified by [execution] and any Service the provider created for it.
+     *
+     * @throws dev.getelements.conductor.exception.JobException if the workload is not found
+     *   (Fabric8 returns an empty result list rather than throwing on 404).
      */
     override fun stop(execution: JobExecution) {
         val (ns, kind, name) = decodeId(execution.id)
 
-        when (kind) {
+        val deleted = when (kind) {
             WorkloadKind.POD -> client.pods().inNamespace(ns).withName(name).delete()
             WorkloadKind.JOB -> client.batch().v1().jobs().inNamespace(ns).withName(name)
                 .withPropagationPolicy(io.fabric8.kubernetes.api.model.DeletionPropagation.BACKGROUND)
                 .delete()
         }
+
+        if (deleted.isEmpty()) {
+            logger.warn("stop(): {} '{}' not found in namespace '{}' — nothing deleted", kind, name, ns)
+            throw dev.getelements.conductor.exception.JobException(
+                "Kubernetes ${kind.name.lowercase()} '$name' not found in namespace '$ns'"
+            )
+        }
+
+        logger.debug("stop(): deleted {} '{}' in namespace '{}'", kind, name, ns)
 
         // Delete any owned Service. No-op when none was created.
         client.services().inNamespace(ns).withName(name).delete()
@@ -395,6 +428,20 @@ class KubernetesOrchestrationService @Inject constructor(
         spec.nodeSelector = selector
     }
 
+    private fun parseIntAnnotation(templateName: String, annotations: Map<String, String>, key: String): Int? {
+        val raw = annotations[key] ?: return null
+        val parsed = raw.trim().toIntOrNull()
+        return if (parsed != null && parsed >= 0) parsed
+        else { logger.warn("PodTemplate '{}' has invalid {}: '{}' — omitting field", templateName, key, raw); null }
+    }
+
+    private fun parseLongAnnotation(templateName: String, annotations: Map<String, String>, key: String): Long? {
+        val raw = annotations[key] ?: return null
+        val parsed = raw.trim().toLongOrNull()
+        return if (parsed != null && parsed >= 0) parsed
+        else { logger.warn("PodTemplate '{}' has invalid {}: '{}' — omitting field", templateName, key, raw); null }
+    }
+
     private fun parseExposePorts(raw: String): List<Pair<Int, String>> =
         raw.split(",")
             .map { it.trim() }
@@ -439,6 +486,16 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_EXPOSE_PORTS = "namazu.conductor/expose-ports"
 
         const val ANN_SERVICE_TYPE = "namazu.conductor/service-type"
+
+        const val ANN_TTL_SECONDS_AFTER_FINISHED = "namazu.conductor/ttl-seconds-after-finished"
+
+        const val ANN_BACKOFF_LIMIT = "namazu.conductor/backoff-limit"
+
+        const val ANN_ACTIVE_DEADLINE_SECONDS = "namazu.conductor/active-deadline-seconds"
+
+        const val ANN_COMPLETIONS = "namazu.conductor/completions"
+
+        const val ANN_PARALLELISM = "namazu.conductor/parallelism"
 
         const val ZONE_LABEL = "topology.kubernetes.io/zone"
 
