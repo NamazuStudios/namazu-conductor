@@ -108,24 +108,24 @@
   <div class="breadcrumbs"><a href="../../../index.html">conductor</a><span class="delimiter">/</span><a href="../index.html">dev.getelements.conductor.kubernetes</a><span class="delimiter">/</span><span class="current">KubernetesJobProfile</span></div>
   <div class="cover ">
     <h1 class="cover"><span>Kubernetes</span><wbr></wbr><span>Job</span><wbr></wbr><span><span>Profile</span></span></h1>
-    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">data </span><span class="token keyword">class </span><a href="index.html">KubernetesJobProfile</a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span class="token keyword">val </span>namespace<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>name<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>primaryContainer<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>workloadKind<span class="token operator">: </span><a href="../-workload-kind/index.html">WorkloadKind</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>exposePorts<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>serviceType<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span> : <a href="../../dev.getelements.conductor.service/-job-profile/index.html">JobProfile</a></div><p class="paragraph"><a href="../../dev.getelements.conductor.service/-job-profile/index.html">JobProfile</a> implementation for Kubernetes. Represents a single <code class="lang-kotlin">PodTemplate</code> resource discovered in the configured namespace.</p><p class="paragraph">The <a href="id.html">id</a> is <code class="lang-kotlin">&quot;$namespace:$name&quot;</code>. <a href="primary-container.html">primaryContainer</a> is the name of the first container in the template's pod spec and is the target of command, argument, and environment overrides at execution time. <a href="workload-kind.html">workloadKind</a> is derived from the <code class="lang-kotlin">namazu.conductor/workload-kind</code> annotation (defaulting to <a href="../-workload-kind/-p-o-d/index.html">WorkloadKind.POD</a>); <a href="expose-ports.html">exposePorts</a> holds the raw <code class="lang-kotlin">namazu.conductor/expose-ports</code> annotation value (empty when absent, in which case no Service is created); <a href="service-type.html">serviceType</a> holds the <code class="lang-kotlin">namazu.conductor/service-type</code> annotation value (defaulting to <code class="lang-kotlin">&quot;NodePort&quot;</code>).</p></div></div>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">data </span><span class="token keyword">class </span><a href="index.html">KubernetesJobProfile</a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span class="token keyword">val </span>namespace<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>name<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>primaryContainer<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>workloadKind<span class="token operator">: </span><a href="../-workload-kind/index.html">WorkloadKind</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>exposePorts<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>serviceType<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>ttlSecondsAfterFinished<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>backoffLimit<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>activeDeadlineSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>completions<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>parallelism<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span> : <a href="../../dev.getelements.conductor.service/-job-profile/index.html">JobProfile</a></div><p class="paragraph"><a href="../../dev.getelements.conductor.service/-job-profile/index.html">JobProfile</a> implementation for Kubernetes. Represents a single <code class="lang-kotlin">PodTemplate</code> resource discovered in the configured namespace.</p><p class="paragraph">The <a href="id.html">id</a> is <code class="lang-kotlin">&quot;$namespace:$name&quot;</code>. <a href="primary-container.html">primaryContainer</a> is the name of the first container in the template's pod spec and is the target of command, argument, and environment overrides at execution time. <a href="workload-kind.html">workloadKind</a> is derived from the <code class="lang-kotlin">namazu.conductor/workload-kind</code> annotation (defaulting to <a href="../-workload-kind/-p-o-d/index.html">WorkloadKind.POD</a>); <a href="expose-ports.html">exposePorts</a> holds the raw <code class="lang-kotlin">namazu.conductor/expose-ports</code> annotation value (empty when absent, in which case no Service is created); <a href="service-type.html">serviceType</a> holds the <code class="lang-kotlin">namazu.conductor/service-type</code> annotation value (defaulting to <code class="lang-kotlin">&quot;NodePort&quot;</code>).</p></div></div>
   </div>
   <div class="tabbedcontent">
     <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
     <div class="tabs-section-body">
       <div data-togglable="CONSTRUCTOR">
         <h2 class="">Constructors</h2>
-        <div class="table"><a data-name="-818195533%2FConstructors%2F-1329614601" anchor-label="KubernetesJobProfile" id="-818195533%2FConstructors%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+        <div class="table"><a data-name="1641349238%2FConstructors%2F-1329614601" anchor-label="KubernetesJobProfile" id="1641349238%2FConstructors%2F-1329614601" data-filterable-set="conductor/JVM"></a>
           <div class="table-row" data-togglable="CONSTRUCTOR" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
             <div class="main-subrow keyValue ">
               <div class=""><span class="inline-flex">
                   <div><a href="-kubernetes-job-profile.html"><span>Kubernetes</span><wbr></wbr><span>Job</span><wbr></wbr><span><span>Profile</span></span></a></div>
-<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-818195533%2FConstructors%2F-1329614601"></span>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1641349238%2FConstructors%2F-1329614601"></span>
                     <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
                   </span></span></div>
               <div>
                 <div class="title">
-                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">namespace<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">name<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">primaryContainer<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">workloadKind<span class="token operator">: </span><a href="../-workload-kind/index.html">WorkloadKind</a><span class="token punctuation">, </span></span><span class="parameter ">exposePorts<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">serviceType<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span></div></div></div>
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">namespace<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">name<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">primaryContainer<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">workloadKind<span class="token operator">: </span><a href="../-workload-kind/index.html">WorkloadKind</a><span class="token punctuation">, </span></span><span class="parameter ">exposePorts<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">serviceType<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSecondsAfterFinished<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">backoffLimit<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">activeDeadlineSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">completions<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">parallelism<span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
                 </div>
               </div>
             </div>
@@ -134,7 +134,52 @@
       </div>
       <div data-togglable="PROPERTY">
         <h2 class="">Properties</h2>
-        <div class="table"><a data-name="-1540091228%2FProperties%2F-1329614601" anchor-label="exposePorts" id="-1540091228%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+        <div class="table"><a data-name="-1104047791%2FProperties%2F-1329614601" anchor-label="activeDeadlineSeconds" id="-1104047791%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+          <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="active-deadline-seconds.html"><span>active</span><wbr></wbr><span>Deadline</span><wbr></wbr><span><span>Seconds</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1104047791%2FProperties%2F-1329614601"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="active-deadline-seconds.html">activeDeadlineSeconds</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null</div><div class="brief "><p class="paragraph"><code class="lang-kotlin">namazu.conductor/active-deadline-seconds</code> → <code class="lang-kotlin">spec.activeDeadlineSeconds</code></p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1709346421%2FProperties%2F-1329614601" anchor-label="backoffLimit" id="1709346421%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+          <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="backoff-limit.html"><span>backoff</span><wbr></wbr><span><span>Limit</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1709346421%2FProperties%2F-1329614601"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="backoff-limit.html">backoffLimit</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</div><div class="brief "><p class="paragraph"><code class="lang-kotlin">namazu.conductor/backoff-limit</code> → <code class="lang-kotlin">spec.backoffLimit</code></p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="558686555%2FProperties%2F-1329614601" anchor-label="completions" id="558686555%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+          <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="completions.html"><span><span>completions</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="558686555%2FProperties%2F-1329614601"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="completions.html">completions</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</div><div class="brief "><p class="paragraph"><code class="lang-kotlin">namazu.conductor/completions</code> → <code class="lang-kotlin">spec.completions</code></p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1540091228%2FProperties%2F-1329614601" anchor-label="exposePorts" id="-1540091228%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
           <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
             <div class="main-subrow keyValue ">
               <div class=""><span class="inline-flex">
@@ -194,6 +239,21 @@
               </div>
             </div>
           </div>
+<a data-name="-1385603082%2FProperties%2F-1329614601" anchor-label="parallelism" id="-1385603082%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+          <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="parallelism.html"><span><span>parallelism</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1385603082%2FProperties%2F-1329614601"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="parallelism.html">parallelism</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</div><div class="brief "><p class="paragraph"><code class="lang-kotlin">namazu.conductor/parallelism</code> → <code class="lang-kotlin">spec.parallelism</code></p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
 <a data-name="980501321%2FProperties%2F-1329614601" anchor-label="primaryContainer" id="980501321%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
           <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
             <div class="main-subrow keyValue ">
@@ -220,6 +280,21 @@
               <div>
                 <div class="title">
                   <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="service-type.html">serviceType</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="564318263%2FProperties%2F-1329614601" anchor-label="ttlSecondsAfterFinished" id="564318263%2FProperties%2F-1329614601" data-filterable-set="conductor/JVM"></a>
+          <div class="table-row" data-filterable-current="conductor/JVM" data-filterable-set="conductor/JVM">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="ttl-seconds-after-finished.html"><span>ttl</span><wbr></wbr><span>Seconds</span><wbr></wbr><span>After</span><wbr></wbr><span><span>Finished</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="564318263%2FProperties%2F-1329614601"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable="conductor/JVM"><div class="symbol monospace"><span class="token keyword">val </span><a href="ttl-seconds-after-finished.html">ttlSecondsAfterFinished</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null</div><div class="brief "><p class="paragraph"><code class="lang-kotlin">namazu.conductor/ttl-seconds-after-finished</code> → <code class="lang-kotlin">spec.ttlSecondsAfterFinished</code></p></div></div></div>
                 </div>
               </div>
             </div>
