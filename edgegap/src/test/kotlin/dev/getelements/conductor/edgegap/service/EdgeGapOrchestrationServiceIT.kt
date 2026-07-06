@@ -115,10 +115,19 @@ class EdgeGapOrchestrationServiceIT {
         assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING")
 
         val endpoint = running.endpoints.first()
+        val target = client.target("http://${endpoint.host}:${endpoint.port}/test_context.json")
 
-        val response = client.target("http://${endpoint.host}:${endpoint.port}/test_context.json")
-            .request()
-            .get()
+        // EdgeGap's edge ingress can take a few seconds to start routing traffic after a
+        // deployment reaches RUNNING, so tolerate a brief propagation window here.
+        var response = target.request().get()
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30)
+
+        while (response.status != 200 && System.currentTimeMillis() < deadline) {
+            logger.debug("Endpoint not ready yet (HTTP {}), retrying...", response.status)
+            response.close()
+            Thread.sleep(2000)
+            response = target.request().get()
+        }
 
         assertEquals(response.status, 200, "Expected HTTP 200 from nginx")
 
