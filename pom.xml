@@ -185,8 +185,8 @@
 
   <modules>
     <module>api</module>
-    <module>ecs</module>
     <module>edgegap</module>
+    <module>ecs</module>
     <module>kubernetes</module>
     <module>multiplay</module>
     <module>admin</module>
