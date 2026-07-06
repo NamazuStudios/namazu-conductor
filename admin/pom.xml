@@ -8,11 +8,11 @@
     <parent>
         <groupId>dev.getelements.conductor</groupId>
         <artifactId>conductor</artifactId>
-        <version>1.0.9</version>
+        <version>1.0.10-SNAPSHOT</version>
     </parent>
 
     <artifactId>admin</artifactId>
-    <version>1.0.9</version>
+    <version>1.0.10-SNAPSHOT</version>
 
     <name>Namazu Conductor Admin UI</name>
 
