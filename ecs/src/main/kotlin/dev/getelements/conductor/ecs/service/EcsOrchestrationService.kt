@@ -3,6 +3,7 @@ package dev.getelements.conductor.ecs.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.ClusterScope
 import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
@@ -44,6 +45,13 @@ import java.util.concurrent.Future
  * All [dev.getelements.conductor.JobPlacement] hints are ignored — task placement is governed
  * entirely by the configured subnets and security groups (for `awsvpc` tasks) or the ECS
  * container instance (for EC2 tasks).
+ *
+ * A [ClusterScope] on the request overrides the cluster the task is launched into; the cluster is
+ * subsequently recovered from the task ARN (which encodes it) for `stop()` and status polling, so
+ * overridden tasks remain trackable without persisting any extra state. Other
+ * [dev.getelements.conductor.JobScope] types are silently ignored. Note that [listExecutions]
+ * only ever discovers tasks in the configured default cluster, since it has no task ARN to recover
+ * an overridden cluster from.
  *
  * Configuration is provided by the Elements SDK via the attribute keys declared in [EcsAttributes].
  */
@@ -163,8 +171,10 @@ class EcsOrchestrationService @Inject constructor(
             }
             .build()
 
+        val targetCluster = request.scope.filterIsInstance<ClusterScope>().firstOrNull()?.cluster ?: cluster
+
         val taskResponse = ecsClient.runTask {
-            it.cluster(cluster)
+            it.cluster(targetCluster)
             it.taskDefinition(profile.family)
             it.launchType(profile.launchType)
             if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig(profile.assignPublicIp))
@@ -176,13 +186,13 @@ class EcsOrchestrationService @Inject constructor(
         }
 
         val task = taskResponse.tasks().firstOrNull()
-            ?: throw JobException("ECS returned no task for family '${profile.family}' on cluster '$cluster'")
+            ?: throw JobException("ECS returned no task for family '${profile.family}' on cluster '$targetCluster'")
 
         return JobExecution(
             id = task.taskArn(),
             status = JobStatus.PENDING,
             details = EcsExecutionDetails(
-                cluster = cluster,
+                cluster = targetCluster,
                 taskDefinitionArn = task.taskDefinitionArn() ?: profile.family,
                 launchType = profile.launchType.name,
                 lastStatus = task.lastStatus()
@@ -229,7 +239,7 @@ class EcsOrchestrationService @Inject constructor(
 
     override fun stop(execution: JobExecution) {
         ecsClient.stopTask {
-            it.cluster(cluster)
+            it.cluster(clusterFromArn(execution.id))
             it.task(execution.id)
         }
     }
@@ -245,13 +255,23 @@ class EcsOrchestrationService @Inject constructor(
         .build()
 
     private fun fetchTask(taskArn: String): Task {
+        val taskCluster = clusterFromArn(taskArn)
         val response = ecsClient.describeTasks {
-            it.cluster(cluster)
+            it.cluster(taskCluster)
             it.tasks(taskArn)
         }
         return response.tasks().firstOrNull()
-            ?: throw JobException("No task found for ARN '$taskArn' on cluster '$cluster'")
+            ?: throw JobException("No task found for ARN '$taskArn' on cluster '$taskCluster'")
     }
+
+    /**
+     * Recovers the cluster name from a task ARN (`arn:aws:ecs:region:account:task/cluster/task-id`),
+     * falling back to the configured default [cluster] if the ARN doesn't carry one (e.g. the
+     * deprecated short ARN format). This lets tasks launched into a [ClusterScope]-overridden
+     * cluster remain trackable via [stop] and status polling without persisting any extra state.
+     */
+    private fun clusterFromArn(taskArn: String): String =
+        taskArn.substringAfter(":task/", "").substringBefore("/").ifEmpty { cluster }
 
     private fun mapStatus(task: Task): JobStatus = when (task.lastStatus()) {
         "RUNNING" -> JobStatus.RUNNING
@@ -319,7 +339,7 @@ class EcsOrchestrationService @Inject constructor(
         val containerInstanceArn = task.containerInstanceArn() ?: return null
 
         val ec2InstanceId = ecsClient.describeContainerInstances {
-            it.cluster(cluster)
+            it.cluster(clusterFromArn(task.taskArn()))
             it.containerInstances(containerInstanceArn)
         }.containerInstances().firstOrNull()?.ec2InstanceId() ?: return null
 

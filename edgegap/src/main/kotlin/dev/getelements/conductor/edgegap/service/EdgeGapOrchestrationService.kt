@@ -41,6 +41,10 @@ import java.util.concurrent.Future
  * - [LatitudeLongitudePlacement] — populates `geo_ip_list` for coordinate-based proximity matching
  * - [dev.getelements.conductor.RegionPlacement] — not supported by EdgeGap v1; silently ignored
  *
+ * EdgeGap has no equivalent to a namespace or cluster — scoping is already fully determined by the
+ * app/version identified by the [EdgeGapJobProfile], so any [dev.getelements.conductor.JobScope] on
+ * the request is silently ignored.
+ *
  * Configuration is provided by the Elements SDK via the attribute keys declared in
  * [EdgeGapAttributes].
  */

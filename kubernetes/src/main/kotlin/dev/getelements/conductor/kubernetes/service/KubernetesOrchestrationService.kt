@@ -7,6 +7,7 @@ import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.NamespaceScope
 import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
@@ -48,6 +49,10 @@ import java.util.concurrent.Future
  *
  * Only [RegionPlacement] is honoured (mapped to a `topology.kubernetes.io/zone` node selector); other
  * [dev.getelements.conductor.JobPlacement] types are silently ignored.
+ *
+ * A [NamespaceScope] on the request overrides the namespace the workload (and its `Service`, if
+ * any) is created in; the `PodTemplate` backing the profile is still resolved from its own
+ * namespace. Other [dev.getelements.conductor.JobScope] types are silently ignored.
  *
  * Configuration is provided by the Elements SDK via the attribute keys declared in
  * [KubernetesAttributes].
@@ -130,6 +135,9 @@ class KubernetesOrchestrationService @Inject constructor(
         applyOverrides(spec, profile, request)
         applyPlacement(spec, request)
 
+        val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
+            ?: profile.namespace
+
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
 
@@ -139,14 +147,14 @@ class KubernetesOrchestrationService @Inject constructor(
                     .withMetadata(
                         ObjectMetaBuilder()
                             .withName(runName)
-                            .withNamespace(profile.namespace)
+                            .withNamespace(namespace)
                             .addToLabels(templateLabels)
                             .addToLabels(LABEL_OWNED_BY, runName)
                             .build()
                     )
                     .withSpec(spec)
                     .build()
-                val created = client.pods().inNamespace(profile.namespace).resource(pod).create()
+                val created = client.pods().inNamespace(namespace).resource(pod).create()
                 OwnerReferenceBuilder()
                     .withApiVersion("v1")
                     .withKind("Pod")
@@ -165,7 +173,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     .withMetadata(
                         ObjectMetaBuilder()
                             .withName(runName)
-                            .withNamespace(profile.namespace)
+                            .withNamespace(namespace)
                             .addToLabels(LABEL_OWNED_BY, runName)
                             .build()
                     )
@@ -182,7 +190,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     )
                     .endSpec()
                     .build()
-                val created = client.batch().v1().jobs().inNamespace(profile.namespace).resource(job).create()
+                val created = client.batch().v1().jobs().inNamespace(namespace).resource(job).create()
                 OwnerReferenceBuilder()
                     .withApiVersion("batch/v1")
                     .withKind("Job")
@@ -194,13 +202,13 @@ class KubernetesOrchestrationService @Inject constructor(
             }
         }
 
-        createServiceIfRequested(profile, runName, ownerRef)
+        createServiceIfRequested(profile, namespace, runName, ownerRef)
 
         return JobExecution(
-            id = encodeId(profile.namespace, profile.workloadKind, runName),
+            id = encodeId(namespace, profile.workloadKind, runName),
             status = JobStatus.PENDING,
             details = KubernetesExecutionDetails(
-                namespace = profile.namespace,
+                namespace = namespace,
                 workloadKind = profile.workloadKind.name.lowercase(),
                 name = runName
             )
@@ -373,6 +381,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
     private fun createServiceIfRequested(
         profile: KubernetesJobProfile,
+        namespace: String,
         runName: String,
         ownerRef: io.fabric8.kubernetes.api.model.OwnerReference
     ) {
@@ -392,7 +401,7 @@ class KubernetesOrchestrationService @Inject constructor(
             .withMetadata(
                 ObjectMetaBuilder()
                     .withName(runName)
-                    .withNamespace(profile.namespace)
+                    .withNamespace(namespace)
                     .addToLabels(LABEL_OWNED_BY, runName)
                     .addToOwnerReferences(ownerRef)
                     .build()
@@ -404,7 +413,7 @@ class KubernetesOrchestrationService @Inject constructor(
             .endSpec()
             .build()
 
-        client.services().inNamespace(profile.namespace).resource(service).create()
+        client.services().inNamespace(namespace).resource(service).create()
     }
 
     private fun applyOverrides(spec: PodSpec, profile: KubernetesJobProfile, request: JobRequest) {

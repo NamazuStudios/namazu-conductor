@@ -22,7 +22,7 @@ Each provider module produces both a JAR and a `.elm` archive (Namazu Elements m
 
 | Module | Purpose | Status |
 |---|---|---|
-| `api` | Core interfaces and data types — `OrchestrationService`, `JobRequest`, `JobExecution`, `JobProfile`, `JobPlacement`, `JobStatus` | Complete |
+| `api` | Core interfaces and data types — `OrchestrationService`, `JobRequest`, `JobExecution`, `JobProfile`, `JobPlacement`, `JobScope`, `JobStatus` | Complete |
 | `edgegap` | EdgeGap REST API v1 implementation | Complete |
 | `ecs` | AWS ECS implementation (AWS SDK v2; Fargate and EC2 launch types) | Complete |
 | `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job` workloads) | Complete |
@@ -34,6 +34,7 @@ Each provider module produces both a JAR and a `.elm` archive (Namazu Elements m
 - **`OrchestrationService`** — the single interface all providers implement; binds via Guice PrivateModule
 - **`JobProfile`** — provider-specific job template identified by a string ID
 - **`JobPlacement`** — sealed hierarchy: `RegionPlacement`, `IpPlacement`, `LatitudeLongitudePlacement`; providers silently ignore unsupported placement types
+- **`JobScope`** — sealed hierarchy: `NamespaceScope` (Kubernetes — overrides the default namespace a workload is created in), `ClusterScope` (ECS — overrides the default cluster a task is launched into); providers without an equivalent concept (e.g. EdgeGap, whose scoping is fully determined by the profile's app/version) silently ignore it
 - **`JobExecution`** — returned from `execute()`; tracks job by ID and `JobStatus`
 
 ## Provider Implementation Pattern

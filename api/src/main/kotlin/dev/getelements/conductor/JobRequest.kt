@@ -33,6 +33,14 @@ data class JobRequest (
      * Optional [JobPlacement] hints that influence where the job is scheduled. Ignored if the
      * underlying [dev.getelements.conductor.service.OrchestrationService] implementation does not support placement.
      */
-    val placement : List<JobPlacement> = emptyList()
+    val placement : List<JobPlacement> = emptyList(),
+
+    /**
+     * Optional [JobScope] hints that override the default scoping boundary (e.g. Kubernetes
+     * namespace, ECS cluster) used by the underlying orchestration backend. Ignored if the
+     * underlying [dev.getelements.conductor.service.OrchestrationService] implementation does not
+     * support scoping.
+     */
+    val scope : List<JobScope> = emptyList()
 
 )
