@@ -22,6 +22,7 @@ import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
 import java.io.File
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -205,12 +206,39 @@ class KubernetesOrchestrationServiceIT {
             val endpoint = resolved.endpoints.first()
             val uri = URI.create("http://${endpoint.host}:${endpoint.port}$httpPath")
             logger.info("HTTP check ({}) against {}", templateName, uri)
-            val response = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build()
-                .send(HttpRequest.newBuilder(uri).GET().timeout(Duration.ofSeconds(20)).build(), HttpResponse.BodyHandlers.discarding())
+            val response = httpGetWithRetry(uri)
             assertTrue(response.statusCode() in 200..499, "Unexpected HTTP status ${response.statusCode()} from $uri")
         }
+    }
+
+    /**
+     * Retries the HTTP GET a few times with a short backoff. Reaching RUNNING only reflects the Pod's
+     * phase; kube-proxy programs the NodePort/Service route via a separate, asynchronous reconciliation
+     * loop with no ordering guarantee relative to phase reporting, so the route can still be a moment
+     * behind — especially when RUNNING resolves quickly under [KubernetesAttributes.WATCH_ENABLED].
+     */
+    private fun httpGetWithRetry(
+        uri: URI,
+        attempts: Int = 5,
+        initialBackoff: Duration = Duration.ofMillis(500)
+    ): HttpResponse<Void> {
+        val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+        val request = HttpRequest.newBuilder(uri).GET().timeout(Duration.ofSeconds(20)).build()
+
+        var backoff = initialBackoff
+        repeat(attempts - 1) { attempt ->
+            try {
+                return client.send(request, HttpResponse.BodyHandlers.discarding())
+            } catch (e: IOException) {
+                logger.warn(
+                    "HTTP check against {} failed (attempt {}/{}): {} — retrying in {}",
+                    uri, attempt + 1, attempts, e.message, backoff
+                )
+                Thread.sleep(backoff.toMillis())
+                backoff = backoff.multipliedBy(2)
+            }
+        }
+        return client.send(request, HttpResponse.BodyHandlers.discarding())
     }
 
     /**
