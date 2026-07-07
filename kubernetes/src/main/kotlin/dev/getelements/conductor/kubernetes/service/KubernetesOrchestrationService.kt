@@ -7,9 +7,11 @@ import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.NamespaceScope
 import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
 import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
 import dev.getelements.conductor.kubernetes.KubernetesJobProfile
@@ -393,6 +395,57 @@ class KubernetesOrchestrationService @Inject constructor(
 
         // Delete any owned Service. No-op when none was created.
         client.services().inNamespace(ns).withName(name).delete()
+    }
+
+    /**
+     * Opens a live, bidirectional stdio session on the Pod backing [execution] (resolved via
+     * [locatePod] for a Job), via Kubernetes exec/attach — the same mechanism as `kubectl attach`.
+     * Defaults to the workload's first container when it has more than one, mirroring how [toProfile]
+     * chooses the profile's primary container.
+     *
+     * Attach requires the container to actually be running; short-lived Jobs are typically no longer
+     * attachable by the time a caller gets around to streaming their stdio (use [getFutureForStatus]
+     * / [getStageForStatus] with [JobStatus.RUNNING] to know when it's safe to call this).
+     *
+     * @throws StdioUnavailableException if the Pod can't be found, or isn't currently `Running`
+     */
+    override fun streamStdio(execution: JobExecution): JobStdio {
+        val (ns, kind, name) = decodeId(execution.id)
+
+        val podName = when (kind) {
+            WorkloadKind.POD -> name
+            WorkloadKind.JOB -> locatePod(ns, name)?.metadata?.name
+                ?: throw StdioUnavailableException(
+                    "No pod found for Job '$name' in namespace '$ns' — job may not have started yet"
+                )
+        }
+
+        val resource = client.pods().inNamespace(ns).withName(podName)
+        val pod = resource.get()
+            ?: throw StdioUnavailableException("Pod '$podName' not found in namespace '$ns'")
+
+        val phase = pod.status?.phase
+        if (phase != "Running") {
+            throw StdioUnavailableException(
+                "Pod '$podName' is not Running (phase='$phase') — stdio attach requires a running process"
+            )
+        }
+
+        val containerName = pod.spec?.containers?.firstOrNull()?.name
+        val containerResource = if (containerName != null) resource.inContainer(containerName) else resource
+
+        val execWatch = containerResource
+            .redirectingInput()
+            .redirectingOutput()
+            .redirectingError()
+            .attach()
+
+        return JobStdio(
+            stdin = execWatch.input,
+            stdout = execWatch.output,
+            stderr = execWatch.error,
+            onClose = execWatch::close
+        )
     }
 
     private fun currentStatus(execution: JobExecution): JobStatus {

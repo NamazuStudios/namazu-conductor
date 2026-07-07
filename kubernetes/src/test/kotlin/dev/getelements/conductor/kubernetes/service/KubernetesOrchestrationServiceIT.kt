@@ -3,6 +3,7 @@ package dev.getelements.conductor.kubernetes.service
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
@@ -17,6 +18,8 @@ import io.fabric8.kubernetes.client.KubernetesClientBuilder
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
+import org.testng.Assert.assertNotNull
+import org.testng.Assert.assertThrows
 import org.testng.Assert.assertTrue
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
@@ -186,6 +189,32 @@ class KubernetesOrchestrationServiceIT {
         val completed = service.getFutureForStatus(execution, JobStatus.COMPLETED)
             .get(timeoutMinutes, TimeUnit.MINUTES)
         assertEquals(completed.status, JobStatus.COMPLETED, "Job did not reach COMPLETED")
+    }
+
+    @Test
+    fun streamStdioThrowsForCompletedJob() {
+        val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+            ?: throw AssertionError("Job profile '$namespace:$jobTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        assertThrows(StdioUnavailableException::class.java) { service.streamStdio(execution) }
+    }
+
+    @Test
+    fun streamStdioAttachesToRunningPod() {
+        val profile = service.findAvailableProfile("$namespace:$nodePortTemplate")
+            ?: throw AssertionError("Profile '$namespace:$nodePortTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        service.streamStdio(execution).use { stdio ->
+            assertNotNull(stdio.stdin, "Expected a stdin stream")
+            assertNotNull(stdio.stdout, "Expected a stdout stream")
+            assertNotNull(stdio.stderr, "Expected a stderr stream")
+        }
     }
 
     private fun runServerProfile(templateName: String) {

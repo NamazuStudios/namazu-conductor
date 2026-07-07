@@ -76,6 +76,20 @@ Command, argument, and environment overrides from the `JobRequest` are applied t
 
 Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/zone` node selector (zone is finer-grained than region; its `id` is the target zone). `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
 
+## Stdio Streaming
+
+`streamStdio(execution)` opens a live, bidirectional stdio session — separate `stdin`/`stdout`/`stderr`
+streams — backed by Fabric8's exec/attach support (the same mechanism as `kubectl attach`). The session
+ends when the process exits or the caller closes the returned `JobStdio`. For a `Job`, the underlying
+pod is resolved the same way as status/endpoint lookups — via the `namazu.conductor/owned-by` label.
+When a pod has more than one container, the workload's first container is used, matching how the
+primary container is chosen when building the profile from the `PodTemplate` in the first place.
+
+Attach requires the container to actually be running, so it throws `StdioUnavailableException` if the
+pod can't be found, or isn't currently `Running` — in particular, a short-lived `Job`'s pod is normally
+no longer attachable by the time it reaches `COMPLETED`. Wait for `JobStatus.RUNNING` via
+`getFutureForStatus`/`getStageForStatus` before calling this.
+
 ## Defining Jobs with PodTemplates
 
 Conductor discovers templates at runtime by listing `PodTemplate`s in the configured namespace and filtering by the `namazu.conductor/job-set` label. To make a template visible, apply it with the required label.
