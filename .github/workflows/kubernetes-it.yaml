@@ -2,7 +2,7 @@ name: Kubernetes Integration Test
 
 on:
   push:
-    branches: [ "feature/**" ]
+    branches: [ "feature/**", "bugfix/**" ]
   pull_request:
     branches: [ main, "maintenance/*" ]
   workflow_dispatch:
