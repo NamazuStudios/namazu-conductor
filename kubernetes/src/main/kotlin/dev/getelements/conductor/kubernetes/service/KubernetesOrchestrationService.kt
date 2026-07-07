@@ -17,6 +17,7 @@ import dev.getelements.conductor.kubernetes.WorkloadKind
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import io.fabric8.kubernetes.api.model.EnvVar
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder
 import io.fabric8.kubernetes.api.model.Pod
@@ -31,9 +32,13 @@ import io.fabric8.kubernetes.api.model.ServicePortBuilder
 import io.fabric8.kubernetes.api.model.batch.v1.Job
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
+import io.fabric8.kubernetes.client.Watch
+import io.fabric8.kubernetes.client.Watcher
+import io.fabric8.kubernetes.client.WatcherException
 import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 
@@ -62,6 +67,7 @@ class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.NAMESPACE) private val namespace: String,
     @Named(KubernetesAttributes.JOBSET) private val jobSet: String,
     @Named(KubernetesAttributes.POLL_INTERVAL) pollInterval: String,
+    @Named(KubernetesAttributes.WATCH_ENABLED) watchEnabled: String = "false",
     private val client: KubernetesClient,
     private val executor: ExecutorService
 ) : OrchestrationService {
@@ -69,6 +75,8 @@ class KubernetesOrchestrationService @Inject constructor(
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationService::class.java)
 
     private val pollIntervalMs: Long = pollInterval.toLongOrNull() ?: DEFAULT_POLL_INTERVAL_MS
+
+    private val isWatchEnabled: Boolean = watchEnabled.toBoolean()
 
     /**
      * Returns one [KubernetesJobProfile] per `PodTemplate` in the configured namespace labelled
@@ -255,25 +263,108 @@ class KubernetesOrchestrationService @Inject constructor(
     }
 
     /**
-     * Polls workload status on a background thread until [status] is reached (or [JobStatus.FAILED]),
-     * populating [JobEndpoint]s once the workload is [JobStatus.RUNNING].
+     * Resolves once [status] (or [JobStatus.FAILED]) is reached, populating [JobEndpoint]s once the
+     * workload is [JobStatus.RUNNING]. When [KubernetesAttributes.WATCH_ENABLED] is `true`, the
+     * transition is observed via a Kubernetes watch on the underlying Pod/Job; otherwise the workload
+     * status is polled on a background thread every [pollIntervalMs].
      */
-    override fun getFutureForStatus(
-        execution: JobExecution,
-        status: JobStatus
-    ): Future<JobExecution> = CompletableFuture.supplyAsync({
+    override fun getFutureForStatus(execution: JobExecution, status: JobStatus): Future<JobExecution> =
+        internalFutureForStatus(execution, status)
+
+    override fun getStageForStatus(execution: JobExecution, status: JobStatus): CompletionStage<JobExecution> =
+        internalFutureForStatus(execution, status)
+
+    private fun internalFutureForStatus(execution: JobExecution, status: JobStatus): CompletableFuture<JobExecution> =
+        if (isWatchEnabled) watchFutureForStatus(execution, status)
+        else CompletableFuture.supplyAsync({ pollForStatus(execution, status) }, executor)
+
+    private fun pollForStatus(execution: JobExecution, status: JobStatus): JobExecution {
         var result: JobExecution
         do {
             Thread.sleep(pollIntervalMs)
-            val current = currentStatus(execution)
-            result = JobExecution(
-                id = execution.id,
-                status = current,
-                endpoints = if (current == JobStatus.RUNNING) mapEndpoints(execution) else emptyList()
-            )
+            result = resultFor(execution, currentStatus(execution))
         } while (result.status != status && result.status != JobStatus.FAILED)
-        result
-    }, executor)
+        return result
+    }
+
+    /**
+     * Watches the Pod/Job backing [execution] and completes the returned future as soon as [target]
+     * (or [JobStatus.FAILED]) is observed, rather than waiting for the next poll tick. The watch is
+     * started from the resourceVersion of the object fetched to compute the initial status, so a
+     * transition landing between that fetch and the watch registering is still delivered as an event
+     * rather than silently missed. Falls back to [pollForStatus] if the watch closes with an error
+     * before a terminal status is reached.
+     */
+    private fun watchFutureForStatus(execution: JobExecution, target: JobStatus): CompletableFuture<JobExecution> {
+        val future = CompletableFuture<JobExecution>()
+        val (ns, kind, name) = decodeId(execution.id)
+
+        fun completeIfTerminal(current: JobStatus) {
+            if (!future.isDone && (current == target || current == JobStatus.FAILED)) {
+                future.complete(resultFor(execution, current))
+            }
+        }
+
+        val watch: Watch = when (kind) {
+            WorkloadKind.POD -> {
+                val resource = client.pods().inNamespace(ns).withName(name)
+                val pod = resource.get()
+                completeIfTerminal(if (pod == null) JobStatus.FAILED else mapPodPhase(pod.status?.phase))
+                if (future.isDone) return future
+
+                val options = ListOptionsBuilder().withResourceVersion(pod?.metadata?.resourceVersion).build()
+                resource.watch(options, object : Watcher<Pod> {
+                    override fun eventReceived(action: Watcher.Action, resource: Pod) =
+                        completeIfTerminal(mapPodPhase(resource.status?.phase))
+
+                    override fun onClose(cause: WatcherException?) {
+                        if (!future.isDone) fallBackToPoll(future, execution, target, cause)
+                    }
+                })
+            }
+            WorkloadKind.JOB -> {
+                val resource = client.batch().v1().jobs().inNamespace(ns).withName(name)
+                val job = resource.get()
+                completeIfTerminal(if (job == null) JobStatus.FAILED else mapJobStatus(ns, name, job))
+                if (future.isDone) return future
+
+                val options = ListOptionsBuilder().withResourceVersion(job?.metadata?.resourceVersion).build()
+                resource.watch(options, object : Watcher<Job> {
+                    override fun eventReceived(action: Watcher.Action, resource: Job) =
+                        completeIfTerminal(mapJobStatus(ns, name, resource))
+
+                    override fun onClose(cause: WatcherException?) {
+                        if (!future.isDone) fallBackToPoll(future, execution, target, cause)
+                    }
+                })
+            }
+        }
+
+        future.whenComplete { _, _ -> watch.close() }
+        return future
+    }
+
+    private fun fallBackToPoll(
+        future: CompletableFuture<JobExecution>,
+        execution: JobExecution,
+        target: JobStatus,
+        cause: WatcherException?
+    ) {
+        logger.warn(
+            "watch for execution '{}' closed before reaching status {} — falling back to polling ({})",
+            execution.id, target, cause?.message
+        )
+        CompletableFuture.supplyAsync({ pollForStatus(execution, target) }, executor)
+            .whenComplete { result, error ->
+                if (error != null) future.completeExceptionally(error) else future.complete(result)
+            }
+    }
+
+    private fun resultFor(execution: JobExecution, status: JobStatus): JobExecution = JobExecution(
+        id = execution.id,
+        status = status,
+        endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList()
+    )
 
     /**
      * Deletes the workload identified by [execution] and any Service the provider created for it.

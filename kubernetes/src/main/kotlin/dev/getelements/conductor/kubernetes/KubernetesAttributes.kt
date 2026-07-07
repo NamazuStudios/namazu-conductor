@@ -45,4 +45,12 @@ object KubernetesAttributes {
     @ElementDefaultAttribute("5000")
     const val POLL_INTERVAL = "dev.getelements.conductor.kubernetes.poll.interval.ms"
 
+    /**
+     * When `"true"`, workload status transitions are observed via a Kubernetes watch on the
+     * underlying Pod/Job instead of polling every [POLL_INTERVAL] milliseconds. Defaults to
+     * `"false"` to preserve the existing polling behaviour.
+     */
+    @ElementDefaultAttribute("false")
+    const val WATCH_ENABLED = "dev.getelements.conductor.kubernetes.watch.enabled"
+
 }

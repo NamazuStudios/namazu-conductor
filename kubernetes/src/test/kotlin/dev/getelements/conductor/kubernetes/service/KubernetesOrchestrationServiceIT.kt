@@ -66,6 +66,7 @@ import java.util.concurrent.TimeUnit
  * | `KUBERNETES_IT_JOB_IMAGE`       | `busybox:stable` | Image for the one-off job test |
  * | `KUBERNETES_IT_JOB_COMMAND`     | `sh,-c,echo hello-from-conductor` | Comma-separated command for the job test |
  * | `KUBERNETES_IT_TIMEOUT_MINUTES` | `5` | Per-status / endpoint-resolution wait timeout |
+ * | `KUBERNETES_IT_WATCH_ENABLED`   | `false` | Exercises the watch-based [KubernetesOrchestrationService.getFutureForStatus] path instead of polling |
  */
 class KubernetesOrchestrationServiceIT {
 
@@ -122,6 +123,7 @@ class KubernetesOrchestrationServiceIT {
             namespace = namespace,
             jobSet = jobSet,
             pollInterval = "3000",
+            watchEnabled = env("KUBERNETES_IT_WATCH_ENABLED", "false"),
             client = client,
             executor = executor
         )
