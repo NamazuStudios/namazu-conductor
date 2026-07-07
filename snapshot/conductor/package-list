@@ -219,6 +219,10 @@ $dokka.location:dev.getelements.conductor.service/OrchestrationService/getFuture
 $dokka.location:dev.getelements.conductor.service/OrchestrationService/listExecutions/#/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/list-executions.html
 $dokka.location:dev.getelements.conductor.service/OrchestrationService/stop/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/stop.html
 $dokka.location:dev.getelements.conductor////PointingToDeclaration/conductor/dev.getelements.conductor/index.html
+$dokka.location:dev.getelements.conductor/ClusterScope///PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/index.html
+$dokka.location:dev.getelements.conductor/ClusterScope/ClusterScope/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/-cluster-scope.html
+$dokka.location:dev.getelements.conductor/ClusterScope/cluster/#/PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/cluster.html
+$dokka.location:dev.getelements.conductor/ClusterScope/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/type.html
 $dokka.location:dev.getelements.conductor/IpPlacement///PointingToDeclaration/conductor/dev.getelements.conductor/-ip-placement/index.html
 $dokka.location:dev.getelements.conductor/IpPlacement/IpPlacement/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-ip-placement/-ip-placement.html
 $dokka.location:dev.getelements.conductor/IpPlacement/ip/#/PointingToDeclaration/conductor/dev.getelements.conductor/-ip-placement/ip.html
@@ -237,12 +241,15 @@ $dokka.location:dev.getelements.conductor/JobExecution/status/#/PointingToDeclar
 $dokka.location:dev.getelements.conductor/JobPlacement///PointingToDeclaration/conductor/dev.getelements.conductor/-job-placement/index.html
 $dokka.location:dev.getelements.conductor/JobPlacement/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-placement/type.html
 $dokka.location:dev.getelements.conductor/JobRequest///PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/index.html
-$dokka.location:dev.getelements.conductor/JobRequest/JobRequest/#dev.getelements.conductor.service.JobProfile#kotlin.collections.List[kotlin.String]#kotlin.collections.List[kotlin.String]#kotlin.collections.Map[kotlin.String,kotlin.String]#kotlin.collections.List[dev.getelements.conductor.JobPlacement]/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/-job-request.html
+$dokka.location:dev.getelements.conductor/JobRequest/JobRequest/#dev.getelements.conductor.service.JobProfile#kotlin.collections.List[kotlin.String]#kotlin.collections.List[kotlin.String]#kotlin.collections.Map[kotlin.String,kotlin.String]#kotlin.collections.List[dev.getelements.conductor.JobPlacement]#kotlin.collections.List[dev.getelements.conductor.JobScope]/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/-job-request.html
 $dokka.location:dev.getelements.conductor/JobRequest/args/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/args.html
 $dokka.location:dev.getelements.conductor/JobRequest/command/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/command.html
 $dokka.location:dev.getelements.conductor/JobRequest/environment/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/environment.html
 $dokka.location:dev.getelements.conductor/JobRequest/placement/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/placement.html
 $dokka.location:dev.getelements.conductor/JobRequest/profile/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/profile.html
+$dokka.location:dev.getelements.conductor/JobRequest/scope/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-request/scope.html
+$dokka.location:dev.getelements.conductor/JobScope///PointingToDeclaration/conductor/dev.getelements.conductor/-job-scope/index.html
+$dokka.location:dev.getelements.conductor/JobScope/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-scope/type.html
 $dokka.location:dev.getelements.conductor/JobStatus.COMPLETED///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-job-status/-c-o-m-p-l-e-t-e-d/index.html
 $dokka.location:dev.getelements.conductor/JobStatus.FAILED///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-job-status/-f-a-i-l-e-d/index.html
 $dokka.location:dev.getelements.conductor/JobStatus.PENDING///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-job-status/-p-e-n-d-i-n-g/index.html
@@ -255,6 +262,10 @@ $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/LatitudeLon
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/latitude/#/PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/latitude.html
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/longitude/#/PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/longitude.html
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/type.html
+$dokka.location:dev.getelements.conductor/NamespaceScope///PointingToDeclaration/conductor/dev.getelements.conductor/-namespace-scope/index.html
+$dokka.location:dev.getelements.conductor/NamespaceScope/NamespaceScope/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-namespace-scope/-namespace-scope.html
+$dokka.location:dev.getelements.conductor/NamespaceScope/namespace/#/PointingToDeclaration/conductor/dev.getelements.conductor/-namespace-scope/namespace.html
+$dokka.location:dev.getelements.conductor/NamespaceScope/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-namespace-scope/type.html
 $dokka.location:dev.getelements.conductor/PlacementType.IP_ADDRESS///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-placement-type/-i-p_-a-d-d-r-e-s-s/index.html
 $dokka.location:dev.getelements.conductor/PlacementType.LAT_LON///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-placement-type/-l-a-t_-l-o-n/index.html
 $dokka.location:dev.getelements.conductor/PlacementType.REGION///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-placement-type/-r-e-g-i-o-n/index.html
@@ -265,6 +276,11 @@ $dokka.location:dev.getelements.conductor/RegionPlacement///PointingToDeclaratio
 $dokka.location:dev.getelements.conductor/RegionPlacement/RegionPlacement/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-region-placement/-region-placement.html
 $dokka.location:dev.getelements.conductor/RegionPlacement/id/#/PointingToDeclaration/conductor/dev.getelements.conductor/-region-placement/id.html
 $dokka.location:dev.getelements.conductor/RegionPlacement/type/#/PointingToDeclaration/conductor/dev.getelements.conductor/-region-placement/type.html
+$dokka.location:dev.getelements.conductor/ScopeType.CLUSTER///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-scope-type/-c-l-u-s-t-e-r/index.html
+$dokka.location:dev.getelements.conductor/ScopeType.NAMESPACE///PointingToDeclaration/{"org.jetbrains.dokka.links.EnumEntryDRIExtra":{"key":"org.jetbrains.dokka.links.EnumEntryDRIExtra"}}conductor/dev.getelements.conductor/-scope-type/-n-a-m-e-s-p-a-c-e/index.html
+$dokka.location:dev.getelements.conductor/ScopeType///PointingToDeclaration/conductor/dev.getelements.conductor/-scope-type/index.html
+$dokka.location:dev.getelements.conductor/ScopeType/valueOf/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-scope-type/value-of.html
+$dokka.location:dev.getelements.conductor/ScopeType/values/#/PointingToDeclaration/conductor/dev.getelements.conductor/-scope-type/values.html
 dev.getelements.conductor
 dev.getelements.conductor.ecs
 dev.getelements.conductor.ecs.guice
