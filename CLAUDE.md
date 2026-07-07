@@ -18,6 +18,10 @@ mvn install && cd debug && mvn exec:java
 
 Each provider module produces both a JAR and a `.elm` archive (Namazu Elements module format).
 
+## Branching
+
+Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-completion`, `bugfix/pod-status-race`). `.github/workflows/kubernetes-it.yaml` triggers automatically on push for both prefixes, so branches without one only get CI via their pull request.
+
 ## Module Structure
 
 | Module | Purpose | Status |

@@ -4,6 +4,8 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.elements.sdk.annotation.ElementServiceExport
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
 import java.util.concurrent.Future
 
 /**
@@ -39,6 +41,16 @@ interface OrchestrationService {
      * with calling code.
      */
     fun getFutureForStatus(execution: JobExecution, status: JobStatus) : Future<JobExecution>;
+
+    /**
+     * Returns a [CompletionStage] for the supplied job status, resolving asynchronously as the
+     * underlying provider observes the transition (e.g. via a push notification/watch) rather than
+     * requiring a dedicated blocked thread. The default implementation delegates to
+     * [getFutureForStatus] on a background thread; providers with a native async/event-driven
+     * status mechanism should override this directly.
+     */
+    fun getStageForStatus(execution: JobExecution, status: JobStatus): CompletionStage<JobExecution> =
+        CompletableFuture.supplyAsync { getFutureForStatus(execution, status).get() }
 
     /**
      * Lists all executions currently visible to this provider (pending, running, and recently

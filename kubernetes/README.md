@@ -13,6 +13,7 @@ A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 J
 | Kubeconfig path | `dev.getelements.conductor.kubernetes.kubeconfig.path` | _(auto-detect)_ | Optional path to a kubeconfig file. When empty, Fabric8 auto-detects (in-cluster service account, then `~/.kube/config`) |
 | Master URL | `dev.getelements.conductor.kubernetes.master.url` | _(from config)_ | Optional API server URL override |
 | Poll interval | `dev.getelements.conductor.kubernetes.poll.interval.ms` | `5000` | Interval at which workload status is polled while awaiting a target status |
+| Watch enabled | `dev.getelements.conductor.kubernetes.watch.enabled` | `false` | When `true`, workload status transitions are observed via a Kubernetes watch on the underlying Pod/Job instead of polling every `poll.interval.ms`; falls back to polling if the watch closes with an error before the target status is reached |
 
 ## PodTemplate Labels & Annotations
 
@@ -148,7 +149,7 @@ dev.getelements.conductor.kubernetes.job.set = game-sessions
 
 ## Integration Test
 
-The module includes an integration test (`KubernetesOrchestrationServiceIT`) that runs against a real cluster — **minikube** locally and in GitHub CI. It creates its own `PodTemplate`s (a `NodePort` server, a `LoadBalancer` server, and a one-off `Job`), exercises discovery, `execute()`, status polling, endpoint resolution, and `stop()`, then deletes everything it created.
+The module includes an integration test (`KubernetesOrchestrationServiceIT`) that runs against a real cluster — **minikube** locally and in GitHub CI. It creates its own `PodTemplate`s (a `NodePort` server, a `LoadBalancer` server, and a one-off `Job`), exercises discovery, `execute()`, status polling (or watching, via `KUBERNETES_IT_WATCH_ENABLED`), endpoint resolution, and `stop()`, then deletes everything it created.
 
 **The test does not start or provision a cluster — one must already be running before `mvn verify`** (minikube locally; provisioned by the CI workflow in GitHub). The suite **always runs** and never skips: with no reachable cluster the calls fail and the suite fails. Every pipeline that reaches the `verify` phase therefore needs a reachable cluster, which is why the publish workflows provision minikube too.
 
@@ -207,3 +208,4 @@ All are optional; defaults target a minikube run.
 | `KUBERNETES_IT_JOB_IMAGE` | `busybox:stable` | Image for the one-off job test |
 | `KUBERNETES_IT_JOB_COMMAND` | `sh,-c,echo hello-from-conductor` | Comma-separated command for the job test |
 | `KUBERNETES_IT_TIMEOUT_MINUTES` | `5` | Per-status / endpoint-resolution wait timeout |
+| `KUBERNETES_IT_WATCH_ENABLED` | `false` | Exercises the watch-based status path (`WATCH_ENABLED` attribute) instead of polling |
