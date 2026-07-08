@@ -3,7 +3,7 @@ package dev.getelements.conductor.exception
 /**
  * Thrown when there is an exception running the job.
  */
-class JobException : RuntimeException {
+open class JobException : RuntimeException {
 
     constructor() : super()
 

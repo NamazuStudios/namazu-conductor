@@ -3,6 +3,7 @@ package dev.getelements.conductor.service
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.JobStdio
 import dev.getelements.elements.sdk.annotation.ElementServiceExport
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
@@ -65,5 +66,18 @@ interface OrchestrationService {
      * Stops the running job identified by [execution].
      */
     fun stop(execution: JobExecution)
+
+    /**
+     * Opens a live, bidirectional stdio session for [execution]: [JobStdio.stdin] accepts writes
+     * forwarded to the process, [JobStdio.stdout]/[JobStdio.stderr] are separate live read streams.
+     * The session ends when the process exits or the caller closes the returned [JobStdio].
+     *
+     * The default implementation throws [UnsupportedOperationException]; providers with no native or
+     * bridged stdio access leave it unimplemented. Providers that support this in principle but can't
+     * currently reach the process (job not started, process no longer running, bridge not present,
+     * etc.) throw [dev.getelements.conductor.exception.StdioUnavailableException] instead.
+     */
+    fun streamStdio(execution: JobExecution): JobStdio =
+        throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming")
 
 }
