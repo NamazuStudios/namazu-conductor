@@ -151,6 +151,11 @@ $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#/
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.String?#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.String?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
 $dokka.location:dev.getelements.conductor.exception/JobException/JobException/#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-job-exception/-job-exception.html
+$dokka.location:dev.getelements.conductor.exception/StdioUnavailableException///PointingToDeclaration/conductor/dev.getelements.conductor.exception/-stdio-unavailable-exception/index.html
+$dokka.location:dev.getelements.conductor.exception/StdioUnavailableException/StdioUnavailableException/#/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-stdio-unavailable-exception/-stdio-unavailable-exception.html
+$dokka.location:dev.getelements.conductor.exception/StdioUnavailableException/StdioUnavailableException/#kotlin.String?#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-stdio-unavailable-exception/-stdio-unavailable-exception.html
+$dokka.location:dev.getelements.conductor.exception/StdioUnavailableException/StdioUnavailableException/#kotlin.String?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-stdio-unavailable-exception/-stdio-unavailable-exception.html
+$dokka.location:dev.getelements.conductor.exception/StdioUnavailableException/StdioUnavailableException/#kotlin.Throwable?/PointingToDeclaration/conductor/dev.getelements.conductor.exception/-stdio-unavailable-exception/-stdio-unavailable-exception.html
 $dokka.location:dev.getelements.conductor.kubernetes.guice////PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/index.html
 $dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/index.html
 $dokka.location:dev.getelements.conductor.kubernetes.guice/KubernetesOrchestrationModule/KubernetesOrchestrationModule/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.guice/-kubernetes-orchestration-module/-kubernetes-orchestration-module.html
@@ -178,6 +183,7 @@ $dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestra
 $dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/getStageForStatus/#dev.getelements.conductor.JobExecution#dev.getelements.conductor.JobStatus/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/get-stage-for-status.html
 $dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/listExecutions/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/list-executions.html
 $dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/stop/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/stop.html
+$dokka.location:dev.getelements.conductor.kubernetes.service/KubernetesOrchestrationService/streamStdio/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes.service/-kubernetes-orchestration-service/stream-stdio.html
 $dokka.location:dev.getelements.conductor.kubernetes////PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/index.html
 $dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes///PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/index.html
 $dokka.location:dev.getelements.conductor.kubernetes/KubernetesAttributes/JOBSET/#/PointingToDeclaration/conductor/dev.getelements.conductor.kubernetes/-kubernetes-attributes/-j-o-b-s-e-t.html
@@ -221,6 +227,7 @@ $dokka.location:dev.getelements.conductor.service/OrchestrationService/getFuture
 $dokka.location:dev.getelements.conductor.service/OrchestrationService/getStageForStatus/#dev.getelements.conductor.JobExecution#dev.getelements.conductor.JobStatus/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/get-stage-for-status.html
 $dokka.location:dev.getelements.conductor.service/OrchestrationService/listExecutions/#/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/list-executions.html
 $dokka.location:dev.getelements.conductor.service/OrchestrationService/stop/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/stop.html
+$dokka.location:dev.getelements.conductor.service/OrchestrationService/streamStdio/#dev.getelements.conductor.JobExecution/PointingToDeclaration/conductor/dev.getelements.conductor.service/-orchestration-service/stream-stdio.html
 $dokka.location:dev.getelements.conductor////PointingToDeclaration/conductor/dev.getelements.conductor/index.html
 $dokka.location:dev.getelements.conductor/ClusterScope///PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/index.html
 $dokka.location:dev.getelements.conductor/ClusterScope/ClusterScope/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-cluster-scope/-cluster-scope.html
@@ -260,6 +267,12 @@ $dokka.location:dev.getelements.conductor/JobStatus.RUNNING///PointingToDeclarat
 $dokka.location:dev.getelements.conductor/JobStatus///PointingToDeclaration/conductor/dev.getelements.conductor/-job-status/index.html
 $dokka.location:dev.getelements.conductor/JobStatus/valueOf/#kotlin.String/PointingToDeclaration/conductor/dev.getelements.conductor/-job-status/value-of.html
 $dokka.location:dev.getelements.conductor/JobStatus/values/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-status/values.html
+$dokka.location:dev.getelements.conductor/JobStdio///PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/index.html
+$dokka.location:dev.getelements.conductor/JobStdio/JobStdio/#java.io.OutputStream#java.io.InputStream#java.io.InputStream#kotlin.Function0[kotlin.Unit]/PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/-job-stdio.html
+$dokka.location:dev.getelements.conductor/JobStdio/close/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/close.html
+$dokka.location:dev.getelements.conductor/JobStdio/stderr/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/stderr.html
+$dokka.location:dev.getelements.conductor/JobStdio/stdin/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/stdin.html
+$dokka.location:dev.getelements.conductor/JobStdio/stdout/#/PointingToDeclaration/conductor/dev.getelements.conductor/-job-stdio/stdout.html
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement///PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/index.html
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/LatitudeLongitudePlacement/#kotlin.Double#kotlin.Double/PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/-latitude-longitude-placement.html
 $dokka.location:dev.getelements.conductor/LatitudeLongitudePlacement/latitude/#/PointingToDeclaration/conductor/dev.getelements.conductor/-latitude-longitude-placement/latitude.html
