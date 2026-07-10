@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import signal as signal_module
 import sys
 
@@ -23,6 +24,18 @@ logger = logging.getLogger("namazu_stdio_bridge")
 DEFAULT_ENTRYPOINT_CANDIDATES = (
     "/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:/app/docker-entrypoint.sh"
 )
+
+_SIZE_PATTERN = re.compile(r"(\d+)\s*([kKmM]?)")
+
+
+def parse_size(value: str) -> int:
+    """Parses a byte-count string like "4096", "16k", or "1M" (case-insensitive; k=KiB, m=MiB)."""
+    match = _SIZE_PATTERN.fullmatch(value.strip())
+    if not match:
+        raise ValueError(f"Invalid buffer size: {value!r}")
+    number = int(match.group(1))
+    multiplier = {"": 1, "k": 1024, "m": 1024 * 1024}[match.group(2).lower()]
+    return number * multiplier
 
 
 def resolve_base_path() -> str:
@@ -46,15 +59,63 @@ def resolve_port() -> int:
     return int(os.environ.get("NAMAZU_CONDUCTOR_STDIO_PORT", "10080"))
 
 
+def resolve_stdout_ring_size() -> int:
+    return parse_size(os.environ.get("NAMAZU_CONDUCTOR_STDIO_STDOUT_BUFFER_SIZE", "16k"))
+
+
+def resolve_stderr_ring_size() -> int:
+    return parse_size(os.environ.get("NAMAZU_CONDUCTOR_STDIO_STDERR_BUFFER_SIZE", "4096"))
+
+
+def resolve_token() -> str:
+    """Required — refuses to start without it, since the stdio endpoints would otherwise be
+    reachable, with no authentication at all, by anyone who can reach the port."""
+    token = os.environ.get("NAMAZU_CONDUCTOR_STDIO_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "NAMAZU_CONDUCTOR_STDIO_TOKEN is required — namazu-stdio-bridge refuses to start "
+            "without an access token configured."
+        )
+    return token
+
+
+class RingBuffer:
+    """Fixed-capacity byte ring buffer: retains only the most recently appended `capacity` bytes,
+    so a client connecting late can still replay recent (not full) history. Capacity 0 disables it."""
+
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self._data = bytearray()
+
+    def append(self, chunk: bytes) -> None:
+        if self.capacity <= 0:
+            return
+        self._data.extend(chunk)
+        overflow = len(self._data) - self.capacity
+        if overflow > 0:
+            del self._data[:overflow]
+
+    def snapshot(self) -> bytes:
+        return bytes(self._data)
+
+
 class StdioBridge:
     """Fans a child process's stdout/stderr out to connected WebSocket clients, and forwards
     incoming WebSocket messages on the stdin endpoint to the process's stdin."""
 
-    def __init__(self, process: asyncio.subprocess.Process, buffer_size: int):
+    def __init__(
+        self,
+        process: asyncio.subprocess.Process,
+        buffer_size: int,
+        stdout_ring_size: int,
+        stderr_ring_size: int,
+    ):
         self.process = process
         self.buffer_size = buffer_size
         self.stdout_clients: set[ServerConnection] = set()
         self.stderr_clients: set[ServerConnection] = set()
+        self.stdout_ring = RingBuffer(stdout_ring_size)
+        self.stderr_ring = RingBuffer(stderr_ring_size)
 
     async def pump_stdin(self, ws: ServerConnection) -> None:
         try:
@@ -66,20 +127,36 @@ class StdioBridge:
         except ConnectionClosed:
             pass
 
-    async def pump_output(self, stream: asyncio.StreamReader | None, clients: set[ServerConnection]) -> None:
+    async def pump_output(
+        self,
+        stream: asyncio.StreamReader | None,
+        clients: set[ServerConnection],
+        ring: RingBuffer,
+    ) -> None:
         if stream is None:
             return
         while True:
             chunk = await stream.read(self.buffer_size)
             if not chunk:
                 return
+            ring.append(chunk)
             for ws in list(clients):
                 try:
                     await ws.send(chunk)
                 except ConnectionClosed:
                     clients.discard(ws)
 
-    async def register_output_client(self, ws: ServerConnection, clients: set[ServerConnection]) -> None:
+    async def register_output_client(
+        self,
+        ws: ServerConnection,
+        clients: set[ServerConnection],
+        ring: RingBuffer,
+    ) -> None:
+        # Replay recent history before subscribing to live output, so a client that connects after
+        # the process has already produced output isn't left with nothing until the next chunk.
+        snapshot = ring.snapshot()
+        if snapshot:
+            await ws.send(snapshot)
         clients.add(ws)
         try:
             await ws.wait_closed()
@@ -116,9 +193,14 @@ class StdioBridge:
 async def run() -> int:
     logging.basicConfig(level=os.environ.get("NAMAZU_CONDUCTOR_STDIO_LOG_LEVEL", "INFO"))
 
+    # Resolved (and, for the token, validated) before spawning anything — a missing token is a
+    # deployment misconfiguration that should fail loudly and immediately, not silently run unsecured.
+    token = resolve_token()
     base = resolve_base_path()
     entrypoint = resolve_entrypoint()
     buffer_size = resolve_buffer_size()
+    stdout_ring_size = resolve_stdout_ring_size()
+    stderr_ring_size = resolve_stderr_ring_size()
     port = resolve_port()
     argv = sys.argv[1:]
 
@@ -132,23 +214,31 @@ async def run() -> int:
         stderr=asyncio.subprocess.PIPE,
     )
 
-    bridge = StdioBridge(process, buffer_size)
-    stdout_task = asyncio.create_task(bridge.pump_output(process.stdout, bridge.stdout_clients))
-    stderr_task = asyncio.create_task(bridge.pump_output(process.stderr, bridge.stderr_clients))
+    bridge = StdioBridge(process, buffer_size, stdout_ring_size, stderr_ring_size)
+    stdout_task = asyncio.create_task(bridge.pump_output(process.stdout, bridge.stdout_clients, bridge.stdout_ring))
+    stderr_task = asyncio.create_task(bridge.pump_output(process.stderr, bridge.stderr_clients, bridge.stderr_ring))
     exit_task = asyncio.create_task(bridge.wait_and_close())
 
     stdin_path = f"{base}/0"
     stdout_path = f"{base}/1"
     stderr_path = f"{base}/2"
+    expected_authorization = f"Bearer {token}"
+
+    def authorized(ws: ServerConnection) -> bool:
+        header = ws.request.headers.get("Authorization") if ws.request is not None else None
+        return header == expected_authorization
 
     async def handler(ws: ServerConnection) -> None:
+        if not authorized(ws):
+            await ws.close(code=1008, reason="unauthorized")
+            return
         path = ws.request.path if ws.request is not None else ""
         if path == stdin_path:
             await bridge.pump_stdin(ws)
         elif path == stdout_path:
-            await bridge.register_output_client(ws, bridge.stdout_clients)
+            await bridge.register_output_client(ws, bridge.stdout_clients, bridge.stdout_ring)
         elif path == stderr_path:
-            await bridge.register_output_client(ws, bridge.stderr_clients)
+            await bridge.register_output_client(ws, bridge.stderr_clients, bridge.stderr_ring)
         else:
             await ws.close(code=1008, reason=f"unknown endpoint: {path}")
 

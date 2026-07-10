@@ -12,9 +12,12 @@ All optional, via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
+| `NAMAZU_CONDUCTOR_STDIO_TOKEN` | _(required)_ | Bearer token every WebSocket connection must present (see Authentication below). The bridge refuses to start without it. |
 | `NAMAZU_CONDUCTOR_STDIO_URI` | `/` | Base path prefix for the WebSocket endpoints |
 | `NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT` | `/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:/app/docker-entrypoint.sh` | `os.pathsep`-separated list of candidate entrypoint paths, tried in order; the first existing, executable path wins |
-| `NAMAZU_CONDUCTOR_STDIO_BUFFER_SIZE` | `4096` | Chunk size in bytes per WebSocket message |
+| `NAMAZU_CONDUCTOR_STDIO_BUFFER_SIZE` | `4096` | Chunk size in bytes per WebSocket message (distinct from the replay buffers below) |
+| `NAMAZU_CONDUCTOR_STDIO_STDOUT_BUFFER_SIZE` | `16k` | Ring buffer capacity for stdout replay (see Wire Protocol below). Accepts a plain byte count or a `k`/`m` suffix (KiB/MiB). `0` disables replay. |
+| `NAMAZU_CONDUCTOR_STDIO_STDERR_BUFFER_SIZE` | `4096` | Same, for stderr. |
 | `NAMAZU_CONDUCTOR_STDIO_PORT` | `10080` | WebSocket listen port |
 | `NAMAZU_CONDUCTOR_STDIO_LOG_LEVEL` | `INFO` | Bridge's own log level |
 
@@ -33,8 +36,23 @@ exit, `4007` = exit code 7; clamped to `4000`-`4255`, the valid range for a POSI
 close reason string carries the signal name if the process was killed by a signal (e.g. `"SIGTERM"`),
 otherwise empty.
 
-Connecting to `/1`/`/2` only streams output produced *after* connecting — like `kubectl attach`,
-there's no historical replay (that's what a real log API is for).
+Connecting to `/1`/`/2` immediately replays up to `NAMAZU_CONDUCTOR_STDIO_STDOUT_BUFFER_SIZE` /
+`NAMAZU_CONDUCTOR_STDIO_STDERR_BUFFER_SIZE` bytes of the most recent output as a single message,
+before switching to live streaming — a client that connects a moment after the process already
+started producing output still sees recent history, not just whatever's written from that point on.
+This is a bounded ring buffer, not a real log API: output older than the buffer's capacity is gone.
+
+## Authentication
+
+Every WebSocket connection (`/0`, `/1`, `/2`) must present `Authorization: Bearer <token>` during
+the handshake, matching `NAMAZU_CONDUCTOR_STDIO_TOKEN`. Connections without it, or with the wrong
+token, are closed immediately with code `1008`. There is no way to run the bridge without a token —
+its stdio endpoints would otherwise be reachable, unauthenticated, by anyone who can reach the port.
+
+`namazu-conductor` generates a fresh token per execution and passes it back automatically when
+opening a stdio session — this isn't something you configure by hand; see `EdgeGapOrchestrationService`
+(and the equivalent ECS provider) for how the token is threaded from deploy-time injection through
+to `streamStdio`.
 
 ## Integration
 
