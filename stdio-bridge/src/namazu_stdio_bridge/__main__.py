@@ -17,7 +17,9 @@ import signal as signal_module
 import sys
 
 from websockets.asyncio.server import ServerConnection, serve
+from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Request, Response
 
 logger = logging.getLogger("namazu_stdio_bridge")
 
@@ -224,14 +226,18 @@ async def run() -> int:
     stderr_path = f"{base}/2"
     expected_authorization = f"Bearer {token}"
 
-    def authorized(ws: ServerConnection) -> bool:
-        header = ws.request.headers.get("Authorization") if ws.request is not None else None
-        return header == expected_authorization
+    def process_request(connection: ServerConnection, request: Request) -> Response | None:
+        # Rejects at the HTTP upgrade itself — returning None here (the default "let it through")
+        # would still complete the WebSocket handshake for an unauthorized client; the caller's
+        # WebSocket client library only reliably surfaces a *connection* failure (as opposed to a
+        # success followed by an async close event it may not be watching for) when the upgrade
+        # itself is refused.
+        if request.headers.get("Authorization") != expected_authorization:
+            body = b"unauthorized\n"
+            return Response(401, "Unauthorized", Headers({"Content-Length": str(len(body))}), body)
+        return None
 
     async def handler(ws: ServerConnection) -> None:
-        if not authorized(ws):
-            await ws.close(code=1008, reason="unauthorized")
-            return
         path = ws.request.path if ws.request is not None else ""
         if path == stdin_path:
             await bridge.pump_stdin(ws)
@@ -242,7 +248,7 @@ async def run() -> int:
         else:
             await ws.close(code=1008, reason=f"unknown endpoint: {path}")
 
-    async with serve(handler, "0.0.0.0", port) as server:
+    async with serve(handler, "0.0.0.0", port, process_request=process_request) as server:
         logger.info(
             "namazu-stdio-bridge listening on :%s (stdin=%s stdout=%s stderr=%s)",
             port, stdin_path, stdout_path, stderr_path,

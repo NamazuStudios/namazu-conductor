@@ -46,8 +46,10 @@ This is a bounded ring buffer, not a real log API: output older than the buffer'
 
 Every WebSocket connection (`/0`, `/1`, `/2`) must present `Authorization: Bearer <token>` during
 the handshake, matching `NAMAZU_CONDUCTOR_STDIO_TOKEN`. Connections without it, or with the wrong
-token, are closed immediately with code `1008`. There is no way to run the bridge without a token —
-its stdio endpoints would otherwise be reachable, unauthenticated, by anyone who can reach the port.
+token, are rejected with HTTP `401` — at the handshake itself, not accepted and then closed, so a
+client's connect call fails outright rather than appearing to succeed. There is no way to run the
+bridge without a token — its stdio endpoints would otherwise be reachable, unauthenticated, by
+anyone who can reach the port.
 
 `namazu-conductor` generates a fresh token per execution and passes it back automatically when
 opening a stdio session — this isn't something you configure by hand; see `EdgeGapOrchestrationService`
