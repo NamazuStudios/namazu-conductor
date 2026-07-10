@@ -8,6 +8,7 @@ import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.LatitudeLongitudePlacement
 import dev.getelements.conductor.edgegap.EdgeGapAttributes
 import dev.getelements.conductor.edgegap.EdgeGapJobProfile
@@ -21,6 +22,7 @@ import dev.getelements.conductor.edgegap.model.EdgeGapExecutionDetails
 import dev.getelements.conductor.edgegap.model.EdgeGapGeoIp
 import dev.getelements.conductor.edgegap.model.EdgeGapStatusResponse
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
@@ -53,10 +55,14 @@ class EdgeGapOrchestrationService @Inject constructor(
     @Named(EdgeGapAttributes.API_KEY) private val apiKey: String,
     @Named(EdgeGapAttributes.BASE_URL) private val baseUrl: String,
     @Named(EdgeGapAttributes.POLL_INTERVAL) private val pollingIntervalMs: Long,
+    @Named(EdgeGapAttributes.STDIO_BRIDGE_PORT) stdioBridgePort: String = "10080",
+    @Named(EdgeGapAttributes.STDIO_BRIDGE_BASE_PATH) private val stdioBridgeBasePath: String = "",
     @Named(EdgeGapAttributes.API_KEY)
     private val client: Client,
     private val executor: ExecutorService
 ) : OrchestrationService {
+
+    private val stdioBridgePortNum: Int = stdioBridgePort.toIntOrNull() ?: DEFAULT_STDIO_BRIDGE_PORT
 
     /**
      * Returns all active app versions across all EdgeGap applications as [EdgeGapJobProfile]s.
@@ -208,6 +214,24 @@ class EdgeGapOrchestrationService @Inject constructor(
             .delete()
     }
 
+    /**
+     * Opens a live, bidirectional stdio session for [execution] by connecting to a
+     * `namazu-stdio-bridge` sidecar assumed to be listening on [stdioBridgePortNum] within the
+     * deployment's container, at the same host resolved for [JobEndpoint]s. EdgeGap has no native
+     * container stdio API, so this requires the app version's image to include the bridge (see
+     * `stdio-bridge/README.md`) with its port declared in the app version's port mapping.
+     *
+     * @throws StdioUnavailableException if the deployment has no reachable host yet, or the bridge
+     *   can't be reached (not present in the image, port not mapped, etc.)
+     */
+    override fun streamStdio(execution: JobExecution): JobStdio {
+        val status = fetchStatus(execution.id)
+        val host = status.fqdn ?: status.publicIp
+            ?: throw StdioUnavailableException("No reachable host for execution '${execution.id}' yet")
+
+        return StdioBridgeClient.connect(host, stdioBridgePortNum, stdioBridgeBasePath)
+    }
+
     private fun fetchStatus(requestId: String): EdgeGapStatusResponse =
         target("/v1/status/{request_id}")
             .resolveTemplate("request_id", requestId)
@@ -244,6 +268,7 @@ class EdgeGapOrchestrationService @Inject constructor(
         private const val AUTH_HEADER = "Authorization"
         private const val PAGE_SIZE = 100
         private const val POLL_INTERVAL_MS = 5_000L
+        private const val DEFAULT_STDIO_BRIDGE_PORT = 10080
     }
 
 }

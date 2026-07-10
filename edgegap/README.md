@@ -9,6 +9,8 @@ The `edgegap` module implements `OrchestrationService` for [EdgeGap](https://edg
 | API Key | `dev.getelements.conductor.edgegap.api.key` | _(required)_ | EdgeGap API token. Supplied as `token <value>` in the `Authorization` header. Mark as sensitive in the Elements SDK. |
 | Base URL | `dev.getelements.conductor.edgegap.base.url` | `https://api.edgegap.com` | EdgeGap REST API base URL. Override for staging or regional mirrors. |
 | Poll Interval | `dev.getelements.conductor.edgegap.poll.interval.ms` | `5000` | Milliseconds between status polls when waiting for a deployment to reach a target state. |
+| Stdio Bridge Port | `dev.getelements.conductor.edgegap.stdio.bridge.port` | `10080` | Port a `namazu-stdio-bridge` sidecar (if included in the app version's image) listens on for `streamStdio`. Must be declared in the app version's port mapping to be reachable. |
+| Stdio Bridge Base Path | `dev.getelements.conductor.edgegap.stdio.bridge.base.path` | _(none)_ | Must match the bridge's own `NAMAZU_CONDUCTOR_STDIO_URI`. |
 
 The API key is available from the EdgeGap dashboard under **Settings → API Tokens**. Create a token with at least the `deploy` and `status` scopes.
 
@@ -97,6 +99,21 @@ service.execute(
 
 `JobRequest.command` and `JobRequest.args` are concatenated (command first, then args) and sent as the `command` field in the EdgeGap deploy request, overriding the container's default entrypoint command.
 
+## Stdio Streaming
+
+EdgeGap has no native container stdio API, so `streamStdio(execution)` depends on the app version's
+image including [`namazu-stdio-bridge`](../stdio-bridge/README.md) — a sidecar wrapper that exposes
+the container's stdin/stdout/stderr over WebSocket. To use it:
+
+1. Include the bridge binary in your image and set it as the `ENTRYPOINT` (see
+   `stdio-bridge/README.md` for the multi-stage `COPY --from=` pattern).
+2. Declare the bridge's port (`10080` by default) in the app version's port mapping so it's
+   reachable at the deployment's `fqdn`/`public_ip`.
+
+`streamStdio` connects to the same host `JobEndpoint`s are resolved from, on the configured
+`Stdio Bridge Port`, and throws `StdioUnavailableException` if the bridge isn't reachable there —
+which almost always means the bridge isn't in the image, or its port isn't mapped.
+
 ## Integration Test
 
 The module includes an integration test (`EdgeGapOrchestrationServiceIT`) that deploys a real EdgeGap application, waits for it to reach `RUNNING`, and verifies the exposed HTTP endpoint returns the expected JSON response.
@@ -129,3 +146,24 @@ The test is skipped automatically if `EDGEGAP_API_KEY` is absent.
    - `environment` contains exactly the variables that were passed in
 
 The deployment is stopped in `@AfterClass` regardless of test outcome.
+
+### StdioBridgeClientIT
+
+A second integration test, `StdioBridgeClientIT`, validates the WebSocket client `streamStdio` uses
+against a real `namazu-stdio-bridge` container — independent of any EdgeGap account, since it talks
+to the bridge directly rather than through a deployment. Unlike `EdgeGapOrchestrationServiceIT`,
+this test does **not** skip when its prerequisite is missing — it fails, since a reachable bridge is
+expected to already be running (this test does not provision one itself). Start one locally before
+`mvn verify -pl edgegap`:
+
+```bash
+docker build -t namazu-stdio-bridge:it ../stdio-bridge
+docker run -d --rm -p 10080:10080 \
+  -v "$(pwd)/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
+  -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
+  namazu-stdio-bridge:it
+```
+
+The container exits after the test sends its `"quit"` line, so it must be restarted before each run.
+Override `STDIO_BRIDGE_IT_HOST`/`STDIO_BRIDGE_IT_PORT` (default `localhost`/`10080`) to point at a
+differently-hosted bridge.
