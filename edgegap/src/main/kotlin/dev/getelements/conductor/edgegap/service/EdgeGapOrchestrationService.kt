@@ -28,6 +28,7 @@ import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.Entity
 import jakarta.ws.rs.core.MediaType
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
@@ -119,7 +120,9 @@ class EdgeGapOrchestrationService @Inject constructor(
      * Polls `GET /v1/status/{request_id}` on a background thread until the deployment reaches
      * [status] (or [JobStatus.FAILED]). Each poll maps the EdgeGap lifecycle string to a
      * [JobStatus] and, once the target is reached, returns a [JobExecution] populated with
-     * the current [JobEndpoint]s.
+     * the current [JobEndpoint]s. [execution]'s `details` (including the [streamStdio] token
+     * generated in [execute]) is carried forward unchanged, since EdgeGap's status API has no
+     * notion of it — callers must be able to pass the result straight into [streamStdio].
      */
     override fun getFutureForStatus(
         execution: JobExecution,
@@ -132,7 +135,8 @@ class EdgeGapOrchestrationService @Inject constructor(
             result = JobExecution(
                 id = execution.id,
                 status = mapStatus(statusResponse.status),
-                endpoints = mapEndpoints(statusResponse)
+                endpoints = mapEndpoints(statusResponse),
+                details = execution.details
             )
         } while (result.status != status && result.status != JobStatus.FAILED)
         result
@@ -145,11 +149,19 @@ class EdgeGapOrchestrationService @Inject constructor(
      * [dev.getelements.conductor.RegionPlacement] entries in [JobRequest.placement] are ignored as
      * EdgeGap v1 does not support named-region placement.
      *
+     * A fresh random token is generated per execution and injected as [STDIO_TOKEN_ENV_VAR], so a
+     * `namazu-stdio-bridge` sidecar in the deployment's image (if present) requires it on every
+     * connection. The token is carried on the returned [JobExecution]'s
+     * [EdgeGapExecutionDetails.stdioToken] for [streamStdio] to present later — this requires no
+     * manual configuration by the deployer; it's generated and threaded through automatically.
+     *
      * @throws JobException if [JobRequest.profile] is not an [EdgeGapJobProfile]
      */
     override fun execute(request: JobRequest): JobExecution {
         val profile = request.profile as? EdgeGapJobProfile
             ?: throw JobException("JobProfile must be an ${EdgeGapJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
+
+        val stdioToken = UUID.randomUUID().toString()
 
         val deployRequest = EdgeGapDeployRequest(
             appName = profile.appName,
@@ -160,7 +172,7 @@ class EdgeGapOrchestrationService @Inject constructor(
             geoIpList = request.placement
                 .filterIsInstance<LatitudeLongitudePlacement>()
                 .map { EdgeGapGeoIp(latitude = it.latitude, longitude = it.longitude) },
-            envVars = request.environment
+            envVars = (request.environment + mapOf(STDIO_TOKEN_ENV_VAR to stdioToken))
                 .map { (k, v) -> EdgeGapEnvVar(key = k, value = v) },
             command = (request.command + request.args).joinToString(" ").ifBlank { null },
             arguments = null
@@ -174,7 +186,11 @@ class EdgeGapOrchestrationService @Inject constructor(
         return JobExecution(
             id = response.requestId,
             status = JobStatus.PENDING,
-            details = EdgeGapExecutionDetails(appName = profile.appName, versionName = profile.versionName)
+            details = EdgeGapExecutionDetails(
+                appName = profile.appName,
+                versionName = profile.versionName,
+                stdioToken = stdioToken
+            )
         )
     }
 
@@ -221,15 +237,30 @@ class EdgeGapOrchestrationService @Inject constructor(
      * container stdio API, so this requires the app version's image to include the bridge (see
      * `stdio-bridge/README.md`) with its port declared in the app version's port mapping.
      *
-     * @throws StdioUnavailableException if the deployment has no reachable host yet, or the bridge
-     *   can't be reached (not present in the image, port not mapped, etc.)
+     * Presents the token [execute] generated and injected into the deployment's environment as the
+     * bridge's required `Authorization` bearer token — read from [execution]'s
+     * [EdgeGapExecutionDetails.stdioToken], so [execution] must be the [JobExecution] originally
+     * returned by [execute], or one derived from it via [getFutureForStatus]/[getStageForStatus]
+     * (both carry `details` forward); an execution reconstructed from [listExecutions] instead has
+     * no token available and can't authenticate.
+     *
+     * @throws StdioUnavailableException if [execution] has no [EdgeGapExecutionDetails.stdioToken],
+     *   no reachable host yet, or the bridge can't be reached (not present in the image, port not
+     *   mapped, wrong token, etc.)
      */
     override fun streamStdio(execution: JobExecution): JobStdio {
+        val token = (execution.details as? EdgeGapExecutionDetails)?.stdioToken
+            ?: throw StdioUnavailableException(
+                "No stdio token available for execution '${execution.id}' — streamStdio requires " +
+                    "the JobExecution originally returned by execute() (or one derived from it via " +
+                    "getFutureForStatus/getStageForStatus), not one reconstructed from listExecutions()"
+            )
+
         val status = fetchStatus(execution.id)
         val host = status.fqdn ?: status.publicIp
             ?: throw StdioUnavailableException("No reachable host for execution '${execution.id}' yet")
 
-        return StdioBridgeClient.connect(host, stdioBridgePortNum, stdioBridgeBasePath)
+        return StdioBridgeClient.connect(host, stdioBridgePortNum, stdioBridgeBasePath, token)
     }
 
     private fun fetchStatus(requestId: String): EdgeGapStatusResponse =
@@ -269,6 +300,9 @@ class EdgeGapOrchestrationService @Inject constructor(
         private const val PAGE_SIZE = 100
         private const val POLL_INTERVAL_MS = 5_000L
         private const val DEFAULT_STDIO_BRIDGE_PORT = 10080
+
+        /** Matches namazu-stdio-bridge's own required `NAMAZU_CONDUCTOR_STDIO_TOKEN` env var. */
+        private const val STDIO_TOKEN_ENV_VAR = "NAMAZU_CONDUCTOR_STDIO_TOKEN"
     }
 
 }

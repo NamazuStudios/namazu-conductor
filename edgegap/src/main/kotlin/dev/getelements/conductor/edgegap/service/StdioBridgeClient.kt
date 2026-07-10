@@ -22,22 +22,26 @@ internal object StdioBridgeClient {
 
     private const val CONNECT_TIMEOUT_SECONDS = 10L
 
+    private const val AUTH_HEADER = "Authorization"
+
     /**
      * @throws StdioUnavailableException if any of the three endpoints can't be reached — the bridge
-     *   isn't present in the image, its port isn't mapped/reachable, or the workload isn't up yet
+     *   isn't present in the image, its port isn't mapped/reachable, the workload isn't up yet, or
+     *   [token] doesn't match the bridge's configured `NAMAZU_CONDUCTOR_STDIO_TOKEN`
      */
-    fun connect(host: String, port: Int, basePath: String): JobStdio {
+    fun connect(host: String, port: Int, basePath: String, token: String): JobStdio {
         val base = if (basePath.isNotEmpty() && !basePath.startsWith("/")) "/$basePath" else basePath
         fun uri(channel: Int) = URI.create("ws://$host:$port$base/$channel")
+        val authorization = "Bearer $token"
 
         val client = HttpClient.newHttpClient()
         val stdoutSink = QueueInputStream()
         val stderrSink = QueueInputStream()
 
         try {
-            val stdinWs = connectPlain(client, uri(0))
-            val stdoutWs = connectOutput(client, uri(1), stdoutSink)
-            val stderrWs = connectOutput(client, uri(2), stderrSink)
+            val stdinWs = connectPlain(client, uri(0), authorization)
+            val stdoutWs = connectOutput(client, uri(1), authorization, stdoutSink)
+            val stderrWs = connectOutput(client, uri(2), authorization, stderrSink)
 
             return JobStdio(
                 stdin = WebSocketOutputStream(stdinWs),
@@ -52,18 +56,20 @@ internal object StdioBridgeClient {
         } catch (e: Exception) {
             throw StdioUnavailableException(
                 "Could not reach namazu-stdio-bridge at $host:$port$base — is the bridge present in " +
-                    "the workload's image, with its port mapped and reachable? See stdio-bridge/README.md.",
+                    "the workload's image, with its port mapped and reachable, and is the token " +
+                    "correct? See stdio-bridge/README.md.",
                 e
             )
         }
     }
 
-    private fun connectPlain(client: HttpClient, uri: URI): WebSocket =
+    private fun connectPlain(client: HttpClient, uri: URI, authorization: String): WebSocket =
         client.newWebSocketBuilder()
+            .header(AUTH_HEADER, authorization)
             .buildAsync(uri, object : WebSocket.Listener {})
             .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-    private fun connectOutput(client: HttpClient, uri: URI, sink: QueueInputStream): WebSocket {
+    private fun connectOutput(client: HttpClient, uri: URI, authorization: String, sink: QueueInputStream): WebSocket {
         val listener = object : WebSocket.Listener {
 
             override fun onBinary(webSocket: WebSocket, data: ByteBuffer, last: Boolean): CompletionStage<*>? {
@@ -93,7 +99,10 @@ internal object StdioBridgeClient {
             }
 
         }
-        return client.newWebSocketBuilder().buildAsync(uri, listener).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        return client.newWebSocketBuilder()
+            .header(AUTH_HEADER, authorization)
+            .buildAsync(uri, listener)
+            .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
     }
 
 }

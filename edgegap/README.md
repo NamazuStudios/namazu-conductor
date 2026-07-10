@@ -114,6 +114,20 @@ the container's stdin/stdout/stderr over WebSocket. To use it:
 `Stdio Bridge Port`, and throws `StdioUnavailableException` if the bridge isn't reachable there —
 which almost always means the bridge isn't in the image, or its port isn't mapped.
 
+### Authentication
+
+The bridge requires every connection to present a bearer token (see `stdio-bridge/README.md`'s
+Authentication section) — this is handled automatically, not something you configure. `execute()`
+generates a random per-execution token, injects it into the deployment's environment as
+`NAMAZU_CONDUCTOR_STDIO_TOKEN`, and carries it on the returned `JobExecution`'s
+`EdgeGapExecutionDetails.stdioToken` (`@JsonIgnore`d — it's a secret, not exposed via the REST
+layer). `streamStdio` reads it back from there to authenticate.
+
+This means `streamStdio` only works with the `JobExecution` originally returned by `execute()`, or
+one derived from it via `getFutureForStatus`/`getStageForStatus` (both carry `details` forward
+unchanged) — not an execution reconstructed from `listExecutions()`, which has no way to recover a
+token EdgeGap's API never echoes back.
+
 ## Integration Test
 
 The module includes an integration test (`EdgeGapOrchestrationServiceIT`) that deploys a real EdgeGap application, waits for it to reach `RUNNING`, and verifies the exposed HTTP endpoint returns the expected JSON response.
@@ -161,9 +175,11 @@ docker build -t namazu-stdio-bridge:it ../stdio-bridge
 docker run -d --rm -p 10080:10080 \
   -v "$(pwd)/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
   -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
+  -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
   namazu-stdio-bridge:it
 ```
 
 The container exits after the test sends its `"quit"` line, so it must be restarted before each run.
-Override `STDIO_BRIDGE_IT_HOST`/`STDIO_BRIDGE_IT_PORT` (default `localhost`/`10080`) to point at a
-differently-hosted bridge.
+Override `STDIO_BRIDGE_IT_HOST`/`STDIO_BRIDGE_IT_PORT`/`STDIO_BRIDGE_IT_TOKEN` (default
+`localhost`/`10080`/`test-token`, matching the command above) to point at a differently-configured
+bridge.
