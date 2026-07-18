@@ -10,6 +10,8 @@ The `ecs` module implements `OrchestrationService` for AWS ECS, supporting both 
 | Subnets | `dev.getelements.conductor.ecs.subnets` | _(required for `awsvpc`)_ | Comma-separated VPC subnet IDs |
 | Security Groups | `dev.getelements.conductor.ecs.security.groups` | _(required for `awsvpc`)_ | Comma-separated security group IDs |
 | Jobset | `dev.getelements.conductor.ecs.jobset` | `default` | Only task definitions tagged with `namazu.conductor:jobSet` matching this value are surfaced as profiles |
+| Stdio Bridge Port | `dev.getelements.conductor.ecs.stdio.bridge.port` | `10080` | Port a `namazu-stdio-bridge` sidecar (if included in the task's image) listens on for `streamStdio`. Must be declared in the container's port mappings to be reachable. |
+| Stdio Bridge Base Path | `dev.getelements.conductor.ecs.stdio.bridge.base.path` | _(none)_ | Must match the bridge's own `NAMAZU_CONDUCTOR_STDIO_URI`. |
 
 ## Task Definition Tags
 
@@ -142,6 +144,35 @@ Configure each conductor with the matching attribute:
 dev.getelements.conductor.ecs.jobset = game-sessions
 ```
 
+## Stdio Streaming
+
+ECS has no native container stdio API, so `streamStdio(execution)` depends on the task's image
+including [`namazu-stdio-bridge`](../stdio-bridge/README.md) — a sidecar wrapper that exposes the
+container's stdin/stdout/stderr over WebSocket. To use it:
+
+1. Include the bridge binary in your image and set it as the `ENTRYPOINT` (see
+   `stdio-bridge/README.md` for the multi-stage `COPY --from=` pattern).
+2. Declare the bridge's port (`10080` by default) in the container's port mappings so it's reachable
+   at the task's resolved host (same host `JobEndpoint`s are resolved from — the ENI public/private
+   IP for `awsvpc` tasks, or the container instance's EC2 IP otherwise).
+
+`streamStdio` throws `StdioUnavailableException` if the bridge isn't reachable there — which almost
+always means the bridge isn't in the image, or its port isn't mapped.
+
+### Authentication
+
+The bridge requires every connection to present a bearer token (see `stdio-bridge/README.md`'s
+Authentication section) — this is handled automatically, not something you configure. `execute()`
+generates a random per-execution token, injects it into the task's container environment overrides
+as `NAMAZU_CONDUCTOR_STDIO_TOKEN`, and carries it on the returned `JobExecution`'s
+`EcsExecutionDetails.stdioToken` (`@JsonIgnore`d — it's a secret, not exposed via the REST layer).
+`streamStdio` reads it back from there to authenticate.
+
+This means `streamStdio` only works with the `JobExecution` originally returned by `execute()`, or
+one derived from it via `getFutureForStatus`/`getStageForStatus` (both carry `details` forward
+unchanged) — not an execution reconstructed from `listExecutions()`, which has no way to recover a
+token ECS's `describeTasks` never echoes back.
+
 ## Integration Test
 
 The module includes an integration test (`EcsOrchestrationServiceIT`) that deploys a full CloudFormation stack (ECS cluster, Fargate task definition, EC2 spot ASG task definition, VPC networking, IAM roles), runs both a Fargate task and an EC2 task, and verifies that each serves the expected HTTP response. The stack is torn down after the suite completes.
@@ -180,3 +211,26 @@ The test requires a deployer stack deployed from `cloudformation/integration-tes
 | `CFN_STACK_NAME` | No | `conductor-integration-test` | Name of the integration test CloudFormation stack |
 | `CFN_DEPLOYER_STACK_NAME` | No | `conductor-integration-test-deployer` | Name of the deployer stack, used to resolve the ECR repository URI |
 | `CFN_IMAGE_NAME` | No | `conductor-integration-test:latest` | Image name and tag within the ECR repository |
+
+### StdioBridgeClientIT
+
+A second integration test, `StdioBridgeClientIT`, validates the WebSocket client `streamStdio` uses
+against a real `namazu-stdio-bridge` container — independent of any AWS/ECS account, since it talks
+to the bridge directly rather than through a task. Unlike `EcsOrchestrationServiceIT`, this test
+does **not** skip when its prerequisite is missing — it fails, since a reachable bridge is expected
+to already be running (this test does not provision one itself). Start one locally before
+`mvn verify -pl ecs`:
+
+```bash
+docker build -t namazu-stdio-bridge:it ../stdio-bridge
+docker run -d --rm -p 10080:10080 \
+  -v "$(pwd)/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
+  -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
+  -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
+  namazu-stdio-bridge:it
+```
+
+The container exits after the test sends its `"quit"` line, so it must be restarted before each run.
+Override `STDIO_BRIDGE_IT_HOST`/`STDIO_BRIDGE_IT_PORT`/`STDIO_BRIDGE_IT_TOKEN` (default
+`localhost`/`10080`/`test-token`, matching the command above) to point at a differently-configured
+bridge.

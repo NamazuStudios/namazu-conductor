@@ -8,10 +8,12 @@ import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.ecs.EcsAttributes
 import dev.getelements.conductor.ecs.EcsExecutionDetails
 import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import software.amazon.awssdk.services.ec2.Ec2Client
@@ -29,6 +31,7 @@ import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionField
 import software.amazon.awssdk.services.ecs.model.TaskOverride
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
@@ -61,10 +64,14 @@ class EcsOrchestrationService @Inject constructor(
     @Named(EcsAttributes.SUBNETS) private val subnets: String,
     @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
     @Named(EcsAttributes.JOBSET) private val jobSet: String,
+    @Named(EcsAttributes.STDIO_BRIDGE_PORT) stdioBridgePort: String = "10080",
+    @Named(EcsAttributes.STDIO_BRIDGE_BASE_PATH) private val stdioBridgeBasePath: String = "",
     private val ecsClient: EcsClient,
     private val ec2Client: Ec2Client,
     private val executor: ExecutorService
 ) : OrchestrationService {
+
+    private val stdioBridgePortNum: Int = stdioBridgePort.toIntOrNull() ?: DEFAULT_STDIO_BRIDGE_PORT
 
     /**
      * Returns one [EcsJobProfile] per active ECS task definition family whose
@@ -125,6 +132,9 @@ class EcsOrchestrationService @Inject constructor(
      * populated with [JobEndpoint]s derived from the task's port mappings. The host address used
      * is the public IP when the task definition carries `namazu.conductor:assignPublicIp=ENABLED`,
      * resolved via EC2 `describeNetworkInterfaces`; otherwise the ENI private IP is used.
+     * [execution]'s `details` (including the [streamStdio] token generated in [execute]) is carried
+     * forward unchanged, since ECS's `describeTasks` has no notion of it — callers must be able to
+     * pass the result straight into [streamStdio].
      */
     override fun getFutureForStatus(
         execution: JobExecution,
@@ -137,7 +147,8 @@ class EcsOrchestrationService @Inject constructor(
             result = JobExecution(
                 id = execution.id,
                 status = mapStatus(task),
-                endpoints = mapEndpoints(task)
+                endpoints = mapEndpoints(task),
+                details = execution.details
             )
         } while (result.status != status && result.status != JobStatus.FAILED)
         result
@@ -150,6 +161,12 @@ class EcsOrchestrationService @Inject constructor(
      * The launch type and network configuration are driven entirely by the [EcsJobProfile].
      * Network configuration is only applied when the task definition uses `awsvpc` network mode.
      *
+     * A fresh random token is generated per execution and injected as [STDIO_TOKEN_ENV_VAR], so a
+     * `namazu-stdio-bridge` sidecar in the task's image (if present) requires it on every
+     * connection. The token is carried on the returned [JobExecution]'s
+     * [EcsExecutionDetails.stdioToken] for [streamStdio] to present later — this requires no manual
+     * configuration by the deployer; it's generated and threaded through automatically.
+     *
      * @throws JobException if [JobRequest.profile] is not an [EcsJobProfile], or if ECS does not
      *   return a task ARN in its response.
      */
@@ -157,7 +174,9 @@ class EcsOrchestrationService @Inject constructor(
         val profile = request.profile as? EcsJobProfile
             ?: throw JobException("JobProfile must be a ${EcsJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
-        val envVars = request.environment.map { (k, v) ->
+        val stdioToken = UUID.randomUUID().toString()
+
+        val envVars = (request.environment + mapOf(STDIO_TOKEN_ENV_VAR to stdioToken)).map { (k, v) ->
             KeyValuePair.builder().name(k).value(v).build()
         }
 
@@ -195,7 +214,8 @@ class EcsOrchestrationService @Inject constructor(
                 cluster = targetCluster,
                 taskDefinitionArn = task.taskDefinitionArn() ?: profile.family,
                 launchType = profile.launchType.name,
-                lastStatus = task.lastStatus()
+                lastStatus = task.lastStatus(),
+                stdioToken = stdioToken
             )
         )
     }
@@ -244,6 +264,43 @@ class EcsOrchestrationService @Inject constructor(
         }
     }
 
+    /**
+     * Opens a live, bidirectional stdio session for [execution] by connecting to a
+     * `namazu-stdio-bridge` sidecar assumed to be listening on [stdioBridgePortNum] within the
+     * task's container, at the same host resolved for [JobEndpoint]s. ECS has no native container
+     * stdio API, so this requires the task's image to include the bridge (see
+     * `stdio-bridge/README.md`) with its port declared in the container's port mappings.
+     *
+     * Presents the token [execute] generated and injected into the task's container environment as
+     * the bridge's required `Authorization` bearer token — read from [execution]'s
+     * [EcsExecutionDetails.stdioToken], so [execution] must be the [JobExecution] originally
+     * returned by [execute], or one derived from it via [getFutureForStatus]/[getStageForStatus]
+     * (both carry `details` forward); an execution reconstructed from [listExecutions] instead has
+     * no token available and can't authenticate.
+     *
+     * @throws StdioUnavailableException if [execution] has no [EcsExecutionDetails.stdioToken], no
+     *   reachable host yet, or the bridge can't be reached (not present in the image, port not
+     *   mapped, wrong token, etc.)
+     */
+    override fun streamStdio(execution: JobExecution): JobStdio {
+        val token = (execution.details as? EcsExecutionDetails)?.stdioToken
+            ?: throw StdioUnavailableException(
+                "No stdio token available for execution '${execution.id}' — streamStdio requires " +
+                    "the JobExecution originally returned by execute() (or one derived from it via " +
+                    "getFutureForStatus/getStageForStatus), not one reconstructed from listExecutions()"
+            )
+
+        val task = fetchTask(execution.id)
+        val taskDef = ecsClient.describeTaskDefinition {
+            it.taskDefinition(task.taskDefinitionArn())
+            it.include(TaskDefinitionField.TAGS)
+        }
+        val host = resolveHost(task, taskDef)
+            ?: throw StdioUnavailableException("No reachable host for execution '${execution.id}' yet")
+
+        return StdioBridgeClient.connect(host, stdioBridgePortNum, stdioBridgeBasePath, token)
+    }
+
     private fun buildNetworkConfig(assignPublicIp: AssignPublicIp) = NetworkConfiguration.builder()
         .awsvpcConfiguration(
             AwsVpcConfiguration.builder()
@@ -289,12 +346,7 @@ class EcsOrchestrationService @Inject constructor(
             it.taskDefinition(task.taskDefinitionArn())
             it.include(TaskDefinitionField.TAGS)
         }
-        val networkMode = taskDef.taskDefinition().networkMode()
-        val host = if (networkMode == NetworkMode.AWSVPC) {
-            resolveAwsVpcHost(task, taskDef)
-        } else {
-            resolveContainerInstanceHost(task)
-        } ?: return emptyList()
+        val host = resolveHost(task, taskDef) ?: return emptyList()
 
         return taskDef.taskDefinition()
             .containerDefinitions()
@@ -308,6 +360,13 @@ class EcsOrchestrationService @Inject constructor(
                 }
             }
     }
+
+    private fun resolveHost(task: Task, taskDef: DescribeTaskDefinitionResponse): String? =
+        if (taskDef.taskDefinition().networkMode() == NetworkMode.AWSVPC) {
+            resolveAwsVpcHost(task, taskDef)
+        } else {
+            resolveContainerInstanceHost(task)
+        }
 
     private fun resolveAwsVpcHost(task: Task, taskDef: DescribeTaskDefinitionResponse): String? {
         val eniDetails = task.attachments()
@@ -359,6 +418,11 @@ class EcsOrchestrationService @Inject constructor(
         const val TAG_LAUNCH_TYPE = "namazu.conductor:launchType"
 
         const val TAG_ASSIGN_PUBLIC_IP = "namazu.conductor:assignPublicIp"
+
+        private const val DEFAULT_STDIO_BRIDGE_PORT = 10080
+
+        /** Matches namazu-stdio-bridge's own required `NAMAZU_CONDUCTOR_STDIO_TOKEN` env var. */
+        private const val STDIO_TOKEN_ENV_VAR = "NAMAZU_CONDUCTOR_STDIO_TOKEN"
 
     }
 

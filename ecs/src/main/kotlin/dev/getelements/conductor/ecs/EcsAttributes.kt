@@ -45,4 +45,20 @@ object EcsAttributes {
     @ElementDefaultAttribute("default")
     const val JOBSET = "dev.getelements.conductor.ecs.job.set"
 
+    /**
+     * Port on which a `namazu-stdio-bridge` sidecar (if included in the task definition's container
+     * image) listens for stdio WebSocket connections. ECS has no native container stdio API, so
+     * [dev.getelements.conductor.ecs.service.EcsOrchestrationService.streamStdio] depends on this
+     * bridge; declare this port in the container's port mappings for it to be reachable.
+     */
+    @ElementDefaultAttribute("10080")
+    const val STDIO_BRIDGE_PORT = "dev.getelements.conductor.ecs.stdio.bridge.port"
+
+    /**
+     * Base path prefix for the `namazu-stdio-bridge` WebSocket endpoints — must match the bridge's
+     * own `NAMAZU_CONDUCTOR_STDIO_URI`. Defaults to no prefix.
+     */
+    @ElementDefaultAttribute("")
+    const val STDIO_BRIDGE_BASE_PATH = "dev.getelements.conductor.ecs.stdio.bridge.base.path"
+
 }
