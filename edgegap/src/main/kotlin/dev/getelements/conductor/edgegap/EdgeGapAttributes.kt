@@ -29,4 +29,20 @@ object EdgeGapAttributes {
     @ElementDefaultAttribute("dev.getelements.conductor.edgegap.poll.interval.ms")
     const val POLL_INTERVAL = "5000";
 
+    /**
+     * Port on which a `namazu-stdio-bridge` sidecar (if included in the app version's container
+     * image) listens for stdio WebSocket connections. EdgeGap has no native container stdio API, so
+     * [dev.getelements.conductor.edgegap.service.EdgeGapOrchestrationService.streamStdio] depends on
+     * this bridge; declare this port in the app version's port mapping for it to be reachable.
+     */
+    @ElementDefaultAttribute("10080")
+    const val STDIO_BRIDGE_PORT = "dev.getelements.conductor.edgegap.stdio.bridge.port"
+
+    /**
+     * Base path prefix for the `namazu-stdio-bridge` WebSocket endpoints — must match the bridge's
+     * own `NAMAZU_CONDUCTOR_STDIO_URI`. Defaults to no prefix.
+     */
+    @ElementDefaultAttribute("")
+    const val STDIO_BRIDGE_BASE_PATH = "dev.getelements.conductor.edgegap.stdio.bridge.base.path"
+
 }
