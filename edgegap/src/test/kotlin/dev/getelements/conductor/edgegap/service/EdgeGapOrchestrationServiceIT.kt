@@ -118,9 +118,12 @@ class EdgeGapOrchestrationServiceIT {
         val target = client.target("http://${endpoint.host}:${endpoint.port}/test_context.json")
 
         // EdgeGap's edge ingress can take a few seconds to start routing traffic after a
-        // deployment reaches RUNNING, so tolerate a brief propagation window here.
+        // deployment reaches RUNNING, so tolerate a brief propagation window here. Empirically
+        // this 403 is intermittent rather than a predictable startup curve (4/5 manual runs
+        // returned 200 immediately; the 1 failure stayed at 403 for the entire prior 30s window
+        // with no sign of clearing) — widening the window is cheap insurance, not a confirmed fix.
         var response = target.request().get()
-        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30)
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60)
 
         while (response.status != 200 && System.currentTimeMillis() < deadline) {
             logger.debug("Endpoint not ready yet (HTTP {}), retrying...", response.status)
