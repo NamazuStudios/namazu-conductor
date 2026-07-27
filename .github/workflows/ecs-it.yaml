@@ -1,0 +1,53 @@
+name: ECS Integration Test
+
+on:
+  push:
+    branches: [ "feature/**", "bugfix/**" ]
+  pull_request:
+    branches: [ main, "maintenance/*" ]
+  workflow_dispatch:
+
+# Not keyed by github.ref: unlike Kubernetes' per-run ephemeral minikube cluster, this test
+# deploys a single shared CloudFormation stack (default name conductor-integration-test) into
+# one real AWS account, so concurrent runs from different branches would collide. Serialize them
+# instead of canceling in-progress runs, since canceling mid-test could leave real AWS resources
+# (VPC, ECS tasks, EC2 spot instances) orphaned.
+concurrency:
+  group: conductor-ecs-it
+  cancel-in-progress: false
+
+jobs:
+
+  ecs-it:
+    name: ECS Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # StdioBridgeClientIT needs a reachable namazu-stdio-bridge container independent of any
+      # AWS/ECS account; it fails rather than skips if absent.
+      - name: Start namazu-stdio-bridge test container
+        run: |
+          docker build -t namazu-stdio-bridge:it stdio-bridge
+          docker run -d --rm -p 10080:10080 \
+            -v "${{ github.workspace }}/ecs/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
+            -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
+            -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
+            namazu-stdio-bridge:it
+
+      - name: Run ECS integration tests
+        run: mvn -B --no-transfer-progress verify -pl ecs -am
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}

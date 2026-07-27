@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.fail
-import org.testng.SkipException
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
@@ -31,7 +30,8 @@ import java.util.concurrent.TimeUnit
  * - Environment variable `EDGEGAP_API_KEY` must be set.
  * - The EdgeGap account must have an active app `"integration_test"` / version `"nginx"`.
  *
- * The test is skipped automatically if `EDGEGAP_API_KEY` is absent. Run via:
+ * The test fails (does not skip) if `EDGEGAP_API_KEY` is absent — a missing/misconfigured
+ * environment should surface as a failure, not a silently-green skip. Run via:
  * ```
  * EDGEGAP_API_KEY=<key> mvn verify -pl edgegap
  * ```
@@ -51,7 +51,7 @@ class EdgeGapOrchestrationServiceIT {
     fun setUp() {
 
         apiKey = System.getenv("EDGEGAP_API_KEY")
-            ?: throw SkipException("EDGEGAP_API_KEY environment variable is not set — skipping EdgeGap integration tests")
+            ?: error("EDGEGAP_API_KEY environment variable is not set")
 
         client = ClientBuilder.newBuilder()
             .register(JacksonJsonProvider::class.java)
