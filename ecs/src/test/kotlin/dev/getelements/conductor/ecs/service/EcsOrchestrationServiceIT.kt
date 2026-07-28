@@ -8,6 +8,7 @@ import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.ClientBuilder
+import jakarta.ws.rs.core.Response
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.slf4j.LoggerFactory
@@ -176,6 +177,25 @@ class EcsOrchestrationServiceIT {
         if (::deployerEc2Client.isInitialized) deployerEc2Client.close()
     }
 
+    /**
+     * ECS reporting RUNNING doesn't guarantee the task's ENI public IP, security group, or the
+     * container's own HTTP server have finished propagating/starting — tolerate a brief window
+     * before failing, mirroring the same fix already applied to the EdgeGap IT.
+     */
+    private fun getWithRetry(url: String): Response {
+        var response = httpClient.target(url).request().get()
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60)
+
+        while (response.status != 200 && System.currentTimeMillis() < deadline) {
+            logger.debug("Endpoint not ready yet (HTTP {}), retrying...", response.status)
+            response.close()
+            Thread.sleep(2000)
+            response = httpClient.target(url).request().get()
+        }
+
+        return response
+    }
+
     @Test
     fun launchFargateAndVerifyTestContext() {
         val profile = service.findAvailableProfile(taskFamily)
@@ -195,9 +215,7 @@ class EcsOrchestrationServiceIT {
         assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING (Fargate)")
 
         val endpoint = running.endpoints.first()
-        val response = httpClient
-            .target("http://${endpoint.host}:${endpoint.port}/test_context.json")
-            .request().get()
+        val response = getWithRetry("http://${endpoint.host}:${endpoint.port}/test_context.json")
 
         assertEquals(response.status, 200, "Expected HTTP 200 from Fargate task on ${endpoint.host}:${endpoint.port}")
         val context = response.readEntity(TestContext::class.java)
@@ -224,9 +242,7 @@ class EcsOrchestrationServiceIT {
         assertFalse(running.endpoints.isEmpty(), "Expected at least one endpoint when RUNNING (EC2)")
 
         val endpoint = running.endpoints.first()
-        val response = httpClient
-            .target("http://${endpoint.host}:${endpoint.port}/test_context.json")
-            .request().get()
+        val response = getWithRetry("http://${endpoint.host}:${endpoint.port}/test_context.json")
 
         assertEquals(response.status, 200, "Expected HTTP 200 from EC2 spot task on ${endpoint.host}:${endpoint.port}")
         val context = response.readEntity(TestContext::class.java)
