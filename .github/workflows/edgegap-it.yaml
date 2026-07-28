@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main, "maintenance/*" ]
   workflow_dispatch:
+  workflow_call:
 
 # Not keyed by github.ref: unlike Kubernetes' per-run ephemeral minikube cluster, this test
 # deploys to a single shared "integration_test" app on one real EdgeGap account, so concurrent

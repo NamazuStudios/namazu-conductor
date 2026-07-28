@@ -113,7 +113,10 @@ jobs:
       # build below runs both modules in one command, loop-restart the container for the whole
       # step instead of starting it once — otherwise whichever module builds later in the
       # reactor finds a dead container. The runner VM is torn down at job end, so the loop needs
-      # no explicit stop.
+      # no explicit stop. Output MUST be redirected to a file, not left attached to this step's
+      # stdout: once this step ends and the job moves on, the runner closes that pipe, and the
+      # next unredirected docker run's write to it dies on SIGPIPE — silently breaking every
+      # restart from then on (see the minikube tunnel step above for the same pattern).
       - name: Start self-restarting namazu-stdio-bridge test container
         run: |
           docker build -t namazu-stdio-bridge:it stdio-bridge
@@ -123,7 +126,7 @@ jobs:
                 -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
                 -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
                 namazu-stdio-bridge:it
-            done ) &
+            done ) &> /tmp/stdio-bridge.log &
           disown
 
       - name: Build and Publish Release

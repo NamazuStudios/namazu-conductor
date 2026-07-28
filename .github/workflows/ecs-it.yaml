@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main, "maintenance/*" ]
   workflow_dispatch:
+  workflow_call:
 
 # Not keyed by github.ref: unlike Kubernetes' per-run ephemeral minikube cluster, this test
 # deploys a single shared CloudFormation stack (default name conductor-integration-test) into
