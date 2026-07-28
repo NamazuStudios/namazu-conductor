@@ -138,7 +138,17 @@ class EcsOrchestrationServiceIT {
         if (::httpClient.isInitialized) httpClient.close()
 
         if (::deployerEc2Client.isInitialized && ::vpcId.isInitialized) {
-            scrubVpcDependencies(vpcId)
+            try {
+                scrubVpcDependencies(vpcId)
+            } catch (e: Exception) {
+                // Don't let a scrub failure skip deleteStack below — deleting the stack's own
+                // ASG/instances often clears whatever dependency blocked the scrub, and even if
+                // deleteStack also fails, the DELETE_FAILED retry path below (or the next run's
+                // deployStack) will scrub and retry again. Leaving this unhandled would abort
+                // tearDown entirely, orphaning the whole stack (including any running EC2/Fargate
+                // resources) with no automatic recovery.
+                logger.warn("Failed to scrub VPC dependencies for '{}' — attempting stack deletion anyway", vpcId, e)
+            }
         }
 
         if (::cfnClient.isInitialized) {
