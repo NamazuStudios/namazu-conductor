@@ -30,7 +30,8 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
 | `edgegap` | EdgeGap REST API v1 implementation | Complete |
 | `ecs` | AWS ECS implementation (AWS SDK v2; Fargate and EC2 launch types) | Complete |
 | `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job` workloads) | Complete |
-| `multiplay` | Multiplay (Unity/Rocket Science) implementation | Skeleton (TODOs) |
+| `multiplay` | Unity Multiplay implementation (fleet allocations via the Unity Services API) | Complete, untested — no IT coverage yet |
+| `admin` | Superuser REST API (`/jobs`) and dashboard panel for listing/launching/stopping jobs across every deployed provider Element | Complete |
 | `debug` | Local runner — boots MongoDB replica set then starts Elements runtime | Complete |
 
 ## Key Abstractions
@@ -292,6 +293,6 @@ mvn install -Pbuild-ui
 
 `superuser/` serves components shown to administrators only. `user/` serves components in user-facing dashboards.
 
-## No Tests
+## Tests
 
-There are currently no unit or integration tests in the project.
+`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `StdioBridgeClientIT` in both `ecs` and `edgegap`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `api`, `multiplay`, `admin`, and `debug` have no tests.
