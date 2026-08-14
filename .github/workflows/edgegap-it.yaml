@@ -1,0 +1,51 @@
+name: EdgeGap Integration Test
+
+on:
+  push:
+    branches: [ "feature/**", "bugfix/**" ]
+  pull_request:
+    branches: [ main, "maintenance/*" ]
+  workflow_dispatch:
+  workflow_call:
+
+# Not keyed by github.ref: unlike Kubernetes' per-run ephemeral minikube cluster, this test
+# deploys to a single shared "integration_test" app on one real EdgeGap account, so concurrent
+# runs from different branches would collide. Serialize them instead of canceling in-progress
+# runs, since canceling mid-test could leave a live EdgeGap deployment orphaned.
+concurrency:
+  group: conductor-edgegap-it
+  cancel-in-progress: false
+
+jobs:
+
+  edgegap-it:
+    name: EdgeGap Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # StdioBridgeClientIT needs a reachable namazu-stdio-bridge container independent of any
+      # EdgeGap account; it fails rather than skips if absent.
+      - name: Start namazu-stdio-bridge test container
+        run: |
+          docker build -t namazu-stdio-bridge:it stdio-bridge
+          docker run -d --rm -p 10080:10080 \
+            -v "${{ github.workspace }}/edgegap/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
+            -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
+            -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
+            namazu-stdio-bridge:it
+
+      - name: Run EdgeGap integration tests
+        run: mvn -B --no-transfer-progress verify -pl edgegap -am
+        env:
+          EDGEGAP_API_KEY: ${{ secrets.EDGEGAP_API_KEY }}

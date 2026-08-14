@@ -11,11 +11,11 @@ concurrency:
 
 jobs:
 
-  snapshot:
+  preflight:
+    name: Verify Snapshot Version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
 
@@ -30,10 +30,8 @@ jobs:
           echo "Current project version: $VERSION"
 
       - name: Ensure Snapshot Version
-        id: next_version
         run: |
-
-          CURRENT=${{ steps.version.outputs.version }}
+          CURRENT="${{ steps.version.outputs.version }}"
 
           # Exit if NOT a snapshot
           if [[ "$CURRENT" != *-SNAPSHOT ]]; then
@@ -42,6 +40,39 @@ jobs:
             echo "Please bump the version in pom.xml and push before retrying."
             exit 1
           fi
+
+  # Each provider's integration test runs as its own isolated job (separate runner, separate
+  # namazu-stdio-bridge container) rather than sequentially inside one mvn command. This makes
+  # failures attributable to a specific provider at a glance, and runs the slow, real-cloud
+  # EdgeGap/ECS tests concurrently with Kubernetes instead of one after another.
+  kubernetes-it:
+    name: Kubernetes Integration Test
+    needs: preflight
+    uses: ./.github/workflows/kubernetes-it.yaml
+
+  edgegap-it:
+    name: EdgeGap Integration Test
+    needs: preflight
+    uses: ./.github/workflows/edgegap-it.yaml
+    secrets: inherit
+
+  ecs-it:
+    name: ECS Integration Test
+    needs: preflight
+    uses: ./.github/workflows/ecs-it.yaml
+    secrets: inherit
+
+  snapshot:
+    needs: [ preflight, kubernetes-it, edgegap-it, ecs-it ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+
+      - name: Cloning the Repository
+        uses: actions/checkout@v4
 
       - name: Set up JDK 21 and Maven Credentials
         uses: actions/setup-java@v5
@@ -53,25 +84,12 @@ jobs:
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      # The kubernetes module's integration test always runs during verify and requires a cluster.
-      - name: Start minikube
-        uses: medyagh/setup-minikube@latest
-        with:
-          driver: docker
-
-      - name: Start minikube tunnel (LoadBalancer support)
-        run: |
-          minikube tunnel &> /tmp/minikube-tunnel.log &
-          echo "Started minikube tunnel (pid $!)"
-
+      # Correctness is already proven by the kubernetes-it/edgegap-it/ecs-it jobs above, so skip
+      # re-running integration tests here — this job just builds and publishes the artifacts.
       - name: Build and Publish Snapshot
-        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay'
+        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay' -DskipITs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EDGEGAP_API_KEY: ${{ secrets.EDGEGAP_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Generate API documentation
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
@@ -79,7 +97,7 @@ jobs:
       - name: Publish snapshot docs to GitHub Pages
         run: |
           set -e
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.preflight.outputs.version }}"
           REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           git config --global user.name "github-actions[bot]"

@@ -315,8 +315,8 @@ Element-Builtin-Spis=${elm.builtin.spis}
 
             <!--
                 Runs integration tests (*IT classes) during mvn verify.
-                Tests are skipped if EDGEGAP_API_KEY is not set — the test class handles this
-                itself via TestNG's SkipException.
+                Tests fail (not skip) if EDGEGAP_API_KEY is not set — the test class handles this
+                itself.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

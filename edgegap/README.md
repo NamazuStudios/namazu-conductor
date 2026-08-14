@@ -147,7 +147,8 @@ The module includes an integration test (`EdgeGapOrchestrationServiceIT`) that d
    ```
    The `token ` prefix is optional — the test strips it if present.
 
-The test is skipped automatically if `EDGEGAP_API_KEY` is absent.
+The test fails (does not skip) if `EDGEGAP_API_KEY` is absent — a missing/misconfigured
+environment should surface as a failure, not a silently-green skip.
 
 ### What the test does
 
@@ -165,9 +166,9 @@ The deployment is stopped in `@AfterClass` regardless of test outcome.
 
 A second integration test, `StdioBridgeClientIT`, validates the WebSocket client `streamStdio` uses
 against a real `namazu-stdio-bridge` container — independent of any EdgeGap account, since it talks
-to the bridge directly rather than through a deployment. Unlike `EdgeGapOrchestrationServiceIT`,
-this test does **not** skip when its prerequisite is missing — it fails, since a reachable bridge is
-expected to already be running (this test does not provision one itself). Start one locally before
+to the bridge directly rather than through a deployment. Like `EdgeGapOrchestrationServiceIT`, this
+test fails rather than skips when its prerequisite is missing — a reachable bridge is expected to
+already be running (this test does not provision one itself). Start one locally before
 `mvn verify -pl edgegap`:
 
 ```bash
