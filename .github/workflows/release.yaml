@@ -165,73 +165,17 @@ jobs:
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
-      - name: Publish versioned docs to GitHub Pages
+      - name: Configure AWS credentials
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_APIDOCS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Publish versioned docs to S3
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
         run: |
           set -e
           VERSION="${{ steps.version.outputs.release_version }}"
-          REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Clone gh-pages branch, or create it fresh if it doesn't exist yet
-          if git ls-remote --exit-code --heads "$REMOTE_URL" gh-pages > /dev/null 2>&1; then
-            git clone --branch gh-pages --depth 1 "$REMOTE_URL" /tmp/gh-pages
-          else
-            mkdir /tmp/gh-pages
-            cd /tmp/gh-pages
-            git init
-            git remote add origin "$REMOTE_URL"
-            git checkout --orphan gh-pages
-            cd -
-          fi
-
-          # Deploy versioned docs
-          rm -rf /tmp/gh-pages/$VERSION
-          cp -r target/dokka/. /tmp/gh-pages/$VERSION/
-
-          # Keep latest/ pointing to this release
-          rm -rf /tmp/gh-pages/latest
-          cp -r target/dokka/. /tmp/gh-pages/latest/
-
-          # Generate root index listing all versions
-          VERSIONS=$(cd /tmp/gh-pages && ls -d [0-9]*/ 2>/dev/null | sed 's|/||' | sort -rV)
-          VERSION_ROWS=""
-          for v in $VERSIONS; do
-            VERSION_ROWS="${VERSION_ROWS}<tr><td><a href=\"${v}/\">${v}</a></td></tr>"
-          done
-
-          cat > /tmp/gh-pages/index.html << HTMLEOF
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Namazu Conductor API Documentation</title>
-            <style>
-              body { font-family: sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; }
-              h1 { font-size: 1.5rem; }
-              a { color: #0969da; }
-              table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-              td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #d0d7de; }
-              tr:first-child td { font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <h1>Namazu Conductor API Documentation</h1>
-            <p><a href="latest/">Latest release</a></p>
-            <h2>All Versions</h2>
-            <table>${VERSION_ROWS}</table>
-          </body>
-          </html>
-          HTMLEOF
-
-          cd /tmp/gh-pages
-          git add .
-          if ! git diff --cached --quiet; then
-            git commit -m "API docs for v${VERSION}"
-            git push origin gh-pages
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          aws s3 sync target/dokka/ "s3://namazu-apidocs/namazu-conductor/${VERSION}/" --delete
+          aws s3 sync target/dokka/ "s3://namazu-apidocs/namazu-conductor/latest/" --delete

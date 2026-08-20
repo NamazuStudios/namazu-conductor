@@ -66,8 +66,8 @@ jobs:
     needs: [ preflight, kubernetes-it, edgegap-it, ecs-it ]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       packages: write
+      id-token: write
 
     steps:
 
@@ -94,36 +94,15 @@ jobs:
       - name: Generate API documentation
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
-      - name: Publish snapshot docs to GitHub Pages
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_APIDOCS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Publish snapshot docs to S3
         run: |
           set -e
           VERSION="${{ needs.preflight.outputs.version }}"
-          REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Clone gh-pages branch, or create it fresh if it doesn't exist yet
-          if git ls-remote --exit-code --heads "$REMOTE_URL" gh-pages > /dev/null 2>&1; then
-            git clone --branch gh-pages --depth 1 "$REMOTE_URL" /tmp/gh-pages
-          else
-            mkdir /tmp/gh-pages
-            cd /tmp/gh-pages
-            git init
-            git remote add origin "$REMOTE_URL"
-            git checkout --orphan gh-pages
-            cd -
-          fi
-
-          # Always overwrite snapshot/ with the latest docs
-          rm -rf /tmp/gh-pages/snapshot
-          cp -r target/dokka/. /tmp/gh-pages/snapshot/
-
-          cd /tmp/gh-pages
-          git add .
-          if ! git diff --cached --quiet; then
-            git commit -m "Snapshot docs for ${VERSION}"
-            git push origin gh-pages
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          aws s3 sync target/dokka/ "s3://namazu-apidocs/namazu-conductor/${VERSION}-${SHORT_SHA}/" --delete
