@@ -94,6 +94,9 @@ jobs:
       - name: Generate API documentation
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
+      - name: Apply brand styling to API documentation
+        run: ./dokka/apply-branding.sh target/dokka
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

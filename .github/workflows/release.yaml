@@ -165,6 +165,10 @@ jobs:
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
         run: mvn -B --no-transfer-progress dokka:dokka -Pdocs -N
 
+      - name: Apply brand styling to API documentation
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        run: ./dokka/apply-branding.sh target/dokka
+
       - name: Configure AWS credentials
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
         uses: aws-actions/configure-aws-credentials@v4

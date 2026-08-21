@@ -1,0 +1,29 @@
+:root {
+  --hover-link-color: #FF0099;
+  --active-section-color: #FF0099;
+  --sidemenu-section-active-color: #FF0099;
+  --active-tab-border-color: #FF0099;
+  --footer-background: #0D1335;
+  --footer-font-color: rgba(255, 255, 255, 0.7);
+  --footer-go-to-top-color: rgba(255, 255, 255, 0.7);
+}
+
+.theme-dark {
+  --hover-link-color: #FF0099;
+  --active-section-color: #FF0099;
+  --sidemenu-section-active-color: #FF0099;
+  --active-tab-border-color: #FF0099;
+}
+
+#navigation-wrapper {
+  background-color: #0D1335;
+}
+
+#navigation-wrapper .library-name--link,
+#navigation-wrapper .library-version {
+  color: #ffffff;
+}
+
+a {
+  color: #FF0099;
+}
