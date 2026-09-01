@@ -405,29 +405,54 @@ Resources:
         - Key: Name
           Value: conductor-integration-test
 
-  # A managed policy (6,144-byte quota) rather than an inline AWS::IAM::Policy (2,048-byte quota,
-  # non-adjustable) — the daemon/autoscaling statements pushed the inline policy over its limit.
+  # Inline policy (2,048-byte quota, non-adjustable). The deployer user that creates this stack in
+  # CI lacks iam:CreatePolicy, so this can't be an AWS::IAM::ManagedPolicy — statements are
+  # consolidated by Resource/Condition shape (rather than one per API call) to fit the quota.
   IntegrationTestUserPolicy:
-    Type: AWS::IAM::ManagedPolicy
+    Type: AWS::IAM::Policy
     Properties:
-      ManagedPolicyName: conductor-integration-test
+      PolicyName: conductor-integration-test
       Users:
         - !Ref IntegrationTestUser
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
 
-          # Profile discovery - getAvailableProfiles()
-          - Sid: EcsListAndDescribeTaskDefinitions
+          # No-condition, wildcard-resource reads/writes - discovery, network/instance lookups,
+          # ECR auth, and daemon autoscaling target management (Application Auto Scaling doesn't
+          # support ARN-scoped resource conditions).
+          - Sid: UnconditionedWildcardActions
             Effect: Allow
             Action:
               - ecs:ListTaskDefinitionFamilies
               - ecs:DescribeTaskDefinition
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeInstances
+              - ecr:GetAuthorizationToken
+              - application-autoscaling:RegisterScalableTarget
+              - application-autoscaling:DeregisterScalableTarget
+              - application-autoscaling:DescribeScalableTargets
             Resource: '*'
 
-          # Task execution - execute()
-          # Resource covers both Fargate and EC2 task definitions; cluster
-          # enforced via condition.
+          # Cluster-scoped task and service lifecycle - execute()/getFutureForStatus()/stop()/
+          # deploy()/setDesiredCount()/undeploy()/getStatus()/resolveContainerInstanceHost()
+          - Sid: EcsClusterScopedActions
+            Effect: Allow
+            Action:
+              - ecs:DescribeTasks
+              - ecs:StopTask
+              - ecs:DescribeContainerInstances
+              - ecs:CreateService
+              - ecs:UpdateService
+              - ecs:DeleteService
+              - ecs:DescribeServices
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Task execution - execute() - resource covers both Fargate and EC2 task definitions;
+          # cluster enforced via condition.
           - Sid: EcsRunTask
             Effect: Allow
             Action:
@@ -446,49 +471,6 @@ Resources:
               - iam:PassRole
             Resource: !GetAtt TaskExecutionRole.Arn
 
-          # Status polling - getFutureForStatus()
-          - Sid: EcsDescribeTasks
-            Effect: Allow
-            Action:
-              - ecs:DescribeTasks
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          # Teardown - stop()
-          - Sid: EcsStopTask
-            Effect: Allow
-            Action:
-              - ecs:StopTask
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          # Daemon deployment - deploy()/setDesiredCount()/undeploy()/getStatus()
-          - Sid: EcsManageServices
-            Effect: Allow
-            Action:
-              - ecs:CreateService
-              - ecs:UpdateService
-              - ecs:DeleteService
-              - ecs:DescribeServices
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          # Daemon autoscaling - setScalingBounds()/undeploy()/getStatus()
-          # Application Auto Scaling does not support ARN-scoped resource conditions.
-          - Sid: ApplicationAutoScalingManageEcsTargets
-            Effect: Allow
-            Action:
-              - application-autoscaling:RegisterScalableTarget
-              - application-autoscaling:DeregisterScalableTarget
-              - application-autoscaling:DescribeScalableTargets
-            Resource: '*'
-
           # One-time per-account: Application Auto Scaling needs this to create its own
           # service-linked role on the first ever RegisterScalableTarget call in the account.
           - Sid: IamCreateApplicationAutoScalingServiceLinkedRole
@@ -500,37 +482,9 @@ Resources:
               StringEquals:
                 iam:AWSServiceName: ecs.application-autoscaling.amazonaws.com
 
-          # Public IP lookup for awsvpc tasks - resolveAwsVpcHost()
-          - Sid: Ec2DescribeNetworkInterfaces
-            Effect: Allow
-            Action:
-              - ec2:DescribeNetworkInterfaces
-            Resource: '*'
-
-          # Public IP lookup for EC2/bridge tasks - resolveContainerInstanceHost()
-          - Sid: EcsDescribeContainerInstances
-            Effect: Allow
-            Action:
-              - ecs:DescribeContainerInstances
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          - Sid: Ec2DescribeInstances
-            Effect: Allow
-            Action:
-              - ec2:DescribeInstances
-            Resource: '*'
-
-          # ECR pull - required to verify the image exists and for any direct
-          # ECR calls from the test; task image pull itself is handled by the
-          # task execution role via AmazonECSTaskExecutionRolePolicy.
-          - Sid: EcrPull
-            Effect: Allow
-            Action:
-              - ecr:GetAuthorizationToken
-            Resource: '*'
+          # ECR pull - required to verify the image exists and for any direct ECR calls from the
+          # test; task image pull itself is handled by the task execution role via
+          # AmazonECSTaskExecutionRolePolicy.
           - Sid: EcrPullRepository
             Effect: Allow
             Action:
