@@ -98,6 +98,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ec2</artifactId>
         </dependency>
+        <!-- AWS SDK v2 Application Auto Scaling client for daemon scaling bounds -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>applicationautoscaling</artifactId>
+        </dependency>
         <!-- TestNG for integration tests -->
         <dependency>
             <groupId>org.testng</groupId>

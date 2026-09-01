@@ -44,6 +44,13 @@ Parameters:
     Description: >
       ECS task definition family name for the EC2 spot-backed task.
 
+  DaemonTaskFamily:
+    Type: String
+    Default: conductor-integration-test-daemon
+    Description: >
+      ECS task definition family name for the daemon (ECS Service) task, exercised by
+      DaemonOrchestrationService integration tests.
+
   EcsOptimizedAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
@@ -202,6 +209,49 @@ Resources:
           Value: FARGATE
         - Key: namazu.conductor:assignPublicIp
           Value: ENABLED
+
+  DaemonLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${DaemonTaskFamily}'
+      RetentionInDays: 7
+
+  # Backs DaemonOrchestrationService integration tests — deployed via CreateService rather than
+  # RunTask, so it's tagged workloadKind=daemon to keep it out of getAvailableProfiles()/RunTask-based
+  # job discovery entirely. Reuses the same Fargate/awsvpc shape and test image as TaskDefinition.
+  DaemonTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref DaemonTaskFamily
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: nginx
+          Image: !Sub '${RepositoryUrl}/${ImageName}'
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DaemonLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: namazu.conductor:jobSet
+          Value: default
+        - Key: namazu.conductor:workloadKind
+          Value: daemon
+        - Key: namazu.conductor:launchType
+          Value: FARGATE
+        - Key: namazu.conductor:assignPublicIp
+          Value: ENABLED
+        - Key: namazu.conductor:desiredCount
+          Value: '1'
 
 # ---------------------------------------------------------------------------
 # EC2 spot-backed capacity
@@ -414,6 +464,40 @@ Resources:
               ArnEquals:
                 ecs:cluster: !GetAtt Cluster.Arn
 
+          # Daemon deployment - deploy()/setDesiredCount()/undeploy()/getStatus()
+          - Sid: EcsManageServices
+            Effect: Allow
+            Action:
+              - ecs:CreateService
+              - ecs:UpdateService
+              - ecs:DeleteService
+              - ecs:DescribeServices
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Daemon autoscaling - setScalingBounds()/undeploy()/getStatus()
+          # Application Auto Scaling does not support ARN-scoped resource conditions.
+          - Sid: ApplicationAutoScalingManageEcsTargets
+            Effect: Allow
+            Action:
+              - application-autoscaling:RegisterScalableTarget
+              - application-autoscaling:DeregisterScalableTarget
+              - application-autoscaling:DescribeScalableTargets
+            Resource: '*'
+
+          # One-time per-account: Application Auto Scaling needs this to create its own
+          # service-linked role on the first ever RegisterScalableTarget call in the account.
+          - Sid: IamCreateApplicationAutoScalingServiceLinkedRole
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName: ecs.application-autoscaling.amazonaws.com
+
           # Public IP lookup for awsvpc tasks - resolveAwsVpcHost()
           - Sid: Ec2DescribeNetworkInterfaces
             Effect: Allow
@@ -488,6 +572,10 @@ Outputs:
   EcsEc2TaskFamily:
     Description: EC2 spot task definition family
     Value: !Ref Ec2TaskFamily
+
+  EcsDaemonTaskFamily:
+    Description: Daemon (ECS Service) task definition family
+    Value: !Ref DaemonTaskFamily
 
   AwsAccessKeyId:
     Description: AWS_ACCESS_KEY_ID

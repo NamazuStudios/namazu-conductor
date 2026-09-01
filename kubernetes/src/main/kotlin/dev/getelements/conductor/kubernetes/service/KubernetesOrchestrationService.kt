@@ -3,8 +3,12 @@ package dev.getelements.conductor.kubernetes.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.DaemonExecution
+import dev.getelements.conductor.DaemonRequest
+import dev.getelements.conductor.DaemonStatus
 import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
+import dev.getelements.conductor.JobPlacement
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.JobStdio
@@ -13,14 +17,19 @@ import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
+import dev.getelements.conductor.kubernetes.KubernetesDaemon
 import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
 import dev.getelements.conductor.kubernetes.KubernetesJobProfile
 import dev.getelements.conductor.kubernetes.WorkloadKind
+import dev.getelements.conductor.service.Daemon
+import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import io.fabric8.kubernetes.api.model.DeletionPropagation
 import io.fabric8.kubernetes.api.model.EnvVar
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder
+import io.fabric8.kubernetes.api.model.OwnerReference
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder
 import io.fabric8.kubernetes.api.model.Pod
 import io.fabric8.kubernetes.api.model.PodBuilder
@@ -31,6 +40,8 @@ import io.fabric8.kubernetes.api.model.Service
 import io.fabric8.kubernetes.api.model.ServiceBuilder
 import io.fabric8.kubernetes.api.model.ServicePort
 import io.fabric8.kubernetes.api.model.ServicePortBuilder
+import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder
+import io.fabric8.kubernetes.api.model.autoscaling.v2.HorizontalPodAutoscalerBuilder
 import io.fabric8.kubernetes.api.model.batch.v1.Job
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
@@ -45,14 +56,18 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 
 /**
- * [OrchestrationService] implementation backed by Kubernetes via the Fabric8 client.
+ * [OrchestrationService] and [DaemonOrchestrationService] implementation backed by Kubernetes via
+ * the Fabric8 client.
  *
- * Profiles correspond to `PodTemplate` resources in the configured namespace, filtered by the
- * `namazu.conductor/job-set` label. A [JobRequest] is dispatched either as a bare `Pod` (long-standing
- * workloads) or a `batch/v1 Job` (one-off, run-to-completion workloads), selected by the
- * `namazu.conductor/workload-kind` annotation on the template. A `Service` is created only when the
- * template declares the `namazu.conductor/expose-ports` annotation; its type defaults to `NodePort`
- * and may be overridden via `namazu.conductor/service-type`.
+ * Profiles/daemons correspond to `PodTemplate` resources in the configured namespace, filtered by
+ * the `namazu.conductor/job-set` label. A [JobRequest] is dispatched either as a bare `Pod`
+ * (long-standing workloads) or a `batch/v1 Job` (one-off, run-to-completion workloads); a
+ * [DaemonRequest] is deployed as a `Deployment` (persistent, horizontally-scaled workloads) — all
+ * selected by the `namazu.conductor/workload-kind` annotation on the template. A `Service` is
+ * created only when the template declares the `namazu.conductor/expose-ports` annotation; its type
+ * defaults to `NodePort` and may be overridden via `namazu.conductor/service-type`. For daemons, a
+ * `HorizontalPodAutoscaler` is additionally created when both `namazu.conductor/min-replicas` and
+ * `namazu.conductor/max-replicas` are present.
  *
  * Only [RegionPlacement] is honoured (mapped to a `topology.kubernetes.io/zone` node selector); other
  * [dev.getelements.conductor.JobPlacement] types are silently ignored.
@@ -72,7 +87,7 @@ class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.WATCH_ENABLED) watchEnabled: String = "false",
     private val client: KubernetesClient,
     private val executor: ExecutorService
-) : OrchestrationService {
+) : OrchestrationService, DaemonOrchestrationService {
 
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationService::class.java)
 
@@ -82,7 +97,8 @@ class KubernetesOrchestrationService @Inject constructor(
 
     /**
      * Returns one [KubernetesJobProfile] per `PodTemplate` in the configured namespace labelled
-     * `namazu.conductor/job-set=<jobSet>`. Templates without a container are skipped.
+     * `namazu.conductor/job-set=<jobSet>`. Templates without a container, or whose `workload-kind` is
+     * `daemon`, are skipped (see [getAvailableDaemons]).
      */
     override fun getAvailableProfiles(): List<JobProfile> =
         client.resources(PodTemplate::class.java)
@@ -96,9 +112,8 @@ class KubernetesOrchestrationService @Inject constructor(
         val container = template.template?.spec?.containers?.firstOrNull() ?: return null
         val annotations = template.metadata?.annotations ?: emptyMap()
 
-        val kind = annotations[ANN_WORKLOAD_KIND]
-            ?.let { runCatching { WorkloadKind.valueOf(it.trim().uppercase()) }.getOrNull() }
-            ?: WorkloadKind.POD
+        val kind = workloadKindOf(annotations)
+        if (kind == WorkloadKind.DAEMON) return null
 
         val templateName = template.metadata?.name ?: return null
 
@@ -116,6 +131,46 @@ class KubernetesOrchestrationService @Inject constructor(
             parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM)
         )
     }
+
+    /**
+     * Returns one [KubernetesDaemon] per `PodTemplate` in the configured namespace labelled
+     * `namazu.conductor/job-set=<jobSet>` whose `namazu.conductor/workload-kind` annotation is
+     * `daemon`. Templates without a container, or whose `workload-kind` is not `daemon`, are skipped
+     * (see [getAvailableProfiles]).
+     */
+    override fun getAvailableDaemons(): List<Daemon> =
+        client.resources(PodTemplate::class.java)
+            .inNamespace(namespace)
+            .withLabel(LABEL_JOB_SET, jobSet)
+            .list()
+            .items
+            .mapNotNull { toDaemon(it) }
+
+    private fun toDaemon(template: PodTemplate): KubernetesDaemon? {
+        val container = template.template?.spec?.containers?.firstOrNull() ?: return null
+        val annotations = template.metadata?.annotations ?: emptyMap()
+
+        if (workloadKindOf(annotations) != WorkloadKind.DAEMON) return null
+
+        val templateName = template.metadata?.name ?: return null
+
+        return KubernetesDaemon(
+            namespace = template.metadata?.namespace ?: namespace,
+            name = templateName,
+            primaryContainer = container.name,
+            exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
+            serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
+            replicas = parseIntAnnotation(templateName, annotations, ANN_REPLICAS) ?: 1,
+            minReplicas = parseIntAnnotation(templateName, annotations, ANN_MIN_REPLICAS),
+            maxReplicas = parseIntAnnotation(templateName, annotations, ANN_MAX_REPLICAS),
+            targetCpuUtilizationPercentage = parseIntAnnotation(templateName, annotations, ANN_TARGET_CPU_UTILIZATION_PERCENTAGE)
+        )
+    }
+
+    private fun workloadKindOf(annotations: Map<String, String>): WorkloadKind =
+        annotations[ANN_WORKLOAD_KIND]
+            ?.let { runCatching { WorkloadKind.valueOf(it.trim().uppercase()) }.getOrNull() }
+            ?: WorkloadKind.POD
 
     /**
      * Creates a `Pod` or `Job` for the given [JobRequest] and returns a [JobExecution] with status
@@ -142,8 +197,8 @@ class KubernetesOrchestrationService @Inject constructor(
         val spec = podTemplateSpec.spec
             ?: throw JobException("PodTemplate '${profile.name}' has no pod spec")
 
-        applyOverrides(spec, profile, request)
-        applyPlacement(spec, request)
+        applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
+        applyPlacement(spec, request.placement)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
             ?: profile.namespace
@@ -210,9 +265,11 @@ class KubernetesOrchestrationService @Inject constructor(
                     .withBlockOwnerDeletion(true)
                     .build()
             }
+            WorkloadKind.DAEMON ->
+                throw JobException("PodTemplate '${profile.name}' is workload-kind 'daemon'; use deploy() instead of execute()")
         }
 
-        createServiceIfRequested(profile, namespace, runName, ownerRef)
+        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef)
 
         return JobExecution(
             id = encodeId(namespace, profile.workloadKind, runName),
@@ -223,6 +280,278 @@ class KubernetesOrchestrationService @Inject constructor(
                 name = runName
             )
         )
+    }
+
+    /**
+     * Creates a `Deployment` (and, optionally, a `HorizontalPodAutoscaler`) for the given
+     * [DaemonRequest] and returns a [DaemonExecution] with status [DaemonStatus.PENDING]. The
+     * workload's name is derived from the profile name plus a short unique suffix and is carried in
+     * the [DaemonExecution.id] as `"$namespace:daemon:$name"`. When the profile declares ports to
+     * expose, a `Service` selecting the workload is created alongside it. An HPA is created only when
+     * both [KubernetesDaemon.minReplicas] and [KubernetesDaemon.maxReplicas] are set.
+     *
+     * @throws JobException if [DaemonRequest.profile] is not a [KubernetesDaemon] or the underlying
+     *   `PodTemplate` can no longer be found.
+     */
+    override fun deploy(request: DaemonRequest): DaemonExecution {
+        val profile = request.profile as? KubernetesDaemon
+            ?: throw JobException("Daemon must be a ${KubernetesDaemon::class.simpleName}; got ${request.profile::class.simpleName}")
+
+        val template = client.resources(PodTemplate::class.java)
+            .inNamespace(profile.namespace)
+            .withName(profile.name)
+            .get()
+            ?: throw JobException("PodTemplate '${profile.name}' not found in namespace '${profile.namespace}'")
+
+        val podTemplateSpec = template.template
+            ?: throw JobException("PodTemplate '${profile.name}' has no pod template spec")
+
+        val spec = podTemplateSpec.spec
+            ?: throw JobException("PodTemplate '${profile.name}' has no pod spec")
+
+        applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
+        applyPlacement(spec, request.placement)
+
+        val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
+            ?: profile.namespace
+
+        val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
+        val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
+
+        val podMeta = ObjectMetaBuilder()
+            .addToLabels(templateLabels)
+            .addToLabels(LABEL_OWNED_BY, runName)
+            .build()
+
+        val deployment = DeploymentBuilder()
+            .withMetadata(
+                ObjectMetaBuilder()
+                    .withName(runName)
+                    .withNamespace(namespace)
+                    .addToLabels(LABEL_OWNED_BY, runName)
+                    .build()
+            )
+            .withNewSpec()
+                .withReplicas(profile.replicas)
+                .withNewSelector()
+                    .addToMatchLabels(LABEL_OWNED_BY, runName)
+                .endSelector()
+                .withTemplate(PodTemplateSpecBuilder().withMetadata(podMeta).withSpec(spec).build())
+            .endSpec()
+            .build()
+
+        val created = client.apps().deployments().inNamespace(namespace).resource(deployment).create()
+
+        val ownerRef = OwnerReferenceBuilder()
+            .withApiVersion("apps/v1")
+            .withKind("Deployment")
+            .withName(runName)
+            .withUid(created.metadata.uid)
+            .withController(true)
+            .withBlockOwnerDeletion(true)
+            .build()
+
+        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef)
+
+        if (profile.minReplicas != null && profile.maxReplicas != null) {
+            createHpa(
+                namespace,
+                runName,
+                ownerRef,
+                profile.minReplicas,
+                profile.maxReplicas,
+                profile.targetCpuUtilizationPercentage ?: DEFAULT_TARGET_CPU_UTILIZATION_PERCENTAGE
+            )
+        }
+
+        return DaemonExecution(
+            id = encodeId(namespace, WorkloadKind.DAEMON, runName),
+            status = DaemonStatus.PENDING,
+            desiredCount = profile.replicas,
+            runningCount = 0,
+            minCount = profile.minReplicas,
+            maxCount = profile.maxReplicas,
+            details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "daemon", name = runName)
+        )
+    }
+
+    /**
+     * Deletes the `Deployment` identified by [execution], any `HorizontalPodAutoscaler` and `Service`
+     * the provider created for it.
+     *
+     * @throws JobException if the `Deployment` is not found (Fabric8 returns an empty result list
+     *   rather than throwing on 404).
+     */
+    override fun undeploy(execution: DaemonExecution) {
+        val (ns, kind, name) = decodeId(execution.id)
+        requireDaemon(kind, name)
+
+        runCatching {
+            client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name).delete()
+        }.onFailure { logger.warn("Failed to delete HorizontalPodAutoscaler '{}' in namespace '{}'", name, ns, it) }
+
+        val deleted = client.apps().deployments().inNamespace(ns).withName(name)
+            .withPropagationPolicy(DeletionPropagation.BACKGROUND)
+            .delete()
+
+        if (deleted.isEmpty()) {
+            logger.warn("undeploy(): Deployment '{}' not found in namespace '{}' — nothing deleted", name, ns)
+            throw JobException("Kubernetes deployment '$name' not found in namespace '$ns'")
+        }
+
+        logger.debug("undeploy(): deleted Deployment '{}' in namespace '{}'", name, ns)
+
+        // Delete any owned Service. No-op when none was created.
+        client.services().inNamespace(ns).withName(name).delete()
+    }
+
+    /**
+     * Returns a fresh snapshot of [execution]'s status, derived from the live `Deployment` (and, if
+     * present, `HorizontalPodAutoscaler` and `Service`) state. [DaemonStatus.RUNNING] requires ready
+     * replicas to meet or exceed the desired count; [DaemonStatus.DEGRADED] covers a partially-ready
+     * Deployment; [DaemonStatus.FAILED] covers a missing Deployment or a `Progressing=False`
+     * condition (rare in practice, since Deployments retry indefinitely by design).
+     */
+    override fun getStatus(execution: DaemonExecution): DaemonExecution {
+        val (ns, kind, name) = decodeId(execution.id)
+        requireDaemon(kind, name)
+
+        val deployment = client.apps().deployments().inNamespace(ns).withName(name).get()
+            ?: return execution.copy(status = DaemonStatus.FAILED, runningCount = 0)
+
+        val desired = deployment.spec?.replicas ?: 0
+        val ready = deployment.status?.readyReplicas ?: 0
+
+        val progressingFailed = deployment.status?.conditions.orEmpty()
+            .any { it.type == "Progressing" && it.status == "False" }
+
+        val status = when {
+            progressingFailed -> DaemonStatus.FAILED
+            ready >= desired && desired > 0 -> DaemonStatus.RUNNING
+            ready == 0 -> DaemonStatus.PENDING
+            else -> DaemonStatus.DEGRADED
+        }
+
+        val hpa = client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name).get()
+
+        val endpoints = client.services().inNamespace(ns).withName(name).get()
+            ?.let { endpointsFromService(it) }
+            ?: emptyList()
+
+        return DaemonExecution(
+            id = execution.id,
+            status = status,
+            desiredCount = desired,
+            runningCount = ready,
+            minCount = hpa?.spec?.minReplicas,
+            maxCount = hpa?.spec?.maxReplicas,
+            endpoints = endpoints,
+            details = execution.details
+        )
+    }
+
+    /**
+     * Patches the `Deployment`'s replica count and returns a fresh [getStatus] snapshot. Note that an
+     * active `HorizontalPodAutoscaler` may reassert its own desired count on its next reconcile if the
+     * manually-set count doesn't match current scaling conditions — this is expected Kubernetes
+     * behaviour, not a bug.
+     */
+    override fun setDesiredCount(execution: DaemonExecution, desired: Int): DaemonExecution {
+        val (ns, kind, name) = decodeId(execution.id)
+        requireDaemon(kind, name)
+
+        client.apps().deployments().inNamespace(ns).withName(name)
+            .edit { current -> DeploymentBuilder(current).editSpec().withReplicas(desired).endSpec().build() }
+
+        return getStatus(execution)
+    }
+
+    /**
+     * Sets the autoscaling bounds for [execution]. If a `HorizontalPodAutoscaler` already exists for
+     * this daemon, its bounds are patched in place; otherwise a new one is created (using the default
+     * CPU utilization target, since none was configured at deploy time), retroactively enabling
+     * autoscaling on a Deployment originally deployed without bounds. Returns a fresh [getStatus]
+     * snapshot.
+     */
+    override fun setScalingBounds(execution: DaemonExecution, min: Int, max: Int): DaemonExecution {
+        val (ns, kind, name) = decodeId(execution.id)
+        requireDaemon(kind, name)
+
+        val existing = client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name).get()
+
+        if (existing != null) {
+            client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name)
+                .edit { current ->
+                    HorizontalPodAutoscalerBuilder(current).editSpec()
+                        .withMinReplicas(min)
+                        .withMaxReplicas(max)
+                        .endSpec()
+                        .build()
+                }
+        } else {
+            val deployment = client.apps().deployments().inNamespace(ns).withName(name).get()
+                ?: throw JobException("Kubernetes deployment '$name' not found in namespace '$ns'")
+
+            val ownerRef = OwnerReferenceBuilder()
+                .withApiVersion("apps/v1")
+                .withKind("Deployment")
+                .withName(name)
+                .withUid(deployment.metadata.uid)
+                .withController(true)
+                .withBlockOwnerDeletion(true)
+                .build()
+
+            createHpa(ns, name, ownerRef, min, max, DEFAULT_TARGET_CPU_UTILIZATION_PERCENTAGE)
+        }
+
+        return getStatus(execution)
+    }
+
+    private fun createHpa(
+        namespace: String,
+        name: String,
+        ownerRef: OwnerReference,
+        minReplicas: Int,
+        maxReplicas: Int,
+        targetCpuUtilizationPercentage: Int
+    ) {
+        val hpa = HorizontalPodAutoscalerBuilder()
+            .withMetadata(
+                ObjectMetaBuilder()
+                    .withName(name)
+                    .withNamespace(namespace)
+                    .addToLabels(LABEL_OWNED_BY, name)
+                    .addToOwnerReferences(ownerRef)
+                    .build()
+            )
+            .withNewSpec()
+                .withNewScaleTargetRef()
+                    .withApiVersion("apps/v1")
+                    .withKind("Deployment")
+                    .withName(name)
+                .endScaleTargetRef()
+                .withMinReplicas(minReplicas)
+                .withMaxReplicas(maxReplicas)
+                .addNewMetric()
+                    .withType("Resource")
+                    .withNewResource()
+                        .withName("cpu")
+                        .withNewTarget()
+                            .withType("Utilization")
+                            .withAverageUtilization(targetCpuUtilizationPercentage)
+                        .endTarget()
+                    .endResource()
+                .endMetric()
+            .endSpec()
+            .build()
+
+        client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(namespace).resource(hpa).create()
+    }
+
+    private fun requireDaemon(kind: WorkloadKind, name: String) {
+        if (kind != WorkloadKind.DAEMON) {
+            throw JobException("Execution '$name' is not a daemon execution (kind=$kind)")
+        }
     }
 
     override fun listExecutions(): List<JobExecution> {
@@ -340,6 +669,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     }
                 })
             }
+            WorkloadKind.DAEMON ->
+                throw JobException("Execution '$name' is a daemon; use getStatus() instead of getFutureForStatus()")
         }
 
         future.whenComplete { _, _ -> watch.close() }
@@ -380,13 +711,15 @@ class KubernetesOrchestrationService @Inject constructor(
         val deleted = when (kind) {
             WorkloadKind.POD -> client.pods().inNamespace(ns).withName(name).delete()
             WorkloadKind.JOB -> client.batch().v1().jobs().inNamespace(ns).withName(name)
-                .withPropagationPolicy(io.fabric8.kubernetes.api.model.DeletionPropagation.BACKGROUND)
+                .withPropagationPolicy(DeletionPropagation.BACKGROUND)
                 .delete()
+            WorkloadKind.DAEMON ->
+                throw JobException("Execution '$name' is a daemon; use undeploy() instead of stop()")
         }
 
         if (deleted.isEmpty()) {
             logger.warn("stop(): {} '{}' not found in namespace '{}' — nothing deleted", kind, name, ns)
-            throw dev.getelements.conductor.exception.JobException(
+            throw JobException(
                 "Kubernetes ${kind.name.lowercase()} '$name' not found in namespace '$ns'"
             )
         }
@@ -418,6 +751,8 @@ class KubernetesOrchestrationService @Inject constructor(
                 ?: throw StdioUnavailableException(
                     "No pod found for Job '$name' in namespace '$ns' — job may not have started yet"
                 )
+            WorkloadKind.DAEMON ->
+                throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming for daemon executions")
         }
 
         val resource = client.pods().inNamespace(ns).withName(podName)
@@ -461,6 +796,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     ?: return JobStatus.FAILED
                 mapJobStatus(ns, name, job)
             }
+            WorkloadKind.DAEMON ->
+                throw JobException("Execution '$name' is a daemon; use getStatus() instead of getFutureForStatus()")
         }
     }
 
@@ -482,6 +819,7 @@ class KubernetesOrchestrationService @Inject constructor(
         val pod = when (kind) {
             WorkloadKind.POD -> client.pods().inNamespace(ns).withName(name).get()
             WorkloadKind.JOB -> locatePod(ns, name)
+            WorkloadKind.DAEMON -> null
         } ?: return emptyList()
 
         val host = pod.status?.podIP ?: return emptyList()
@@ -524,12 +862,13 @@ class KubernetesOrchestrationService @Inject constructor(
         client.pods().inNamespace(ns).withLabel(LABEL_OWNED_BY, jobName).list().items.firstOrNull()
 
     private fun createServiceIfRequested(
-        profile: KubernetesJobProfile,
+        exposePorts: String,
+        serviceType: String,
         namespace: String,
         runName: String,
-        ownerRef: io.fabric8.kubernetes.api.model.OwnerReference
+        ownerRef: OwnerReference
     ) {
-        val ports = parseExposePorts(profile.exposePorts)
+        val ports = parseExposePorts(exposePorts)
         if (ports.isEmpty()) return
 
         val servicePorts: List<ServicePort> = ports.map { (port, protocol) ->
@@ -551,7 +890,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     .build()
             )
             .withNewSpec()
-            .withType(profile.serviceType)
+            .withType(serviceType)
             .addToSelector(LABEL_OWNED_BY, runName)
             .withPorts(servicePorts)
             .endSpec()
@@ -560,22 +899,28 @@ class KubernetesOrchestrationService @Inject constructor(
         client.services().inNamespace(namespace).resource(service).create()
     }
 
-    private fun applyOverrides(spec: PodSpec, profile: KubernetesJobProfile, request: JobRequest) {
-        val container = spec.containers.firstOrNull { it.name == profile.primaryContainer }
-            ?: throw JobException("Container '${profile.primaryContainer}' not found in PodTemplate '${profile.name}'")
+    private fun applyOverrides(
+        spec: PodSpec,
+        primaryContainer: String,
+        command: List<String>,
+        args: List<String>,
+        environment: Map<String, String>
+    ) {
+        val container = spec.containers.firstOrNull { it.name == primaryContainer }
+            ?: throw JobException("Container '$primaryContainer' not found in PodTemplate spec")
 
-        if (request.command.isNotEmpty()) container.command = request.command
-        if (request.args.isNotEmpty()) container.args = request.args
+        if (command.isNotEmpty()) container.command = command
+        if (args.isNotEmpty()) container.args = args
 
-        if (request.environment.isNotEmpty()) {
+        if (environment.isNotEmpty()) {
             val merged = container.env.orEmpty().associateBy { it.name }.toMutableMap()
-            request.environment.forEach { (key, value) -> merged[key] = EnvVar(key, value, null) }
+            environment.forEach { (key, value) -> merged[key] = EnvVar(key, value, null) }
             container.env = merged.values.toList()
         }
     }
 
-    private fun applyPlacement(spec: PodSpec, request: JobRequest) {
-        val region = request.placement.filterIsInstance<RegionPlacement>().firstOrNull() ?: return
+    private fun applyPlacement(spec: PodSpec, placement: List<JobPlacement>) {
+        val region = placement.filterIsInstance<RegionPlacement>().firstOrNull() ?: return
         val selector = spec.nodeSelector.orEmpty().toMutableMap()
         selector[ZONE_LABEL] = region.id
         spec.nodeSelector = selector
@@ -630,6 +975,8 @@ class KubernetesOrchestrationService @Inject constructor(
 
         private const val DEFAULT_SERVICE_TYPE = "NodePort"
 
+        private const val DEFAULT_TARGET_CPU_UTILIZATION_PERCENTAGE = 80
+
         const val LABEL_JOB_SET = "namazu.conductor/job-set"
 
         const val LABEL_OWNED_BY = "namazu.conductor/owned-by"
@@ -649,6 +996,14 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_COMPLETIONS = "namazu.conductor/completions"
 
         const val ANN_PARALLELISM = "namazu.conductor/parallelism"
+
+        const val ANN_REPLICAS = "namazu.conductor/replicas"
+
+        const val ANN_MIN_REPLICAS = "namazu.conductor/min-replicas"
+
+        const val ANN_MAX_REPLICAS = "namazu.conductor/max-replicas"
+
+        const val ANN_TARGET_CPU_UTILIZATION_PERCENTAGE = "namazu.conductor/target-cpu-utilization-percentage"
 
         const val ZONE_LABEL = "topology.kubernetes.io/zone"
 

@@ -1,8 +1,8 @@
 # Kubernetes Provider
 
-The `kubernetes` module implements `OrchestrationService` for Kubernetes using the [Fabric8](https://github.com/fabric8io/kubernetes-client) client. A `JobProfile` maps to a Kubernetes **`PodTemplate`** resource; behavior is driven by labels and annotations on the template rather than service-level configuration, so each template declares its own runtime requirements.
+The `kubernetes` module implements `OrchestrationService` and `DaemonOrchestrationService` for Kubernetes using the [Fabric8](https://github.com/fabric8io/kubernetes-client) client. A `JobProfile`/`Daemon` maps to a Kubernetes **`PodTemplate`** resource; behavior is driven by labels and annotations on the template rather than service-level configuration, so each template declares its own runtime requirements.
 
-A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 Job`**, and a **`Service`** is created on demand when the template asks for ports to be exposed.
+A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 Job`**, and a **`Service`** is created on demand when the template asks for ports to be exposed. A daemon runs as a persistent **`Deployment`**, optionally paired with a **`HorizontalPodAutoscaler`** — see [Daemons](#daemons) below.
 
 ## Configuration Attributes
 
@@ -35,6 +35,7 @@ Selects the workload primitive created at execution time.
 |---|---|
 | `pod` | A long-standing bare `Pod`. Pod phase maps directly onto `JobStatus`. **Default** if the annotation is absent. |
 | `job` | A one-off `batch/v1 Job` (run-to-completion). Job status drives `COMPLETED`/`FAILED`; while active, the underlying pod supplies `RUNNING` and endpoints. |
+| `daemon` | A persistent `Deployment`, surfaced via `DaemonOrchestrationService.getAvailableDaemons()` instead of `getAvailableProfiles()`. See [Daemons](#daemons). |
 
 ```yaml
 metadata:
@@ -75,6 +76,79 @@ When a template declares `expose-ports`, `execute()` creates the workload and a 
 Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
 
 Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/zone` node selector (zone is finer-grained than region; its `id` is the target zone). `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
+
+## Daemons
+
+`DaemonOrchestrationService` deploys a `PodTemplate` tagged `namazu.conductor/workload-kind: daemon` as a persistent, horizontally-scaled `Deployment` instead of a `Pod`/`Job`. Discovery uses the same `namazu.conductor/job-set` label filter as job profiles; a template is surfaced by exactly one of `getAvailableProfiles()`/`getAvailableDaemons()` depending on its `workload-kind`, never both.
+
+### New annotations
+
+| Annotation | Maps to | Default |
+|---|---|---|
+| `namazu.conductor/replicas` | `Deployment.spec.replicas` | `1` |
+| `namazu.conductor/min-replicas` | `HorizontalPodAutoscaler.spec.minReplicas` | absent → no HPA |
+| `namazu.conductor/max-replicas` | `HorizontalPodAutoscaler.spec.maxReplicas` | absent → no HPA |
+| `namazu.conductor/target-cpu-utilization-percentage` | HPA CPU metric target utilization | `80` (only used if an HPA is created) |
+
+A `HorizontalPodAutoscaler` is created at `deploy()` time only when **both** `min-replicas` and `max-replicas` are present. `expose-ports`/`service-type` work exactly as they do for jobs — a `Service` is created when ports are declared, using the same `namazu.conductor/owned-by` label convention for cleanup.
+
+### Fixed-replica daemon behind a LoadBalancer Service
+
+```yaml
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: my-game-service
+  namespace: default
+  labels:
+    namazu.conductor/job-set: default
+  annotations:
+    namazu.conductor/workload-kind: daemon
+    namazu.conductor/replicas: "3"
+    namazu.conductor/expose-ports: "7777/udp"
+    namazu.conductor/service-type: LoadBalancer
+template:
+  spec:
+    containers:
+      - name: server
+        image: ghcr.io/example/my-game-service:latest
+        ports:
+          - containerPort: 7777
+            protocol: UDP
+```
+
+### Autoscaled daemon
+
+```yaml
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: my-autoscaled-service
+  namespace: default
+  labels:
+    namazu.conductor/job-set: default
+  annotations:
+    namazu.conductor/workload-kind: daemon
+    namazu.conductor/replicas: "2"
+    namazu.conductor/min-replicas: "2"
+    namazu.conductor/max-replicas: "10"
+    namazu.conductor/target-cpu-utilization-percentage: "70"
+template:
+  spec:
+    containers:
+      - name: server
+        image: ghcr.io/example/my-autoscaled-service:latest
+```
+
+### Scaling operations
+
+`setDesiredCount()` patches `Deployment.spec.replicas` directly. **If an HPA is active, it may reassert its own desired count on its next reconcile** if the manually-set count doesn't match current scaling conditions — this is expected Kubernetes behaviour, not a bug.
+
+`setScalingBounds()` patches an existing HPA's `minReplicas`/`maxReplicas`, or creates one (with the default 70%/80% CPU target) if the daemon was deployed without autoscaling bounds — this retroactively enables autoscaling.
+
+`getStatus()` reports `DaemonStatus.RUNNING` once ready replicas meet or exceed the desired count, `DEGRADED` while partially ready, and `FAILED` for a missing Deployment or a `Progressing=False` condition (rare, since Deployments retry indefinitely by design). `minCount`/`maxCount` always reflect the *live* HPA, not the values passed to `deploy()`/`setScalingBounds()`.
+
+> Observing **actual** CPU-driven autoscaling in minikube requires `minikube addons enable metrics-server`. This is not required to exercise the integration test below, which only asserts the HPA's declared spec, not live scaling behavior.
 
 ## Stdio Streaming
 
@@ -163,7 +237,10 @@ dev.getelements.conductor.kubernetes.job.set = game-sessions
 
 ## Integration Test
 
-The module includes an integration test (`KubernetesOrchestrationServiceIT`) that runs against a real cluster — **minikube** locally and in GitHub CI. It creates its own `PodTemplate`s (a `NodePort` server, a `LoadBalancer` server, and a one-off `Job`), exercises discovery, `execute()`, status polling (or watching, via `KUBERNETES_IT_WATCH_ENABLED`), endpoint resolution, and `stop()`, then deletes everything it created.
+The module includes two integration tests that run against a real cluster — **minikube** locally and in GitHub CI:
+
+- `KubernetesOrchestrationServiceIT` creates its own `PodTemplate`s (a `NodePort` server, a `LoadBalancer` server, and a one-off `Job`), exercises discovery, `execute()`, status polling (or watching, via `KUBERNETES_IT_WATCH_ENABLED`), endpoint resolution, and `stop()`, then deletes everything it created.
+- `KubernetesDaemonOrchestrationServiceIT` creates its own daemon `PodTemplate`s (fixed-replica, autoscaled, and unbounded), and exercises `deploy()`, `setDesiredCount()`, `setScalingBounds()` (both creating and updating an HPA), `getStatus()`, and `undeploy()`, then deletes everything it created.
 
 **The test does not start or provision a cluster — one must already be running before `mvn verify`** (minikube locally; provisioned by the CI workflow in GitHub). The suite **always runs** and never skips: with no reachable cluster the calls fail and the suite fails. Every pipeline that reaches the `verify` phase therefore needs a reachable cluster, which is why the publish workflows provision minikube too.
 
