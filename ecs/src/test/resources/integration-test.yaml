@@ -405,10 +405,12 @@ Resources:
         - Key: Name
           Value: conductor-integration-test
 
+  # A managed policy (6,144-byte quota) rather than an inline AWS::IAM::Policy (2,048-byte quota,
+  # non-adjustable) — the daemon/autoscaling statements pushed the inline policy over its limit.
   IntegrationTestUserPolicy:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      PolicyName: conductor-integration-test
+      ManagedPolicyName: conductor-integration-test
       Users:
         - !Ref IntegrationTestUser
       PolicyDocument:

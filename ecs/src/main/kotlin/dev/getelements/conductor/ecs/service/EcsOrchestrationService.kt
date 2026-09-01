@@ -26,6 +26,7 @@ import dev.getelements.conductor.service.OrchestrationService
 import software.amazon.awssdk.services.applicationautoscaling.ApplicationAutoScalingClient
 import software.amazon.awssdk.services.applicationautoscaling.model.ScalableDimension
 import software.amazon.awssdk.services.applicationautoscaling.model.ServiceNamespace
+import software.amazon.awssdk.services.applicationautoscaling.model.ValidationException
 import software.amazon.awssdk.services.ec2.Ec2Client
 import software.amazon.awssdk.services.ecs.EcsClient
 import software.amazon.awssdk.services.ecs.model.AssignPublicIp
@@ -45,6 +46,7 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 
 /**
  * [OrchestrationService] and [DaemonOrchestrationService] implementation backed by AWS ECS via the
@@ -257,13 +259,7 @@ class EcsOrchestrationService @Inject constructor(
 
         if (profile.minCount != null && profile.maxCount != null) {
             try {
-                applicationAutoScalingClient.registerScalableTarget {
-                    it.serviceNamespace(ServiceNamespace.ECS)
-                    it.resourceId("service/$targetCluster/$serviceName")
-                    it.scalableDimension(ScalableDimension.ECS_SERVICE_DESIRED_COUNT)
-                    it.minCapacity(profile.minCount)
-                    it.maxCapacity(profile.maxCount)
-                }
+                registerScalableTargetWithRetry("service/$targetCluster/$serviceName", profile.minCount, profile.maxCount)
             } catch (e: Exception) {
                 throw JobException(
                     "Failed to register Application Auto Scaling target for service '$serviceName' on " +
@@ -412,15 +408,38 @@ class EcsOrchestrationService @Inject constructor(
         val serviceCluster = clusterFromServiceArn(execution.id)
         val serviceName = serviceNameFromArn(execution.id)
 
-        applicationAutoScalingClient.registerScalableTarget {
-            it.serviceNamespace(ServiceNamespace.ECS)
-            it.resourceId("service/$serviceCluster/$serviceName")
-            it.scalableDimension(ScalableDimension.ECS_SERVICE_DESIRED_COUNT)
-            it.minCapacity(min)
-            it.maxCapacity(max)
-        }
+        registerScalableTargetWithRetry("service/$serviceCluster/$serviceName", min, max)
 
         return getStatus(execution)
+    }
+
+    /**
+     * Calls `RegisterScalableTarget`, retrying for up to 60s on the
+     * `ValidationException: Unable to assume IAM role ... AWSServiceRoleForApplicationAutoScaling_ECSService`
+     * that Application Auto Scaling returns when the service-linked role it just created (via
+     * `iam:CreateServiceLinkedRole` on the first-ever call in the account) hasn't finished IAM's
+     * usual propagation delay for STS `AssumeRole` checks — the same class of AWS eventual-consistency
+     * lag already tolerated for ECS endpoint propagation elsewhere in this provider's IT suite.
+     */
+    private fun registerScalableTargetWithRetry(resourceId: String, minCapacity: Int, maxCapacity: Int) {
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60)
+
+        while (true) {
+            try {
+                applicationAutoScalingClient.registerScalableTarget {
+                    it.serviceNamespace(ServiceNamespace.ECS)
+                    it.resourceId(resourceId)
+                    it.scalableDimension(ScalableDimension.ECS_SERVICE_DESIRED_COUNT)
+                    it.minCapacity(minCapacity)
+                    it.maxCapacity(maxCapacity)
+                }
+                return
+            } catch (e: ValidationException) {
+                val retryable = e.message?.contains("Unable to assume IAM role") == true
+                if (!retryable || System.currentTimeMillis() >= deadline) throw e
+                Thread.sleep(2_000)
+            }
+        }
     }
 
     /**

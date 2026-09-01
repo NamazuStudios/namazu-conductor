@@ -70,7 +70,6 @@ class KubernetesDaemonOrchestrationServiceIT {
     private var podProtocol: String = "tcp"
     private var timeoutMinutes: Long = 5
 
-    private var createdNamespace: Boolean = false
     private val executions = mutableListOf<DaemonExecution>()
 
     @BeforeClass
@@ -117,15 +116,16 @@ class KubernetesDaemonOrchestrationServiceIT {
             }
         }
 
+        // Never delete the namespace itself here, even if this class created it: the namespace is
+        // shared with KubernetesOrchestrationServiceIT (same default KUBERNETES_IT_NAMESPACE), which
+        // may run in the same failsafe suite before or after this class, and deleting a namespace
+        // out from under a sibling test class racing against it causes spurious
+        // "namespace is being terminated" failures. Deleting only the templates this class created
+        // is sufficient; the namespace itself is harmless to leave behind on an ephemeral CI cluster.
         if (::client.isInitialized) {
-            if (createdNamespace) {
-                runCatching { client.namespaces().withName(namespace).delete() }
-                    .onFailure { logger.warn("Failed to delete namespace '{}'", namespace, it) }
-            } else {
-                listOf(fixedTemplate, autoscaledTemplate, unboundedTemplate).forEach { name ->
-                    runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
-                        .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
-                }
+            listOf(fixedTemplate, autoscaledTemplate, unboundedTemplate).forEach { name ->
+                runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
+                    .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
             }
         }
 
@@ -308,7 +308,6 @@ class KubernetesDaemonOrchestrationServiceIT {
             client.namespaces()
                 .resource(NamespaceBuilder().withNewMetadata().withName(namespace).endMetadata().build())
                 .create()
-            createdNamespace = true
             logger.info("Created namespace '{}'", namespace)
         }
     }

@@ -45,6 +45,8 @@ import io.fabric8.kubernetes.api.model.autoscaling.v2.HorizontalPodAutoscalerBui
 import io.fabric8.kubernetes.api.model.batch.v1.Job
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
+import io.fabric8.kubernetes.client.dsl.base.PatchContext
+import io.fabric8.kubernetes.client.dsl.base.PatchType
 import io.fabric8.kubernetes.client.Watch
 import io.fabric8.kubernetes.client.Watcher
 import io.fabric8.kubernetes.client.WatcherException
@@ -460,8 +462,16 @@ class KubernetesOrchestrationService @Inject constructor(
         val (ns, kind, name) = decodeId(execution.id)
         requireDaemon(kind, name)
 
+        // A merge patch built from a minimal object (rather than edit()'s diff-against-the-full
+        // server object) avoids serializing the live Deployment's server-populated `managedFields`,
+        // which trips a Jackson NPE in the Fabric8 model's any-getter serialization.
+        val patch = DeploymentBuilder()
+            .withNewMetadata().withName(name).withNamespace(ns).endMetadata()
+            .withNewSpec().withReplicas(desired).endSpec()
+            .build()
+
         client.apps().deployments().inNamespace(ns).withName(name)
-            .edit { current -> DeploymentBuilder(current).editSpec().withReplicas(desired).endSpec().build() }
+            .patch(PatchContext.of(PatchType.JSON_MERGE), patch)
 
         return getStatus(execution)
     }
@@ -480,14 +490,18 @@ class KubernetesOrchestrationService @Inject constructor(
         val existing = client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name).get()
 
         if (existing != null) {
+            // See setDesiredCount() — a minimal-object merge patch avoids serializing the live
+            // HPA's server-populated `managedFields`, which trips a Jackson NPE via edit().
+            val patch = HorizontalPodAutoscalerBuilder()
+                .withNewMetadata().withName(name).withNamespace(ns).endMetadata()
+                .withNewSpec()
+                    .withMinReplicas(min)
+                    .withMaxReplicas(max)
+                .endSpec()
+                .build()
+
             client.autoscaling().v2().horizontalPodAutoscalers().inNamespace(ns).withName(name)
-                .edit { current ->
-                    HorizontalPodAutoscalerBuilder(current).editSpec()
-                        .withMinReplicas(min)
-                        .withMaxReplicas(max)
-                        .endSpec()
-                        .build()
-                }
+                .patch(PatchContext.of(PatchType.JSON_MERGE), patch)
         } else {
             val deployment = client.apps().deployments().inNamespace(ns).withName(name).get()
                 ?: throw JobException("Kubernetes deployment '$name' not found in namespace '$ns'")
