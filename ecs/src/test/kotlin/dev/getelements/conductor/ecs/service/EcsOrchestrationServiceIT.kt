@@ -3,6 +3,9 @@ package dev.getelements.conductor.ecs.service
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.jakarta.rs.json.JacksonJsonProvider
+import dev.getelements.conductor.DaemonExecution
+import dev.getelements.conductor.DaemonRequest
+import dev.getelements.conductor.DaemonStatus
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
@@ -11,6 +14,8 @@ import jakarta.ws.rs.client.ClientBuilder
 import jakarta.ws.rs.core.Response
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
+import org.testng.Assert.assertNull
+import org.testng.Assert.assertTrue
 import org.slf4j.LoggerFactory
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
@@ -18,6 +23,9 @@ import org.testng.annotations.Test
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.applicationautoscaling.ApplicationAutoScalingClient
+import software.amazon.awssdk.services.applicationautoscaling.model.ScalableDimension
+import software.amazon.awssdk.services.applicationautoscaling.model.ServiceNamespace
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient
 import software.amazon.awssdk.services.cloudformation.model.AlreadyExistsException
 import software.amazon.awssdk.services.cloudformation.model.Capability
@@ -56,17 +64,20 @@ class EcsOrchestrationServiceIT {
     private lateinit var stackName: String
     private lateinit var taskFamily: String
     private lateinit var ec2TaskFamily: String
+    private lateinit var daemonTaskFamily: String
     private lateinit var cluster: String
     private lateinit var vpcId: String
     private lateinit var cfnClient: CloudFormationClient
     private lateinit var deployerEc2Client: Ec2Client
     private lateinit var ecsClient: EcsClient
+    private lateinit var applicationAutoScalingClient: ApplicationAutoScalingClient
     private lateinit var executor: ExecutorService
     private lateinit var service: EcsOrchestrationService
     private lateinit var httpClient: Client
 
     private var fargateExecutionId: String? = null
     private var ec2ExecutionId: String? = null
+    private var daemonExecution: DaemonExecution? = null
 
     @BeforeClass
     fun setUp() {
@@ -93,6 +104,7 @@ class EcsOrchestrationServiceIT {
         cluster       = outputs.getValue("EcsCluster").outputValue()
         taskFamily    = outputs.getValue("EcsTaskFamily").outputValue()
         ec2TaskFamily = outputs.getValue("EcsEc2TaskFamily").outputValue()
+        daemonTaskFamily = outputs.getValue("EcsDaemonTaskFamily").outputValue()
         val subnets         = outputs.getValue("EcsSubnets").outputValue()
         vpcId = deployerEc2Client.describeSubnets { it.subnetIds(subnets.split(",").first()) }
             .subnets().first().vpcId()
@@ -106,6 +118,10 @@ class EcsOrchestrationServiceIT {
 
         ecsClient = EcsClient.builder().region(awsRegion).credentialsProvider(testCredentials).build()
         val ec2Client = Ec2Client.builder().region(awsRegion).credentialsProvider(testCredentials).build()
+        applicationAutoScalingClient = ApplicationAutoScalingClient.builder()
+            .region(awsRegion)
+            .credentialsProvider(testCredentials)
+            .build()
         executor  = Executors.newCachedThreadPool()
         httpClient = ClientBuilder.newBuilder()
             .register(JacksonJsonProvider::class.java)
@@ -118,6 +134,7 @@ class EcsOrchestrationServiceIT {
             jobSet         = "default",
             ecsClient      = ecsClient,
             ec2Client      = ec2Client,
+            applicationAutoScalingClient = applicationAutoScalingClient,
             executor       = executor
         )
     }
@@ -134,8 +151,19 @@ class EcsOrchestrationServiceIT {
             }
         }
 
+        // ECS Services and Application Auto Scaling targets are not part of the CloudFormation
+        // template, so they must be cleaned up here, before the stack (and its cluster) is deleted.
+        daemonExecution?.let {
+            try {
+                service.undeploy(it)
+            } catch (e: Exception) {
+                logger.warn("Failed to undeploy daemon execution {}", it.id, e)
+            }
+        }
+
         if (::executor.isInitialized) executor.shutdownNow()
         if (::ecsClient.isInitialized) ecsClient.close()
+        if (::applicationAutoScalingClient.isInitialized) applicationAutoScalingClient.close()
         if (::httpClient.isInitialized) httpClient.close()
 
         if (::deployerEc2Client.isInitialized && ::vpcId.isInitialized) {
@@ -196,6 +224,26 @@ class EcsOrchestrationServiceIT {
         return response
     }
 
+    /**
+     * Polls [EcsOrchestrationService.getStatus] until [status] is reached or [timeoutSeconds] elapses,
+     * mirroring the retry style of [getWithRetry] — there is no future/wait API for daemons, unlike
+     * [EcsOrchestrationService.getFutureForStatus] for jobs, since RUNNING is a steady state rather
+     * than a one-time terminal outcome.
+     */
+    private fun awaitDaemonStatus(
+        execution: DaemonExecution,
+        status: DaemonStatus,
+        timeoutSeconds: Long = 300
+    ): DaemonExecution {
+        var current = service.getStatus(execution)
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(timeoutSeconds)
+        while (current.status != status && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5_000)
+            current = service.getStatus(execution)
+        }
+        return current
+    }
+
     @Test
     fun launchFargateAndVerifyTestContext() {
         val profile = service.findAvailableProfile(taskFamily)
@@ -248,6 +296,91 @@ class EcsOrchestrationServiceIT {
         val context = response.readEntity(TestContext::class.java)
         assertEquals(context.args, emptyList<String>(), "args mismatch (EC2)")
         assertEquals(context.environment, environment, "environment mismatch (EC2)")
+    }
+
+    @Test
+    fun discoversDaemonProfileOnly() {
+        val daemon = service.findAvailableDaemon(daemonTaskFamily)
+        assertTrue(daemon != null, "Daemon profile '$daemonTaskFamily' not found via getAvailableDaemons()")
+        assertNull(
+            service.findAvailableProfile(daemonTaskFamily),
+            "Daemon-tagged family '$daemonTaskFamily' should not appear in getAvailableProfiles()"
+        )
+    }
+
+    @Test(dependsOnMethods = ["discoversDaemonProfileOnly"])
+    fun deployServiceReachesRunningWithExpectedRunningCount() {
+        val daemon = service.findAvailableDaemon(daemonTaskFamily)
+            ?: throw AssertionError("Daemon profile '$daemonTaskFamily' not found")
+
+        val execution = service.deploy(DaemonRequest(profile = daemon))
+        daemonExecution = execution
+
+        val running = awaitDaemonStatus(execution, DaemonStatus.RUNNING)
+        assertEquals(running.status, DaemonStatus.RUNNING, "Expected daemon to reach RUNNING")
+        assertEquals(running.runningCount, running.desiredCount, "Expected runningCount to match desiredCount once RUNNING")
+        daemonExecution = running
+    }
+
+    @Test(dependsOnMethods = ["deployServiceReachesRunningWithExpectedRunningCount"])
+    fun setDesiredCountUpdatesService() {
+        val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
+
+        val updated = service.setDesiredCount(execution, 2)
+        assertEquals(updated.desiredCount, 2, "Expected desiredCount to be updated immediately")
+
+        val running = awaitDaemonStatus(updated, DaemonStatus.RUNNING)
+        assertEquals(running.runningCount, 2, "Expected 2 running tasks after setDesiredCount(2)")
+        daemonExecution = running
+    }
+
+    @Test(dependsOnMethods = ["setDesiredCountUpdatesService"])
+    fun setScalingBoundsRegistersScalableTarget() {
+        val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
+
+        val updated = service.setScalingBounds(execution, 1, 3)
+        assertEquals(updated.minCount, 1, "Expected minCount to reflect the new bounds")
+        assertEquals(updated.maxCount, 3, "Expected maxCount to reflect the new bounds")
+
+        val serviceCluster = execution.id.substringAfter(":service/").substringBefore("/")
+        val serviceName = execution.id.substringAfterLast("/")
+        val targets = applicationAutoScalingClient.describeScalableTargets {
+            it.serviceNamespace(ServiceNamespace.ECS)
+            it.resourceIds("service/$serviceCluster/$serviceName")
+            it.scalableDimension(ScalableDimension.ECS_SERVICE_DESIRED_COUNT)
+        }.scalableTargets()
+        assertFalse(targets.isEmpty(), "Expected a registered Application Auto Scaling target")
+        assertEquals(targets.first().minCapacity(), 1)
+        assertEquals(targets.first().maxCapacity(), 3)
+
+        daemonExecution = updated
+    }
+
+    @Test(dependsOnMethods = ["setScalingBoundsRegistersScalableTarget"])
+    fun undeployDeletesServiceAndScalableTarget() {
+        val execution = daemonExecution ?: throw AssertionError("No daemon execution to undeploy")
+
+        val serviceCluster = execution.id.substringAfter(":service/").substringBefore("/")
+        val serviceName = execution.id.substringAfterLast("/")
+
+        service.undeploy(execution)
+        daemonExecution = null // already cleaned up here; tearDown()'s best-effort undeploy becomes a no-op
+
+        val remaining = ecsClient.describeServices {
+            it.cluster(serviceCluster)
+            it.services(serviceName)
+        }.services().firstOrNull()
+        assertTrue(
+            remaining == null || remaining.status() == "DRAINING" || remaining.status() == "INACTIVE",
+            "Expected service to be gone or draining/inactive after undeploy"
+        )
+
+        val targets = applicationAutoScalingClient.describeScalableTargets {
+            it.serviceNamespace(ServiceNamespace.ECS)
+            it.resourceIds("service/$serviceCluster/$serviceName")
+            it.scalableDimension(ScalableDimension.ECS_SERVICE_DESIRED_COUNT)
+        }.scalableTargets()
+        assertTrue(targets.isEmpty(), "Expected no scalable target after undeploy")
     }
 
     private fun scrubVpcDependencies(vpcId: String) {
@@ -337,8 +470,25 @@ class EcsOrchestrationServiceIT {
         } catch (e: AlreadyExistsException) {
             val stack = cfnClient.describeStacks { it.stackName(stackName) }.stacks().first()
             when (val status = stack.stackStatus()) {
-                StackStatus.CREATE_COMPLETE, StackStatus.UPDATE_COMPLETE ->
-                    logger.info("Stack '{}' is {} — reusing existing resources", stackName, status)
+                StackStatus.CREATE_COMPLETE, StackStatus.UPDATE_COMPLETE -> {
+                    logger.info("Stack '{}' is {} — applying any template changes via updateStack", stackName, status)
+                    try {
+                        cfnClient.updateStack {
+                            it.stackName(stackName)
+                            it.templateBody(templateBody)
+                            it.capabilities(Capability.CAPABILITY_NAMED_IAM)
+                            it.parameters(params)
+                        }
+                        cfnClient.waiter().waitUntilStackUpdateComplete { it.stackName(stackName) }
+                    } catch (updateError: software.amazon.awssdk.services.cloudformation.model.CloudFormationException) {
+                        val message = updateError.awsErrorDetails()?.errorMessage() ?: updateError.message ?: ""
+                        if (message.contains("No updates are to be performed")) {
+                            logger.info("Stack '{}' template unchanged — no update necessary", stackName)
+                        } else {
+                            throw updateError
+                        }
+                    }
+                }
                 StackStatus.DELETE_FAILED -> {
                     logger.warn("Stack '{}' is DELETE_FAILED — scrubbing VPC dependencies and recreating", stackName)
                     scrubAndDeleteStack()

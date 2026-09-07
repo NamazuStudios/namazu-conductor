@@ -44,6 +44,13 @@ Parameters:
     Description: >
       ECS task definition family name for the EC2 spot-backed task.
 
+  DaemonTaskFamily:
+    Type: String
+    Default: conductor-integration-test-daemon
+    Description: >
+      ECS task definition family name for the daemon (ECS Service) task, exercised by
+      DaemonOrchestrationService integration tests.
+
   EcsOptimizedAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
@@ -203,6 +210,49 @@ Resources:
         - Key: namazu.conductor:assignPublicIp
           Value: ENABLED
 
+  DaemonLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${DaemonTaskFamily}'
+      RetentionInDays: 7
+
+  # Backs DaemonOrchestrationService integration tests — deployed via CreateService rather than
+  # RunTask, so it's tagged workloadKind=daemon to keep it out of getAvailableProfiles()/RunTask-based
+  # job discovery entirely. Reuses the same Fargate/awsvpc shape and test image as TaskDefinition.
+  DaemonTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref DaemonTaskFamily
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: nginx
+          Image: !Sub '${RepositoryUrl}/${ImageName}'
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DaemonLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: namazu.conductor:jobSet
+          Value: default
+        - Key: namazu.conductor:workloadKind
+          Value: daemon
+        - Key: namazu.conductor:launchType
+          Value: FARGATE
+        - Key: namazu.conductor:assignPublicIp
+          Value: ENABLED
+        - Key: namazu.conductor:desiredCount
+          Value: '1'
+
 # ---------------------------------------------------------------------------
 # EC2 spot-backed capacity
 # ---------------------------------------------------------------------------
@@ -355,6 +405,9 @@ Resources:
         - Key: Name
           Value: conductor-integration-test
 
+  # Inline policy (2,048-byte quota, non-adjustable). The deployer user that creates this stack in
+  # CI lacks iam:CreatePolicy, so this can't be an AWS::IAM::ManagedPolicy — statements are
+  # consolidated by Resource/Condition shape (rather than one per API call) to fit the quota.
   IntegrationTestUserPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -365,17 +418,41 @@ Resources:
         Version: '2012-10-17'
         Statement:
 
-          # Profile discovery - getAvailableProfiles()
-          - Sid: EcsListAndDescribeTaskDefinitions
+          # No-condition, wildcard-resource reads/writes - discovery, network/instance lookups,
+          # ECR auth, and daemon autoscaling target management (Application Auto Scaling doesn't
+          # support ARN-scoped resource conditions).
+          - Sid: UnconditionedWildcardActions
             Effect: Allow
             Action:
               - ecs:ListTaskDefinitionFamilies
               - ecs:DescribeTaskDefinition
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeInstances
+              - ecr:GetAuthorizationToken
+              - application-autoscaling:RegisterScalableTarget
+              - application-autoscaling:DeregisterScalableTarget
+              - application-autoscaling:DescribeScalableTargets
             Resource: '*'
 
-          # Task execution - execute()
-          # Resource covers both Fargate and EC2 task definitions; cluster
-          # enforced via condition.
+          # Cluster-scoped task and service lifecycle - execute()/getFutureForStatus()/stop()/
+          # deploy()/setDesiredCount()/undeploy()/getStatus()/resolveContainerInstanceHost()
+          - Sid: EcsClusterScopedActions
+            Effect: Allow
+            Action:
+              - ecs:DescribeTasks
+              - ecs:StopTask
+              - ecs:DescribeContainerInstances
+              - ecs:CreateService
+              - ecs:UpdateService
+              - ecs:DeleteService
+              - ecs:DescribeServices
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !GetAtt Cluster.Arn
+
+          # Task execution - execute() - resource covers both Fargate and EC2 task definitions;
+          # cluster enforced via condition.
           - Sid: EcsRunTask
             Effect: Allow
             Action:
@@ -394,57 +471,20 @@ Resources:
               - iam:PassRole
             Resource: !GetAtt TaskExecutionRole.Arn
 
-          # Status polling - getFutureForStatus()
-          - Sid: EcsDescribeTasks
+          # One-time per-account: Application Auto Scaling needs this to create its own
+          # service-linked role on the first ever RegisterScalableTarget call in the account.
+          - Sid: IamCreateApplicationAutoScalingServiceLinkedRole
             Effect: Allow
             Action:
-              - ecs:DescribeTasks
-            Resource: '*'
+              - iam:CreateServiceLinkedRole
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
             Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
+              StringEquals:
+                iam:AWSServiceName: ecs.application-autoscaling.amazonaws.com
 
-          # Teardown - stop()
-          - Sid: EcsStopTask
-            Effect: Allow
-            Action:
-              - ecs:StopTask
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          # Public IP lookup for awsvpc tasks - resolveAwsVpcHost()
-          - Sid: Ec2DescribeNetworkInterfaces
-            Effect: Allow
-            Action:
-              - ec2:DescribeNetworkInterfaces
-            Resource: '*'
-
-          # Public IP lookup for EC2/bridge tasks - resolveContainerInstanceHost()
-          - Sid: EcsDescribeContainerInstances
-            Effect: Allow
-            Action:
-              - ecs:DescribeContainerInstances
-            Resource: '*'
-            Condition:
-              ArnEquals:
-                ecs:cluster: !GetAtt Cluster.Arn
-
-          - Sid: Ec2DescribeInstances
-            Effect: Allow
-            Action:
-              - ec2:DescribeInstances
-            Resource: '*'
-
-          # ECR pull - required to verify the image exists and for any direct
-          # ECR calls from the test; task image pull itself is handled by the
-          # task execution role via AmazonECSTaskExecutionRolePolicy.
-          - Sid: EcrPull
-            Effect: Allow
-            Action:
-              - ecr:GetAuthorizationToken
-            Resource: '*'
+          # ECR pull - required to verify the image exists and for any direct ECR calls from the
+          # test; task image pull itself is handled by the task execution role via
+          # AmazonECSTaskExecutionRolePolicy.
           - Sid: EcrPullRepository
             Effect: Allow
             Action:
@@ -488,6 +528,10 @@ Outputs:
   EcsEc2TaskFamily:
     Description: EC2 spot task definition family
     Value: !Ref Ec2TaskFamily
+
+  EcsDaemonTaskFamily:
+    Description: Daemon (ECS Service) task definition family
+    Value: !Ref DaemonTaskFamily
 
   AwsAccessKeyId:
     Description: AWS_ACCESS_KEY_ID

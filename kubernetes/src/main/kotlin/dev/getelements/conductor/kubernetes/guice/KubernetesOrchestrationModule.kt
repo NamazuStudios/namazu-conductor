@@ -6,6 +6,7 @@ import com.google.inject.Singleton
 import com.google.inject.name.Named
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService
+import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.OrchestrationService
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
@@ -15,20 +16,24 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * Guice [PrivateModule] that wires the Kubernetes [OrchestrationService] implementation.
+ * Guice [PrivateModule] that wires the Kubernetes [OrchestrationService] and
+ * [DaemonOrchestrationService] implementations — a single shared [KubernetesOrchestrationService]
+ * instance backs both.
  *
  * Provides a singleton [KubernetesClient] built from the configured kubeconfig path / master URL
  * (falling back to Fabric8 auto-detection of in-cluster or `~/.kube/config` configuration) and an
- * [ExecutorService] for background status polling. Only [OrchestrationService] is exposed to the
- * parent injector; all Kubernetes-specific bindings remain private.
+ * [ExecutorService] for background status polling. Only [OrchestrationService] and
+ * [DaemonOrchestrationService] are exposed to the parent injector; all Kubernetes-specific bindings
+ * remain private.
  */
 class KubernetesOrchestrationModule : PrivateModule() {
 
     override fun configure() {
-        bind(OrchestrationService::class.java)
-            .to(KubernetesOrchestrationService::class.java)
-            .`in`(Singleton::class.java)
+        bind(KubernetesOrchestrationService::class.java).`in`(Singleton::class.java)
+        bind(OrchestrationService::class.java).to(KubernetesOrchestrationService::class.java)
+        bind(DaemonOrchestrationService::class.java).to(KubernetesOrchestrationService::class.java)
         expose(OrchestrationService::class.java)
+        expose(DaemonOrchestrationService::class.java)
     }
 
     @Provides

@@ -29,18 +29,20 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
 | `api` | Core interfaces and data types — `OrchestrationService`, `JobRequest`, `JobExecution`, `JobProfile`, `JobPlacement`, `JobScope`, `JobStatus` | Complete |
 | `edgegap` | EdgeGap REST API v1 implementation | Complete |
 | `ecs` | AWS ECS implementation (AWS SDK v2; Fargate and EC2 launch types) | Complete |
-| `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job` workloads) | Complete |
+| `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job`/`Deployment` workloads) | Complete |
 | `multiplay` | Unity Multiplay implementation (fleet allocations via the Unity Services API) | Complete, untested — no IT coverage yet |
 | `admin` | Superuser REST API (`/jobs`) and dashboard panel for listing/launching/stopping jobs across every deployed provider Element | Complete |
 | `debug` | Local runner — boots MongoDB replica set then starts Elements runtime | Complete |
 
 ## Key Abstractions
 
-- **`OrchestrationService`** — the single interface all providers implement; binds via Guice PrivateModule
+- **`OrchestrationService`** — the interface for one-shot job execution (a workload runs to a terminal `JobStatus`); binds via Guice PrivateModule
 - **`JobProfile`** — provider-specific job template identified by a string ID
 - **`JobPlacement`** — sealed hierarchy: `RegionPlacement`, `IpPlacement`, `LatitudeLongitudePlacement`; providers silently ignore unsupported placement types
 - **`JobScope`** — sealed hierarchy: `NamespaceScope` (Kubernetes — overrides the default namespace a workload is created in), `ClusterScope` (ECS — overrides the default cluster a task is launched into); providers without an equivalent concept (e.g. EdgeGap, whose scoping is fully determined by the profile's app/version) silently ignore it
 - **`JobExecution`** — returned from `execute()`; tracks job by ID and `JobStatus`
+- **`DaemonOrchestrationService`** — the interface for persistent, always-running workloads with a desired replica count (`RUNNING` is the steady state; there is no completion). A provider implements `OrchestrationService`, `DaemonOrchestrationService`, or both — neither requires the other. Implemented by `ecs` (ECS Service + Application Auto Scaling) and `kubernetes` (`Deployment` + optional `HorizontalPodAutoscaler`); not applicable to EdgeGap.
+- **`Daemon`** / **`DaemonRequest`** / **`DaemonExecution`** — mirror `JobProfile` / `JobRequest` / `JobExecution` for the daemon model; `DaemonExecution` additionally carries `desiredCount`/`runningCount`/`minCount`/`maxCount`
 
 ## Provider Implementation Pattern
 
@@ -73,8 +75,11 @@ labels and annotations on the `PodTemplate`:
 
 - **Label** `namazu.conductor/job-set=<value>` — only templates matching the configured `JOBSET`
   attribute are surfaced as profiles (the per-instance filter; analogous to the ECS `jobSet` tag).
-- **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`) or
-  `job` (one-off, `batch/v1 Job`). Pod phases / Job status map onto `JobStatus`.
+- **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`),
+  `job` (one-off, `batch/v1 Job`), or `daemon` (persistent `Deployment`, surfaced via
+  `DaemonOrchestrationService.getAvailableDaemons()` instead of `getAvailableProfiles()` — see
+  `kubernetes/README.md`'s "Daemons" section for the `replicas`/`min-replicas`/`max-replicas`/
+  `target-cpu-utilization-percentage` annotations). Pod phases / Job status map onto `JobStatus`.
 - **Annotation** `namazu.conductor/expose-ports` — e.g. `"7777/udp,8080/tcp"`. Present → a `Service`
   is created selecting the workload; absent → no `Service`, endpoints fall back to the pod IP.
 - **Annotation** `namazu.conductor/service-type` — `NodePort` (default), `LoadBalancer`, or `ClusterIP`.
@@ -295,4 +300,4 @@ mvn install -Pbuild-ui
 
 ## Tests
 
-`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `StdioBridgeClientIT` in both `ecs` and `edgegap`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `api`, `multiplay`, `admin`, and `debug` have no tests.
+`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `StdioBridgeClientIT` in both `ecs` and `edgegap`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `multiplay`, `admin`, and `debug` have no tests.
