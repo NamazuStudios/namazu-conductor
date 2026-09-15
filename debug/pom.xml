@@ -43,6 +43,18 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>RunKt</mainClass>
+                    <!-- sdk/sdk-local are `provided` scope (supplied by the Elements runtime in a
+                         real deployment), but here exec:java IS the runtime, so provided-scope
+                         classes must be on its classpath. classpathScope=compile includes provided. -->
+                    <classpathScope>compile</classpathScope>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
