@@ -41,6 +41,15 @@ data class JobRequest (
      * underlying [dev.getelements.conductor.service.OrchestrationService] implementation does not
      * support scoping.
      */
-    val scope : List<JobScope> = emptyList()
+    val scope : List<JobScope> = emptyList(),
+
+    /**
+     * Requests that the job be launched with an interactive pty attached (tty allocated, stdin kept
+     * open) rather than as a plain batch process, so it can be attached to as a terminal via
+     * [dev.getelements.conductor.service.OrchestrationService.streamStdio]. Providers that don't
+     * support interactive terminal jobs throw [UnsupportedOperationException] from
+     * [dev.getelements.conductor.service.OrchestrationService.execute] when this is `true`.
+     */
+    val tty : Boolean = false
 
 )

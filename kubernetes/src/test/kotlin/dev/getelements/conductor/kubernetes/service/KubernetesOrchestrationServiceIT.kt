@@ -74,6 +74,11 @@ import java.util.concurrent.TimeUnit
  */
 class KubernetesOrchestrationServiceIT {
 
+    companion object {
+        private const val MULTI_CONTAINER_PRIMARY = "primary"
+        private const val MULTI_CONTAINER_SECONDARY = "secondary"
+    }
+
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationServiceIT::class.java)
 
     private lateinit var namespace: String
@@ -90,6 +95,7 @@ class KubernetesOrchestrationServiceIT {
     private val nodePortTemplate get() = "conductor-it-nodeport-$runSuffix"
     private val loadBalancerTemplate get() = "conductor-it-lb-$runSuffix"
     private val jobTemplate get() = "conductor-it-job-$runSuffix"
+    private val multiContainerTemplate get() = "conductor-it-multi-$runSuffix"
     private lateinit var runSuffix: String
 
     private var podPort: Int = 80
@@ -136,8 +142,12 @@ class KubernetesOrchestrationServiceIT {
         createServerTemplate(nodePortTemplate, "NodePort")
         createServerTemplate(loadBalancerTemplate, "LoadBalancer")
         createJobTemplate(jobTemplate)
+        createMultiContainerTemplate(multiContainerTemplate)
 
-        logger.info("Created PodTemplates in namespace '{}': {}, {}, {}", namespace, nodePortTemplate, loadBalancerTemplate, jobTemplate)
+        logger.info(
+            "Created PodTemplates in namespace '{}': {}, {}, {}, {}",
+            namespace, nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate
+        )
     }
 
     @AfterClass(alwaysRun = true)
@@ -154,7 +164,7 @@ class KubernetesOrchestrationServiceIT {
                 runCatching { client.namespaces().withName(namespace).delete() }
                     .onFailure { logger.warn("Failed to delete namespace '{}'", namespace, it) }
             } else {
-                listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate).forEach { name ->
+                listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate).forEach { name ->
                     runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
                         .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
                 }
@@ -199,7 +209,7 @@ class KubernetesOrchestrationServiceIT {
         val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
         service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
 
-        assertThrows(StdioUnavailableException::class.java) { service.streamStdio(execution) }
+        assertThrows(StdioUnavailableException::class.java) { service.streamStdio(execution, null) }
     }
 
     @Test
@@ -210,7 +220,7 @@ class KubernetesOrchestrationServiceIT {
         val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
         service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
 
-        service.streamStdio(execution).use { stdio ->
+        service.streamStdio(execution, null).use { stdio ->
             assertNotNull(stdio.stdin, "Expected a stdin stream")
             assertNotNull(stdio.stdout, "Expected a stdout stream")
             assertNotNull(stdio.stderr, "Expected a stderr stream")
@@ -359,6 +369,80 @@ class KubernetesOrchestrationServiceIT {
             .endTemplate()
             .build()
         client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
+    }
+
+    private fun createMultiContainerTemplate(name: String) {
+        fun loopContainer(containerName: String) = ContainerBuilder()
+            .withName(containerName)
+            .withImage(jobImage)
+            .withCommand("sh", "-c", "while true; do echo hello-from-$containerName; sleep 1; done")
+            .build()
+
+        val template = PodTemplateBuilder()
+            .withNewMetadata()
+                .withName(name)
+                .withNamespace(namespace)
+                .addToLabels(LABEL_JOB_SET, jobSet)
+            .endMetadata()
+            .withNewTemplate()
+                .withNewSpec()
+                    .withContainers(loopContainer(MULTI_CONTAINER_PRIMARY), loopContainer(MULTI_CONTAINER_SECONDARY))
+                .endSpec()
+            .endTemplate()
+            .build()
+        client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
+    }
+
+    @Test
+    fun discoversContainersForMultiContainerProfile() {
+        val profile = service.findAvailableProfile("$namespace:$multiContainerTemplate")
+            ?: throw AssertionError("Profile '$namespace:$multiContainerTemplate' not found")
+
+        assertEquals(profile.containers.map { it.id }, listOf(MULTI_CONTAINER_PRIMARY, MULTI_CONTAINER_SECONDARY))
+        assertTrue(profile.containers.first { it.id == MULTI_CONTAINER_PRIMARY }.primary, "Expected the first container to be primary")
+        assertFalse(profile.containers.first { it.id == MULTI_CONTAINER_SECONDARY }.primary, "Expected the second container to not be primary")
+    }
+
+    @Test
+    fun ttyExecuteSetsPtyOnPrimaryContainer() {
+        val profile = service.findAvailableProfile("$namespace:$multiContainerTemplate")
+            ?: throw AssertionError("Profile '$namespace:$multiContainerTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile, tty = true)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        val (ns, _, podName) = decodeExecutionId(execution.id)
+        val pod = client.pods().inNamespace(ns).withName(podName).get()
+            ?: throw AssertionError("Pod '$podName' not found")
+        val primary = pod.spec?.containers.orEmpty().first { it.name == MULTI_CONTAINER_PRIMARY }
+        assertTrue(primary.tty == true, "Expected tty=true on the primary container")
+        assertTrue(primary.stdin == true, "Expected stdin=true on the primary container")
+    }
+
+    @Test
+    fun streamStdioAttachesToRequestedContainer() {
+        val profile = service.findAvailableProfile("$namespace:$multiContainerTemplate")
+            ?: throw AssertionError("Profile '$namespace:$multiContainerTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        service.streamStdio(execution, MULTI_CONTAINER_SECONDARY).use { stdio ->
+            val line = stdio.stdout.bufferedReader().readLine()
+            assertEquals(line, "hello-from-$MULTI_CONTAINER_SECONDARY")
+        }
+
+        service.streamStdio(execution, MULTI_CONTAINER_PRIMARY).use { stdio ->
+            val line = stdio.stdout.bufferedReader().readLine()
+            assertEquals(line, "hello-from-$MULTI_CONTAINER_PRIMARY")
+        }
+
+        assertThrows(StdioUnavailableException::class.java) { service.streamStdio(execution, "no-such-container") }
+    }
+
+    private fun decodeExecutionId(id: String): Triple<String, String, String> {
+        val parts = id.split(":")
+        return Triple(parts[0], parts[1], parts[2])
     }
 
     private fun env(name: String, default: String): String =

@@ -3,6 +3,7 @@ package dev.getelements.conductor.kubernetes.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.ContainerRef
 import dev.getelements.conductor.DaemonExecution
 import dev.getelements.conductor.DaemonRequest
 import dev.getelements.conductor.DaemonStatus
@@ -25,6 +26,7 @@ import dev.getelements.conductor.service.Daemon
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import io.fabric8.kubernetes.api.model.Container
 import io.fabric8.kubernetes.api.model.DeletionPropagation
 import io.fabric8.kubernetes.api.model.EnvVar
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder
@@ -111,7 +113,8 @@ class KubernetesOrchestrationService @Inject constructor(
             .mapNotNull { toProfile(it) }
 
     private fun toProfile(template: PodTemplate): KubernetesJobProfile? {
-        val container = template.template?.spec?.containers?.firstOrNull() ?: return null
+        val containers = template.template?.spec?.containers ?: emptyList()
+        val container = containers.firstOrNull() ?: return null
         val annotations = template.metadata?.annotations ?: emptyMap()
 
         val kind = workloadKindOf(annotations)
@@ -123,6 +126,7 @@ class KubernetesOrchestrationService @Inject constructor(
             namespace = template.metadata?.namespace ?: namespace,
             name = templateName,
             primaryContainer = container.name,
+            containers = containerRefsFor(containers),
             workloadKind = kind,
             exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
             serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
@@ -201,6 +205,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
         applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
         applyPlacement(spec, request.placement)
+        if (request.tty) applyTty(spec, profile.primaryContainer)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
             ?: profile.namespace
@@ -280,7 +285,8 @@ class KubernetesOrchestrationService @Inject constructor(
                 namespace = namespace,
                 workloadKind = profile.workloadKind.name.lowercase(),
                 name = runName
-            )
+            ),
+            containers = profile.containers
         )
     }
 
@@ -586,7 +592,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = name)
+                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = name),
+                    containers = containerRefsFor(pod.spec?.containers ?: emptyList())
                 )
             }
 
@@ -600,7 +607,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name)
+                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name),
+                    containers = containerRefsFor(job.spec?.template?.spec?.containers ?: emptyList())
                 )
             }
 
@@ -710,7 +718,8 @@ class KubernetesOrchestrationService @Inject constructor(
     private fun resultFor(execution: JobExecution, status: JobStatus): JobExecution = JobExecution(
         id = execution.id,
         status = status,
-        endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList()
+        endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList(),
+        containers = execution.containers
     )
 
     /**
@@ -747,16 +756,19 @@ class KubernetesOrchestrationService @Inject constructor(
     /**
      * Opens a live, bidirectional stdio session on the Pod backing [execution] (resolved via
      * [locatePod] for a Job), via Kubernetes exec/attach — the same mechanism as `kubectl attach`.
-     * Defaults to the workload's first container when it has more than one, mirroring how [toProfile]
-     * chooses the profile's primary container.
+     * [containerId] selects which container to attach to (matched by container name); `null` (the
+     * default) attaches to the workload's first container, mirroring how [toProfile] chooses the
+     * profile's primary container. [JobStdio.resize] is populated so callers can live-resize the
+     * remote pty when the container was launched with [dev.getelements.conductor.JobRequest.tty].
      *
      * Attach requires the container to actually be running; short-lived Jobs are typically no longer
      * attachable by the time a caller gets around to streaming their stdio (use [getFutureForStatus]
      * / [getStageForStatus] with [JobStatus.RUNNING] to know when it's safe to call this).
      *
-     * @throws StdioUnavailableException if the Pod can't be found, or isn't currently `Running`
+     * @throws StdioUnavailableException if the Pod can't be found, isn't currently `Running`, or
+     *   [containerId] doesn't name a container in the pod
      */
-    override fun streamStdio(execution: JobExecution): JobStdio {
+    override fun streamStdio(execution: JobExecution, containerId: String?): JobStdio {
         val (ns, kind, name) = decodeId(execution.id)
 
         val podName = when (kind) {
@@ -780,7 +792,16 @@ class KubernetesOrchestrationService @Inject constructor(
             )
         }
 
-        val containerName = pod.spec?.containers?.firstOrNull()?.name
+        val podContainers = pod.spec?.containers ?: emptyList()
+        val containerName = if (containerId != null) {
+            podContainers.firstOrNull { it.name == containerId }?.name
+                ?: throw StdioUnavailableException(
+                    "Container '$containerId' not found in pod '$podName' — available containers: " +
+                        podContainers.map { it.name }
+                )
+        } else {
+            podContainers.firstOrNull()?.name
+        }
         val containerResource = if (containerName != null) resource.inContainer(containerName) else resource
 
         val execWatch = containerResource
@@ -793,7 +814,8 @@ class KubernetesOrchestrationService @Inject constructor(
             stdin = execWatch.input,
             stdout = execWatch.output,
             stderr = execWatch.error,
-            onClose = execWatch::close
+            onClose = execWatch::close,
+            resize = execWatch::resize
         )
     }
 
@@ -913,6 +935,9 @@ class KubernetesOrchestrationService @Inject constructor(
         client.services().inNamespace(namespace).resource(service).create()
     }
 
+    private fun containerRefsFor(containers: List<Container>): List<ContainerRef> =
+        containers.mapIndexed { i, c -> ContainerRef(id = c.name, name = c.name, primary = i == 0) }
+
     private fun applyOverrides(
         spec: PodSpec,
         primaryContainer: String,
@@ -931,6 +956,13 @@ class KubernetesOrchestrationService @Inject constructor(
             environment.forEach { (key, value) -> merged[key] = EnvVar(key, value, null) }
             container.env = merged.values.toList()
         }
+    }
+
+    private fun applyTty(spec: PodSpec, primaryContainer: String) {
+        val container = spec.containers.firstOrNull { it.name == primaryContainer }
+            ?: throw JobException("Container '$primaryContainer' not found in PodTemplate spec")
+        container.tty = true
+        container.stdin = true
     }
 
     private fun applyPlacement(spec: PodSpec, placement: List<JobPlacement>) {

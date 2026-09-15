@@ -72,12 +72,19 @@ interface OrchestrationService {
      * forwarded to the process, [JobStdio.stdout]/[JobStdio.stderr] are separate live read streams.
      * The session ends when the process exits or the caller closes the returned [JobStdio].
      *
+     * [containerId] selects which of [JobExecution.containers] to attach to; `null` (the default)
+     * attaches to the primary container. Providers that only ever run a single container per job
+     * ignore this parameter when `null` and throw [UnsupportedOperationException] for any non-null
+     * value, since they have no other container to select. Note that requesting an interactive
+     * terminal (tty allocation) is decided at [execute] time via [dev.getelements.conductor.JobRequest.tty],
+     * not here — this method only ever attaches to whatever pty/pipe the job was launched with.
+     *
      * The default implementation throws [UnsupportedOperationException]; providers with no native or
      * bridged stdio access leave it unimplemented. Providers that support this in principle but can't
      * currently reach the process (job not started, process no longer running, bridge not present,
      * etc.) throw [dev.getelements.conductor.exception.StdioUnavailableException] instead.
      */
-    fun streamStdio(execution: JobExecution): JobStdio =
+    fun streamStdio(execution: JobExecution, containerId: String? = null): JobStdio =
         throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming")
 
 }

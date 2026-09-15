@@ -1,5 +1,6 @@
 package dev.getelements.conductor.edgegap
 
+import dev.getelements.conductor.ContainerRef
 import dev.getelements.conductor.service.JobProfile
 
 /**
@@ -23,5 +24,11 @@ data class EdgeGapJobProfile(
      */
     override val id: String
         get() = "$appName:$versionName"
+
+    /**
+     * EdgeGap jobs always run exactly one container; this always has a single primary entry.
+     */
+    override val containers: List<ContainerRef>
+        get() = listOf(ContainerRef(id = id, name = id, primary = true))
 
 }

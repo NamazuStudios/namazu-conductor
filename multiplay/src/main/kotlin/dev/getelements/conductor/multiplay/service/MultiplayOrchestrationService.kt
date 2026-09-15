@@ -3,6 +3,7 @@ package dev.getelements.conductor.multiplay.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.ContainerRef
 import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
@@ -171,6 +172,10 @@ class MultiplayOrchestrationService @Inject constructor(
      * @throws JobException if [JobRequest.profile] is not a [MultiplayJobProfile]
      */
     override fun execute(request: JobRequest): JobExecution {
+        if (request.tty) {
+            throw UnsupportedOperationException("${this::class.simpleName} does not support tty/terminal jobs")
+        }
+
         val profile = request.profile as? MultiplayJobProfile
             ?: throw JobException("JobProfile must be a ${MultiplayJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
@@ -199,7 +204,8 @@ class MultiplayOrchestrationService @Inject constructor(
                 fleetId = profile.fleetId,
                 buildConfigurationId = profile.buildConfigurationId,
                 regionId = regionId
-            )
+            ),
+            containers = profile.containers
         )
     }
 
@@ -225,7 +231,8 @@ class MultiplayOrchestrationService @Inject constructor(
                             id = allocation.allocationId,
                             status = mapStatus(allocation.status),
                             endpoints = mapEndpoints(allocation),
-                            details = MultiplayExecutionDetails(fleetId = fleet.fleetId)
+                            details = MultiplayExecutionDetails(fleetId = fleet.fleetId),
+                            containers = listOf(ContainerRef(id = allocation.allocationId, name = allocation.allocationId, primary = true))
                         )
                     }
                 total = page.total

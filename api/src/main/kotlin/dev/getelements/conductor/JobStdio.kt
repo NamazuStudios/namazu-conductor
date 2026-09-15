@@ -13,7 +13,14 @@ class JobStdio(
     val stdin: OutputStream,
     val stdout: InputStream,
     val stderr: InputStream,
-    private val onClose: () -> Unit = {}
+    private val onClose: () -> Unit = {},
+
+    /**
+     * Resizes the remote pty, if this session was opened with a tty attached (see
+     * [dev.getelements.conductor.JobRequest.tty]) and the provider supports live resizing.
+     * `null` when no pty is attached or the provider doesn't support resizing.
+     */
+    val resize: ((cols: Int, rows: Int) -> Unit)? = null
 ) : Closeable {
 
     override fun close() {

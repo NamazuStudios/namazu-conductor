@@ -14,7 +14,8 @@ data class ExecuteJobRequest @JsonCreator constructor(
     @JsonProperty("args")        val args: List<String>?,
     @JsonProperty("command")     val command: List<String>?,
     @JsonProperty("environment") val environment: Map<String, String>?,
-    @JsonProperty("placement")   val placement: List<PlacementDto>?
+    @JsonProperty("placement")   val placement: List<PlacementDto>?,
+    @JsonProperty("tty")         val tty: Boolean?
 )
 
 data class PlacementDto @JsonCreator constructor(

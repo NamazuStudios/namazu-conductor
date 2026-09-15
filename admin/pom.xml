@@ -54,6 +54,24 @@
             <groupId>jakarta.ws.rs</groupId>
             <artifactId>jakarta.ws.rs-api</artifactId>
         </dependency>
+        <!--
+            Jakarta WS. WebSocket Support. Powers the terminal-job stdio endpoints under /service.
+            jakarta.websocket-api (the server annotations: @ServerEndpoint etc.) is `provided` per the
+            sdk-bom, supplied by the runtime's deployment-jetty container. Its own POM declares
+            jakarta.websocket-client-api (Session, @OnOpen, etc.) as `provided` too, and Maven does not
+            propagate provided-scope transitive dependencies at all (provided+provided => excluded), so
+            it must be declared directly here — kept `provided` for the same reason: the runtime
+            container already supplies it, and bundling a second copy would risk classloader conflicts.
+        -->
+        <dependency>
+            <groupId>jakarta.websocket</groupId>
+            <artifactId>jakarta.websocket-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.websocket</groupId>
+            <artifactId>jakarta.websocket-client-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
@@ -252,5 +270,54 @@ Element-Builtin-Spis=${elm.builtin.spis}
 
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Builds the admin/ui Vite+TypeScript project and writes its output straight into
+            src/main/ui/superuser/plugin.bundle.js (see admin/ui/vite.config.ts), before the
+            elm-stage-ui antrun execution above copies src/main/ui into the .elm archive. Not bound
+            by default since it requires npm on the build machine; activate explicitly:
+            `mvn install -Pbuild-ui`.
+        -->
+        <profile>
+            <id>build-ui</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.2.0</version>
+                        <executions>
+                            <execution>
+                                <id>ui-npm-install</id>
+                                <phase>generate-resources</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>npm</executable>
+                                    <workingDirectory>${project.basedir}/ui</workingDirectory>
+                                    <arguments>
+                                        <argument>ci</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>ui-npm-build</id>
+                                <phase>generate-resources</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>npm</executable>
+                                    <workingDirectory>${project.basedir}/ui</workingDirectory>
+                                    <arguments>
+                                        <argument>run</argument>
+                                        <argument>build</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>
