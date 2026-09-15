@@ -22,6 +22,24 @@ interface Session {
 type Listener = () => void
 
 /**
+ * Reads the dashboard's current `bg-background`/`text-foreground` colors via computed style so the
+ * terminal palette tracks whatever theme (and light/dark mode) the host dashboard is using, rather
+ * than hardcoding a palette that could clash with it.
+ */
+function getTerminalTheme(): { background: string; foreground: string } {
+  const probe = document.createElement('div')
+  probe.className = 'bg-background text-foreground'
+  probe.style.position = 'absolute'
+  probe.style.visibility = 'hidden'
+  probe.style.pointerEvents = 'none'
+  document.body.appendChild(probe)
+  const style = getComputedStyle(probe)
+  const theme = { background: style.backgroundColor, foreground: style.color }
+  document.body.removeChild(probe)
+  return theme
+}
+
+/**
  * Owns live terminal sessions (xterm.js instance + WebSocket) outside of React's render tree, so
  * switching tabs re-parents an existing DOM node instead of destroying and recreating the terminal —
  * that's what keeps a session's connection and scrollback alive while another tab is active.
@@ -30,6 +48,18 @@ class TerminalSessionManager {
   private sessions = new Map<string, Session>()
   private listeners = new Set<Listener>()
   private activeKey: string | null = null
+
+  constructor() {
+    new MutationObserver(() => this.applyTheme()).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    })
+  }
+
+  private applyTheme() {
+    const theme = getTerminalTheme()
+    this.sessions.forEach((s) => { s.term.options.theme = theme })
+  }
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener)
@@ -70,7 +100,7 @@ class TerminalSessionManager {
     container.style.width = '100%'
     container.style.height = '100%'
 
-    const term = new Terminal({ convertEol: true, cursorBlink: true })
+    const term = new Terminal({ convertEol: true, cursorBlink: true, theme: getTerminalTheme() })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
@@ -199,7 +229,7 @@ export function TerminalTabs() {
       ))),
     h('div', {
       ref: hostRef,
-      className: 'rounded-lg border bg-black p-2',
+      className: 'rounded-lg border bg-background p-2',
       style: { height: '384px' },
     }))
 }
