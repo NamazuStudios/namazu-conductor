@@ -49,6 +49,10 @@ class TerminalSessionManager {
   private listeners = new Set<Listener>()
   private activeKey: string | null = null
 
+  // useSyncExternalStore requires getSnapshot() to return a stable reference when nothing has
+  // changed — recomputing a fresh object/array on every call causes an infinite re-render loop.
+  private snapshot = this.computeSnapshot()
+
   constructor() {
     new MutationObserver(() => this.applyTheme()).observe(document.documentElement, {
       attributes: true,
@@ -67,14 +71,19 @@ class TerminalSessionManager {
   }
 
   private notify() {
+    this.snapshot = this.computeSnapshot()
     this.listeners.forEach((l) => l())
   }
 
-  getSnapshot() {
+  private computeSnapshot() {
     return {
       sessions: [...this.sessions.values()].map((s) => ({ key: s.key, label: s.label, status: s.status })),
       activeKey: this.activeKey,
     }
+  }
+
+  getSnapshot() {
+    return this.snapshot
   }
 
   getSession(key: string): Session | undefined {
