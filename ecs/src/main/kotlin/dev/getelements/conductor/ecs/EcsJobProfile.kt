@@ -1,5 +1,6 @@
 package dev.getelements.conductor.ecs
 
+import dev.getelements.conductor.ContainerRef
 import dev.getelements.conductor.service.JobProfile
 import software.amazon.awssdk.services.ecs.model.AssignPublicIp
 import software.amazon.awssdk.services.ecs.model.LaunchType
@@ -28,4 +29,10 @@ data class EcsJobProfile(
 ) : JobProfile {
     override val id: String
         get() = family
+
+    /**
+     * ECS jobs always run exactly one container; this always has a single primary entry.
+     */
+    override val containers: List<ContainerRef>
+        get() = listOf(ContainerRef(id = containerName, name = containerName, primary = true))
 }

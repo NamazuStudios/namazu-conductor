@@ -27,6 +27,13 @@ data class JobExecution(
      * Provider-specific detail object. The shape is determined by the [dev.getelements.conductor.service.OrchestrationService]
      * implementation and is opaque to this module. Serialised as-is by the REST layer.
      */
-    val details : Any? = null
+    val details : Any? = null,
+
+    /**
+     * The containers running as part of this execution, mirroring
+     * [dev.getelements.conductor.service.JobProfile.containers]. Used to select a specific
+     * container when calling [dev.getelements.conductor.service.OrchestrationService.streamStdio].
+     */
+    val containers : List<ContainerRef> = emptyList()
 
 )

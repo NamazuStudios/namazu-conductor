@@ -4,6 +4,9 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.admin.model.ExecuteJobRequest
 import dev.getelements.conductor.admin.model.StopJobRequest
+import dev.getelements.conductor.admin.model.TerminalTicketRequest
+import dev.getelements.conductor.admin.model.TerminalTicketResponse
+import dev.getelements.conductor.admin.ws.TerminalTicketStore
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
@@ -44,29 +47,6 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
     private fun requireSuperuser(): User? {
         val user = userService.currentUser ?: return null
         return if (user.level == User.Level.SUPERUSER) user else null
-    }
-
-    private fun resolveService(elementName: String): Pair<Response?, OrchestrationService> {
-        val registry = ElementRegistrySupplier.getElementLocal(ConductorAdminJobsResource::class.java).get()
-        val element = registry.stream().toList()
-            .firstOrNull { it.elementRecord.definition().name() == elementName }
-            ?: return Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Element not found: $elementName"))
-                .build() to error("unreachable")
-
-        val service: OrchestrationService? = try {
-            element.serviceLocator.findInstance(OrchestrationService::class.java).map { it.get() }.orElse(null)
-        } catch (e: SdkServiceNotFoundException) {
-            null
-        }
-
-        return if (service == null) {
-            Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Element $elementName does not expose OrchestrationService"))
-                .build() to error("unreachable")
-        } else {
-            null to service
-        }
     }
 
     @GET
@@ -138,26 +118,10 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
     fun execute(request: ExecuteJobRequest): Response {
         requireSuperuser() ?: return Response.status(Response.Status.FORBIDDEN).build()
 
-        val registry = ElementRegistrySupplier.getElementLocal(ConductorAdminJobsResource::class.java).get()
-
-        val element = registry.stream().toList()
-            .firstOrNull { it.elementRecord.definition().name() == request.element }
+        val service = ElementLookup.findByName(ConductorAdminJobsResource::class.java, request.element)
             ?: return Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Element not found: ${request.element}"))
+                .entity(mapOf("error" to "Element not found or does not expose OrchestrationService: ${request.element}"))
                 .build()
-
-        // Workaround: FilteredServiceLocator.findInstance() throws SdkServiceNotFoundException
-        // instead of returning Optional.empty() when the service is not visible to the calling
-        // element. Should be fixed in the SDK.
-        val service: OrchestrationService = try {
-            element.serviceLocator.findInstance(OrchestrationService::class.java)
-                .map { it.get() }
-                .orElse(null)
-        } catch (e: SdkServiceNotFoundException) {
-            null
-        } ?: return Response.status(Response.Status.NOT_FOUND)
-            .entity(mapOf("error" to "Element ${request.element} does not expose OrchestrationService"))
-            .build()
 
         val profile = service.findAvailableProfile(request.profileId)
             ?: return Response.status(Response.Status.NOT_FOUND)
@@ -169,7 +133,8 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
             args        = request.args ?: emptyList(),
             command     = request.command ?: emptyList(),
             environment = request.environment ?: emptyMap(),
-            placement   = request.placement?.map { it.toPlacement() } ?: emptyList()
+            placement   = request.placement?.map { it.toPlacement() } ?: emptyList(),
+            tty         = request.tty ?: false
         )
 
         return try {
@@ -202,23 +167,10 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
     fun stop(request: StopJobRequest): Response {
         requireSuperuser() ?: return Response.status(Response.Status.FORBIDDEN).build()
 
-        val registry = ElementRegistrySupplier.getElementLocal(ConductorAdminJobsResource::class.java).get()
-
-        val element = registry.stream().toList()
-            .firstOrNull { it.elementRecord.definition().name() == request.element }
+        val service = ElementLookup.findByName(ConductorAdminJobsResource::class.java, request.element)
             ?: return Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Element not found: ${request.element}"))
+                .entity(mapOf("error" to "Element not found or does not expose OrchestrationService: ${request.element}"))
                 .build()
-
-        val service: OrchestrationService = try {
-            element.serviceLocator.findInstance(OrchestrationService::class.java)
-                .map { it.get() }
-                .orElse(null)
-        } catch (e: SdkServiceNotFoundException) {
-            null
-        } ?: return Response.status(Response.Status.NOT_FOUND)
-            .entity(mapOf("error" to "Element ${request.element} does not expose OrchestrationService"))
-            .build()
 
         return try {
             service.stop(dev.getelements.conductor.JobExecution(id = request.id, status = dev.getelements.conductor.JobStatus.RUNNING))
@@ -229,5 +181,41 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
                 .entity(mapOf("error" to (e.message ?: "Stop failed")))
                 .build()
         }
+    }
+
+    @POST
+    @Path("/terminal-ticket")
+    @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
+    @Operation(
+        summary = "Mint a terminal WebSocket ticket",
+        description = "Mints a short-lived, single-use ticket authorizing a WebSocket connection to " +
+            "the job's stdio at /service/{jobId} (or /service/{jobId}/{containerId} for a non-primary " +
+            "container). Browsers can't set an Authorization header on the native WebSocket handshake, " +
+            "so this ticket is passed instead as a `?ticket=` query parameter. Requires SUPERUSER level."
+    )
+    @RequestBody(
+        description = "Terminal ticket request",
+        required = true,
+        content = [Content(schema = Schema(implementation = TerminalTicketRequest::class))]
+    )
+    @ApiResponse(responseCode = "200", description = "Ticket minted.")
+    @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
+    @ApiResponse(responseCode = "404", description = "Job (or container) not found on any deployed provider.")
+    fun mintTerminalTicket(request: TerminalTicketRequest): Response {
+        requireSuperuser() ?: return Response.status(Response.Status.FORBIDDEN).build()
+
+        val lookup = ElementLookup.findByJobId(ConductorAdminJobsResource::class.java, request.jobId)
+            ?: return Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "Job not found: ${request.jobId}"))
+                .build()
+
+        if (request.containerId != null && lookup.execution.containers.none { it.id == request.containerId }) {
+            return Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "Container not found: ${request.containerId}"))
+                .build()
+        }
+
+        val ticket = TerminalTicketStore.mint(request.jobId, request.containerId)
+        return Response.ok(TerminalTicketResponse(ticket)).build()
     }
 }

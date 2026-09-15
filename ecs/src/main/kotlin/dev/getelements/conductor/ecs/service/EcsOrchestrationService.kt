@@ -487,6 +487,10 @@ class EcsOrchestrationService @Inject constructor(
      *   return a task ARN in its response.
      */
     override fun execute(request: JobRequest): JobExecution {
+        if (request.tty) {
+            throw UnsupportedOperationException("${this::class.simpleName} does not support tty/terminal jobs")
+        }
+
         val profile = request.profile as? EcsJobProfile
             ?: throw JobException("JobProfile must be a ${EcsJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
@@ -532,12 +536,14 @@ class EcsOrchestrationService @Inject constructor(
                 launchType = profile.launchType.name,
                 lastStatus = task.lastStatus(),
                 stdioToken = stdioToken
-            )
+            ),
+            containers = profile.containers
         )
     }
 
     override fun listExecutions(): List<JobExecution> {
-        val families = getAvailableProfiles().mapTo(mutableSetOf()) { (it as EcsJobProfile).family }
+        val profilesByFamily = getAvailableProfiles().filterIsInstance<EcsJobProfile>().associateBy { it.family }
+        val families = profilesByFamily.keys
         val executions = mutableListOf<JobExecution>()
         for (family in families) {
             var nextToken: String? = null
@@ -563,7 +569,8 @@ class EcsOrchestrationService @Inject constructor(
                                 taskDefinitionArn = task.taskDefinitionArn() ?: "",
                                 launchType = task.launchTypeAsString(),
                                 lastStatus = task.lastStatus()
-                            )
+                            ),
+                            containers = profilesByFamily[family]?.containers ?: emptyList()
                         )
                     }
                 }
@@ -598,7 +605,13 @@ class EcsOrchestrationService @Inject constructor(
      *   reachable host yet, or the bridge can't be reached (not present in the image, port not
      *   mapped, wrong token, etc.)
      */
-    override fun streamStdio(execution: JobExecution): JobStdio {
+    override fun streamStdio(execution: JobExecution, containerId: String?): JobStdio {
+        if (containerId != null) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} only supports a single container per job; containerId must be null"
+            )
+        }
+
         val token = (execution.details as? EcsExecutionDetails)?.stdioToken
             ?: throw StdioUnavailableException(
                 "No stdio token available for execution '${execution.id}' — streamStdio requires " +

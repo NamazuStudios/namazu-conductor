@@ -3,6 +3,7 @@ package dev.getelements.conductor.edgegap.service
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.google.inject.name.Named
+import dev.getelements.conductor.ContainerRef
 import dev.getelements.conductor.IpPlacement
 import dev.getelements.conductor.JobEndpoint
 import dev.getelements.conductor.JobExecution
@@ -158,6 +159,10 @@ class EdgeGapOrchestrationService @Inject constructor(
      * @throws JobException if [JobRequest.profile] is not an [EdgeGapJobProfile]
      */
     override fun execute(request: JobRequest): JobExecution {
+        if (request.tty) {
+            throw UnsupportedOperationException("${this::class.simpleName} does not support tty/terminal jobs")
+        }
+
         val profile = request.profile as? EdgeGapJobProfile
             ?: throw JobException("JobProfile must be an ${EdgeGapJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
@@ -190,7 +195,8 @@ class EdgeGapOrchestrationService @Inject constructor(
                 appName = profile.appName,
                 versionName = profile.versionName,
                 stdioToken = stdioToken
-            )
+            ),
+            containers = profile.containers
         )
     }
 
@@ -214,6 +220,9 @@ class EdgeGapOrchestrationService @Inject constructor(
                         versionName = deployment.versionName,
                         fqdn = deployment.fqdn,
                         publicIp = deployment.publicIp
+                    ),
+                    containers = listOf(
+                        ContainerRef(id = deployment.requestId, name = deployment.requestId, primary = true)
                     )
                 )
             }
@@ -248,7 +257,13 @@ class EdgeGapOrchestrationService @Inject constructor(
      *   no reachable host yet, or the bridge can't be reached (not present in the image, port not
      *   mapped, wrong token, etc.)
      */
-    override fun streamStdio(execution: JobExecution): JobStdio {
+    override fun streamStdio(execution: JobExecution, containerId: String?): JobStdio {
+        if (containerId != null) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} only supports a single container per job; containerId must be null"
+            )
+        }
+
         val token = (execution.details as? EdgeGapExecutionDetails)?.stdioToken
             ?: throw StdioUnavailableException(
                 "No stdio token available for execution '${execution.id}' — streamStdio requires " +
