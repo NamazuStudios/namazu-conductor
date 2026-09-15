@@ -57,6 +57,7 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
             "Providers that fail to respond are included with a non-null error field. " +
             "Requires SUPERUSER level."
     )
+    @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Execution list retrieved. Check the 'status' field: ok | partial | error.")
     @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
     @ApiResponse(responseCode = "503", description = "No OrchestrationService providers are currently deployed.")
@@ -111,6 +112,8 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
         required = true,
         content = [Content(schema = Schema(implementation = ExecuteJobRequest::class))]
     )
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Job submitted. Returns a JobExecution with id, status, and any initial endpoints.")
     @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
     @ApiResponse(responseCode = "404", description = "Element or profile not found.")
@@ -150,6 +153,8 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
 
     @POST
     @Path("/stop")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
     @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
     @Operation(
         summary = "Stop a running job",
@@ -185,6 +190,8 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
 
     @POST
     @Path("/terminal-ticket")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
     @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
     @Operation(
         summary = "Mint a terminal WebSocket ticket",
@@ -218,4 +225,5 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
         val ticket = TerminalTicketStore.mint(request.jobId, request.containerId)
         return Response.ok(TerminalTicketResponse(ticket)).build()
     }
+
 }

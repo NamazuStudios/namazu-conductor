@@ -3,6 +3,7 @@ package dev.getelements.conductor.admin
 import dev.getelements.elements.sdk.annotation.ElementDefaultAttribute
 import dev.getelements.elements.sdk.annotation.ElementServiceExport
 import dev.getelements.elements.sdk.annotation.ElementServiceImplementation
+import dev.getelements.elements.sdk.jakarta.rs.DefaultExceptionMapper
 import jakarta.ws.rs.core.Application
 
 @ElementServiceImplementation
@@ -32,7 +33,10 @@ class ConductorAdminApplication : Application() {
 
     override fun getClasses(): Set<Class<*>> = setOf(
         ConductorAdminResource::class.java,
-        ConductorAdminJobsResource::class.java
+        ConductorAdminJobsResource::class.java,
+        DefaultExceptionMapper::class.java
     )
+
+    override fun getSingletons(): Set<Any> = setOf(ConductorAdminJacksonProvider())
 
 }

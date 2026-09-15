@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -42,6 +43,7 @@ class ConductorAdminResource @Inject constructor(private val userService: UserSe
             "Providers that fail to respond are included with a non-null error field. " +
             "Requires SUPERUSER level."
     )
+    @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Profile list retrieved. Check the 'status' field: ok | partial | error.")
     @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
     @ApiResponse(responseCode = "503", description = "No OrchestrationService providers are currently deployed.",
