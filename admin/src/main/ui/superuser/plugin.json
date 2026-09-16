@@ -12,12 +12,6 @@
       "icon": "Activity",
       "bundlePath": "plugin.bundle.js",
       "route": "conductor-running"
-    },
-    {
-      "label": "Terminals",
-      "icon": "SquareTerminal",
-      "bundlePath": "plugin.bundle.js",
-      "route": "conductor-terminals"
     }
   ]
 }

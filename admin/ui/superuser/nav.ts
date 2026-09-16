@@ -9,7 +9,6 @@
 export const ROUTES = {
   available: 'conductor-available',
   running: 'conductor-running',
-  terminals: 'conductor-terminals',
 } as const
 
 export function navigateTo(route: string, params?: Record<string, string>) {
@@ -20,7 +19,7 @@ export function navigateTo(route: string, params?: Record<string, string>) {
 export function readAndClearParams(): URLSearchParams | null {
   const params = new URLSearchParams(window.location.search)
   if ([...params.keys()].length === 0) return null
-  // Clear so a refresh of the Terminals page doesn't re-open the same session request.
+  // Clear so refreshing the page doesn't re-apply the same one-shot param (e.g. re-flash a highlight).
   window.history.replaceState(null, '', window.location.pathname)
   return params
 }

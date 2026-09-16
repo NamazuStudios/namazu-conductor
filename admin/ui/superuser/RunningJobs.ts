@@ -19,9 +19,9 @@ function statusColorClasses(status: string): string {
  * whitespace-split of whatever's typed otherwise, which is an intentional simplification for this
  * advanced/power-user path (not full shell quoting/parsing).
  */
-function ContainerAttachRow(props: { element: string; jobId: string; running: boolean; container: { id: string; name: string; primary: boolean }; label: string }) {
+function ContainerAttachRow(props: { element: string; jobId: string; running: boolean; container: { id: string; name: string; primary: boolean; defaultCommand?: string[] }; label: string }) {
   const { container: c } = props
-  const [command, setCommand] = React.useState('')
+  const [command, setCommand] = React.useState(() => (c.defaultCommand ?? []).join(' '))
 
   function handleAttach() {
     const tokens = command.trim().split(/\s+/).filter(Boolean)

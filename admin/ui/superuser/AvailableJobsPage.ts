@@ -61,7 +61,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       disabled: starting,
       onClick: (e: React.MouseEvent) => { e.stopPropagation(); handleStart() },
       className: 'px-3 py-1 rounded bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors',
-    }, starting ? 'Starting…' : 'Run ▶️'))
+    }, starting ? 'Starting…' : 'Run ▶'))
 
   return h(Accordion, { isExpanded: props.isExpanded, onToggle: props.onToggle, header },
     startError && h('p', { className: 'text-xs text-destructive mb-2' }, startError),

@@ -2,6 +2,7 @@ export interface ContainerRef {
   id: string
   name: string
   primary: boolean
+  defaultCommand?: string[]
 }
 
 export interface JobEndpoint {

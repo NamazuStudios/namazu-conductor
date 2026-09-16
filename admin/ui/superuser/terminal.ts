@@ -1,9 +1,18 @@
 import React from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import xtermCss from '@xterm/xterm/css/xterm.css?inline'
 import { mintTerminalTicket } from './api'
 
 const h = React.createElement
+
+export function injectXtermStyles() {
+  if (document.getElementById('conductor-xterm-styles')) return
+  const style = document.createElement('style')
+  style.id = 'conductor-xterm-styles'
+  style.textContent = xtermCss
+  document.head.appendChild(style)
+}
 
 // Bell sound copied alongside this bundle at build time — see admin/src/main/ui/superuser/complete.oga.
 // Resolved against the bundle's OWN script URL (captured once, synchronously, while this script is
@@ -259,6 +268,34 @@ export function playBell() {
   const audio = new Audio(BELL_SOUND_PATH)
   audio.volume = terminalSessionManager.getBellVolume()
   void audio.play().catch(() => {})
+}
+
+export function BellControls() {
+  const [volume, setVolume] = React.useState(() => terminalSessionManager.getBellVolume())
+
+  function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = Number(e.target.value) / 100
+    setVolume(next)
+    terminalSessionManager.setBellVolume(next)
+  }
+
+  return h('div', { className: 'flex items-center gap-3' },
+    h('button', {
+      className: 'px-2.5 py-1 rounded border text-xs hover:bg-muted transition-colors',
+      onClick: () => playBell(),
+      title: 'Play the terminal bell sound',
+    }, '🔔'),
+    h('label', { className: 'flex items-center gap-1.5 text-xs text-muted-foreground' },
+      volume === 0 ? '🔇' : '🔊',
+      h('input', {
+        type: 'range',
+        min: 0,
+        max: 100,
+        value: Math.round(volume * 100),
+        onChange: handleVolumeChange,
+        className: 'w-24',
+        title: 'Terminal bell volume',
+      })))
 }
 
 function useTerminalSnapshot() {
