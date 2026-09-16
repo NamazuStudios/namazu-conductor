@@ -34,13 +34,13 @@ metadata:
   annotations:
     namazu.conductor/workload-kind: pod
     namazu.conductor/terminal-job: "true"
-    namazu.conductor/default-container-exec.shell: "/bin/bash -l"
+    namazu.conductor/default-container-exec.shell: "/bin/bash"
     namazu.conductor/default-container-exec.sidecar: "/bin/sh"
     namazu.conductor/description: |
       A minimal two-container pod for testing the admin dashboard's web-based terminal.
 
       - `shell` (`bash:5`) — the primary container; *Start Terminal* attaches to it automatically,
-        with `/bin/bash -l` pre-filled when attaching manually from Running Jobs.
+        with `/bin/bash` pre-filled when attaching manually from Running Jobs.
       - `sidecar` (`alpine:3`) — only reachable via Running Jobs' per-container Attach Terminal row,
         pre-filled with `/bin/sh`.
       - Both stay alive on their own via `sleep infinity`.
