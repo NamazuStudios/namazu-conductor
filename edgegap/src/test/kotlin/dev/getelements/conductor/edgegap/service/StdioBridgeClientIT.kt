@@ -1,10 +1,12 @@
 package dev.getelements.conductor.edgegap.service
 
+import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.exception.StdioUnavailableException
 import org.testng.Assert.assertThrows
 import org.testng.Assert.assertTrue
 import org.testng.annotations.Test
 import java.io.BufferedReader
+import java.util.concurrent.TimeUnit
 
 /**
  * Integration test for [StdioBridgeClient] — the WebSocket client `EdgeGapOrchestrationService`
@@ -47,7 +49,7 @@ class StdioBridgeClientIT {
 
     @Test(priority = 1)
     fun roundTripsStdinStdoutStderr() {
-        val stdio = StdioBridgeClient.connect(host(), port(), "", token())
+        val stdio = connectWithRetry()
         val stdoutReader = BufferedReader(stdio.stdout.reader())
         val stderrReader = BufferedReader(stdio.stderr.reader())
 
@@ -70,6 +72,23 @@ class StdioBridgeClientIT {
             assertTrue(stderrReader.readLine() == null, "Expected stderr EOF after process exit")
         } finally {
             stdio.close()
+        }
+    }
+
+    // The self-restarting bridge container in CI (see release.yaml/edgegap-it.yaml) is a tight
+    // `docker run --rm` loop with no guaranteed restart latency. In release.yaml specifically, a
+    // full reactor build also runs minikube concurrently — under that combined load the restart
+    // can occasionally lag past its usual near-instant respawn. Tolerate a brief window here rather
+    // than fail on a container that is merely still coming back up.
+    private fun connectWithRetry(): JobStdio {
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(15)
+        while (true) {
+            try {
+                return StdioBridgeClient.connect(host(), port(), "", token())
+            } catch (e: StdioUnavailableException) {
+                if (System.currentTimeMillis() >= deadline) throw e
+                Thread.sleep(500)
+            }
         }
     }
 
