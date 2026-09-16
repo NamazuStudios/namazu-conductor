@@ -1,15 +1,19 @@
 #!/bin/bash
 #
-# Applies a sample PodTemplate running a bash container to the current kubectl context, so the
-# admin dashboard's web-based terminal (xterm.js) can be tested end-to-end against a real pod.
+# Applies a sample two-container PodTemplate to the current kubectl context, so the admin
+# dashboard's web-based terminal (xterm.js) can be tested end-to-end against a real pod.
 # Run ./kubernetes/start-minikube.sh first.
 #
-# The container just sleeps so the pod stays Running on its own. The `namazu.conductor/terminal-job`
+# Both containers just sleep so the pod stays Running on its own. The `namazu.conductor/terminal-job`
 # annotation marks this profile as terminal-capable: the admin dashboard's "Available Jobs & Services"
 # page shows a one-click "Start Terminal 💻" button for it, which launches the job with tty/command
-# defaults implied automatically (see ConductorAdminJobsResource.execute()) — no manual form needed.
-# The `namazu.conductor/default-container-exec.shell` annotation pre-fills the Running Jobs page's
-# "Attach Terminal" input for the `shell` container instead of leaving it blank.
+# defaults implied automatically (see ConductorAdminJobsResource.execute()) — no manual form needed;
+# this always targets the primary/first container (`shell`).
+#
+# Each container also declares its own `namazu.conductor/default-container-exec.<name>` annotation,
+# which pre-fills that container's "Attach Terminal" input on the Running Jobs page — `shell` defaults
+# to `/bin/bash -l`, `sidecar` to `/bin/sh`, demonstrating that the default is genuinely per-container
+# rather than shared across the whole profile.
 #
 # Usage:
 #     ./kubernetes/install-terminal-test-pod.sh
@@ -31,20 +35,28 @@ metadata:
     namazu.conductor/workload-kind: pod
     namazu.conductor/terminal-job: "true"
     namazu.conductor/default-container-exec.shell: "/bin/bash -l"
+    namazu.conductor/default-container-exec.sidecar: "/bin/sh"
     namazu.conductor/description: |
-      A minimal **bash** container for testing the admin dashboard's web-based terminal.
+      A minimal two-container pod for testing the admin dashboard's web-based terminal.
 
-      - Image: `bash:5`
-      - Stays alive on its own via `sleep infinity`
-      - Launching via *Start Terminal* attaches an interactive shell automatically
+      - `shell` (`bash:5`) — the primary container; *Start Terminal* attaches to it automatically,
+        with `/bin/bash -l` pre-filled when attaching manually from Running Jobs.
+      - `sidecar` (`alpine:3`) — only reachable via Running Jobs' per-container Attach Terminal row,
+        pre-filled with `/bin/sh`.
+      - Both stay alive on their own via `sleep infinity`.
 template:
   spec:
     containers:
       - name: shell
         image: bash:5
         command: ["bash", "-c", "sleep infinity"]
+      - name: sidecar
+        image: alpine:3
+        command: ["sh", "-c", "sleep infinity"]
 EOF
 
 echo
 echo "Applied PodTemplate 'conductor-terminal-test' to namespace 'default'."
-echo "In the admin dashboard's Available Jobs & Services page, click 'Start Terminal 💻' to launch it."
+echo "In the admin dashboard's Available Jobs & Services page, click 'Start Terminal 💻' to launch it"
+echo "(attaches to the 'shell' container). Once running, attach to either 'shell' or 'sidecar' from"
+echo "the Running Jobs page's per-container Attach Terminal row."
