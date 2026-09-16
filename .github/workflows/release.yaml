@@ -186,6 +186,8 @@ jobs:
           set -x
           mvn versions:set -DnewVersion=${{ steps.version.outputs.next_version }} -B --no-transfer-progress
           mvn versions:commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -am "Start next iteration: ${{ steps.version.outputs.next_version }}"
           git push origin "${{ github.ref_name }}"
         env:
