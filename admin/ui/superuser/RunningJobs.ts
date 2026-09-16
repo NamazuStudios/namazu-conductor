@@ -126,9 +126,10 @@ export function RunningJobsSection() {
     h('div', { className: 'flex items-center justify-between' },
       h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
       h('div', { className: 'flex items-center gap-2' },
-        expandedIds.size > 0 && h('button', {
+        h('button', {
           onClick: () => setExpandedIds(new Set()),
-          className: 'px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors',
+          disabled: expandedIds.size === 0,
+          className: 'px-3 py-1.5 rounded border text-sm hover:bg-muted disabled:opacity-50 transition-colors',
         }, 'Collapse all'),
         h('button', {
           onClick: load,
