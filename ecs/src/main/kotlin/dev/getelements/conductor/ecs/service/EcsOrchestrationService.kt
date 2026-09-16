@@ -605,10 +605,16 @@ class EcsOrchestrationService @Inject constructor(
      *   reachable host yet, or the bridge can't be reached (not present in the image, port not
      *   mapped, wrong token, etc.)
      */
-    override fun streamStdio(execution: JobExecution, containerId: String?): JobStdio {
+    override fun streamStdio(execution: JobExecution, containerId: String?, command: List<String>?): JobStdio {
         if (containerId != null) {
             throw UnsupportedOperationException(
                 "${this::class.simpleName} only supports a single container per job; containerId must be null"
+            )
+        }
+        if (command != null) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} does not support exec-ing an arbitrary command; the stdio " +
+                    "bridge only relays the container's single fixed process"
             )
         }
 

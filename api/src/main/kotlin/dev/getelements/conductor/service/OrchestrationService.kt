@@ -75,16 +75,20 @@ interface OrchestrationService {
      * [containerId] selects which of [JobExecution.containers] to attach to; `null` (the default)
      * attaches to the primary container. Providers that only ever run a single container per job
      * ignore this parameter when `null` and throw [UnsupportedOperationException] for any non-null
-     * value, since they have no other container to select. Note that requesting an interactive
-     * terminal (tty allocation) is decided at [execute] time via [dev.getelements.conductor.JobRequest.tty],
-     * not here — this method only ever attaches to whatever pty/pipe the job was launched with.
+     * value, since they have no other container to select.
+     *
+     * [command] optionally selects a process to run for this specific session — like `kubectl exec`
+     * rather than `kubectl attach` — independent of whatever the container's own PID 1 is doing.
+     * `null` (the default) uses the provider's own default (e.g. a shell). Providers that only ever
+     * expose the container's single fixed process (no per-session exec support) ignore this parameter
+     * when `null` and throw [UnsupportedOperationException] for any non-null value.
      *
      * The default implementation throws [UnsupportedOperationException]; providers with no native or
      * bridged stdio access leave it unimplemented. Providers that support this in principle but can't
      * currently reach the process (job not started, process no longer running, bridge not present,
      * etc.) throw [dev.getelements.conductor.exception.StdioUnavailableException] instead.
      */
-    fun streamStdio(execution: JobExecution, containerId: String? = null): JobStdio =
+    fun streamStdio(execution: JobExecution, containerId: String? = null, command: List<String>? = null): JobStdio =
         throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming")
 
 }
