@@ -1,6 +1,5 @@
 import React from 'react'
 import { RunningJobsSection } from './RunningJobs'
-import { readAndClearParams } from './nav'
 import { TerminalTabs, BellControls, injectXtermStyles, terminalSessionManager } from './terminal'
 
 const h = React.createElement
@@ -14,7 +13,6 @@ function useHasOpenTerminals(): boolean {
 }
 
 export function RunningJobsPage() {
-  const [highlightId] = React.useState(() => readAndClearParams()?.get('highlight') ?? null)
   const hasOpenTerminals = useHasOpenTerminals()
 
   React.useEffect(() => { injectXtermStyles() }, [])
@@ -23,6 +21,6 @@ export function RunningJobsPage() {
     h('div', { className: 'flex items-center justify-between' },
       h('h1', { className: 'text-2xl font-bold' }, 'Running Jobs & Services'),
       h(BellControls)),
-    h(RunningJobsSection, { highlightId }),
+    h(RunningJobsSection),
     hasOpenTerminals && h(TerminalTabs))
 }

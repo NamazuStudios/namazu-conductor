@@ -45,24 +45,11 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
     }, '▤ Attach Terminal'))
 }
 
-function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; highlight?: boolean }) {
+function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; isExpanded: boolean; onToggle: () => void }) {
   const ex = props.execution
-  const [isExpanded, setExpanded] = React.useState(false)
+  const { isExpanded } = props
   const [isStopping, setStopping] = React.useState(false)
   const [stopError, setStopError] = React.useState<string | null>(null)
-  const [isFlashing, setFlashing] = React.useState(false)
-  const rowRef = React.useRef<HTMLDivElement | null>(null)
-  const hasHandledHighlight = React.useRef(false)
-
-  React.useEffect(() => {
-    if (!props.highlight || hasHandledHighlight.current) return
-    hasHandledHighlight.current = true
-    setExpanded(true)
-    setFlashing(true)
-    rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    const timeout = setTimeout(() => setFlashing(false), 2500)
-    return () => clearTimeout(timeout)
-  }, [props.highlight])
 
   function handleStop() {
     setStopping(true)
@@ -75,12 +62,9 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   const containers = ex.containers ?? []
 
-  return h('div', {
-    ref: rowRef,
-    className: `rounded-lg border bg-card transition-shadow ${isFlashing ? 'ring-2 ring-primary' : ''}`,
-  },
+  return h('div', { className: 'rounded-lg border bg-card' },
     h('div', { className: 'flex items-center gap-3 px-4 py-2.5 flex-wrap' },
-      h('button', { className: 'text-xs opacity-50 shrink-0', onClick: () => setExpanded((v) => !v) }, isExpanded ? '▼' : '▶'),
+      h('button', { className: 'text-xs opacity-50 shrink-0', onClick: props.onToggle }, isExpanded ? '▼' : '▶'),
       h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
       h('span', { className: `text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${statusColorClasses(ex.status)}` }, ex.status),
       ex.endpoints && ex.endpoints.length > 0 &&
@@ -106,10 +90,11 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
     isExpanded && Boolean(ex.details) && h('div', { className: 'border-t px-4 py-3' }, h(DetailGrid, { obj: ex.details })))
 }
 
-export function RunningJobsSection(props: { highlightId?: string | null }) {
+export function RunningJobsSection() {
   const [data, setData] = React.useState<{ loading: boolean; providers: ProviderExecutionsResult[]; error: string | null }>({
     loading: true, providers: [], error: null,
   })
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
 
   const load = React.useCallback(() => {
     fetchJobs()
@@ -129,14 +114,27 @@ export function RunningJobsSection(props: { highlightId?: string | null }) {
     ? h('span', { className: 'w-3 h-3 rounded-full bg-gray-400 animate-pulse inline-block' })
     : '↺'
 
+  function toggle(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
   return h('div', { className: 'space-y-3' },
     h('div', { className: 'flex items-center justify-between' },
       h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
-      h('button', {
-        onClick: load,
-        disabled: data.loading,
-        className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50',
-      }, refreshIcon, data.loading ? ' Refreshing…' : ' Refresh')),
+      h('div', { className: 'flex items-center gap-2' },
+        expandedIds.size > 0 && h('button', {
+          onClick: () => setExpandedIds(new Set()),
+          className: 'px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors',
+        }, 'Collapse all'),
+        h('button', {
+          onClick: load,
+          disabled: data.loading,
+          className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50',
+        }, refreshIcon, data.loading ? ' Refreshing…' : ' Refresh'))),
     data.error && h('p', { className: 'text-xs text-destructive' }, data.error),
     !data.loading && allExecutions.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
@@ -148,6 +146,7 @@ export function RunningJobsSection(props: { highlightId?: string | null }) {
             execution: item.execution,
             element: item.element,
             onRefresh: load,
-            highlight: Boolean(props.highlightId) && item.execution.id === props.highlightId,
+            isExpanded: expandedIds.has(item.execution.id),
+            onToggle: () => toggle(item.execution.id),
           })))))
 }
