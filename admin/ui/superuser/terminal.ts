@@ -15,6 +15,7 @@ export function injectXtermStyles() {
 }
 
 // Bell sound copied alongside this bundle at build time — see admin/src/main/ui/superuser/complete.oga.
+// Thanks to Okiedokie24 for the "ding" sound effect.
 // Resolved against the bundle's OWN script URL (captured once, synchronously, while this script is
 // still `document.currentScript`), not the current page URL — we now do full-page navigations across
 // three different /admin/plugin/{route} URLs, none of which are anywhere near where this bundle (and

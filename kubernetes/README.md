@@ -69,6 +69,33 @@ metadata:
     namazu.conductor/service-type: LoadBalancer
 ```
 
+### `namazu.conductor/terminal-job` (annotation)
+
+`"true"`/`"false"`, defaults to `false`. Hints that a profile is meant to be launched with an
+interactive terminal attached: when a `JobRequest` doesn't specify `tty`/`command` explicitly, the
+admin dashboard's one-click "Start Terminal" launch defaults `tty` to `true` and `command` to a shell
+for this profile. Setting it alongside `workload-kind: job` logs a warning and is otherwise a no-op —
+job pods are transient and complete on their own, so there's nothing useful to keep an interactive
+session attached to.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/terminal-job: "true"
+```
+
+### `namazu.conductor/description` (annotation)
+
+An optional human-readable description, rendered as Markdown on the admin dashboard's "Available Jobs
+& Services" page. Absent → no description shown.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/description: |
+      A **minimal** profile for smoke-testing terminal attachment.
+```
+
 ### `namazu.conductor/default-container-exec.<container-name>` (annotation)
 
 Default command to pre-fill the admin dashboard's "Attach Terminal" action for the named container,
