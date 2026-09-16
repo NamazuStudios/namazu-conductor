@@ -6,6 +6,9 @@ import jakarta.websocket.CloseReason
 import jakarta.websocket.Session
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Shared logic behind [PrimaryContainerTerminalEndpoint] and [ContainerTerminalEndpoint]: resolves
@@ -24,6 +27,19 @@ internal object TerminalSessionHandler {
     private val logger = LoggerFactory.getLogger(TerminalSessionHandler::class.java)
 
     private const val STDIO_PROPERTY = "conductor.jobStdio"
+    private const val WRITE_LOCK_PROPERTY = "conductor.writeLock"
+    private const val PING_FUTURE_PROPERTY = "conductor.pingFuture"
+
+    // Comfortably under common container/proxy idle-timeout defaults (typically 30-60s), so an
+    // otherwise-silent terminal (no keystrokes, no pty output) never gets closed out from under it.
+    private const val PING_INTERVAL_SECONDS = 25L
+
+    private val EMPTY_PING_PAYLOAD: ByteBuffer = ByteBuffer.allocate(0)
+
+    // Shared across all terminal sessions - pings are infrequent and cheap, one daemon thread suffices.
+    private val pingScheduler = Executors.newSingleThreadScheduledExecutor {
+        Thread(it, "conductor-terminal-ping").apply { isDaemon = true }
+    }
 
     private val RESIZE_REGEX = Regex(
         """"type"\s*:\s*"resize".*?"cols"\s*:\s*(\d+).*?"rows"\s*:\s*(\d+)"""
@@ -53,9 +69,39 @@ internal object TerminalSessionHandler {
 
         session.userProperties[STDIO_PROPERTY] = stdio
 
-        val reader = Thread({ pumpStdout(session, stdio) }, "conductor-terminal-$jobId")
+        // Guards every session.basicRemote send (both the stdout pump below and the ping heartbeat)
+        // so they're never in flight concurrently - see TerminalSessionHandler's plan notes: the spec
+        // documents a possible IllegalStateException from concurrent Basic-remote sends, independent
+        // of whatever the underlying container happens to serialize internally.
+        val writeLock = Any()
+        session.userProperties[WRITE_LOCK_PROPERTY] = writeLock
+
+        val pingFuture = pingScheduler.scheduleAtFixedRate(
+            { sendPing(session, writeLock) },
+            PING_INTERVAL_SECONDS,
+            PING_INTERVAL_SECONDS,
+            TimeUnit.SECONDS
+        )
+        session.userProperties[PING_FUTURE_PROPERTY] = pingFuture
+
+        val reader = Thread({ pumpStdout(session, stdio, writeLock) }, "conductor-terminal-$jobId")
         reader.isDaemon = true
         reader.start()
+    }
+
+    private fun sendPing(session: Session, writeLock: Any) {
+        if (!session.isOpen) {
+            cancelPing(session)
+            return
+        }
+        val sent = runCatching {
+            synchronized(writeLock) { session.basicRemote.sendPing(EMPTY_PING_PAYLOAD) }
+        }
+        if (sent.isFailure) cancelPing(session)
+    }
+
+    private fun cancelPing(session: Session) {
+        (session.userProperties[PING_FUTURE_PROPERTY] as? ScheduledFuture<*>)?.cancel(false)
     }
 
     fun onBinaryMessage(session: Session, data: ByteArray) {
@@ -75,6 +121,7 @@ internal object TerminalSessionHandler {
     }
 
     fun onClose(session: Session) {
+        cancelPing(session)
         stdioOf(session)?.let { stdio -> runCatching { stdio.close() } }
     }
 
@@ -83,13 +130,13 @@ internal object TerminalSessionHandler {
         onClose(session)
     }
 
-    private fun pumpStdout(session: Session, stdio: JobStdio) {
+    private fun pumpStdout(session: Session, stdio: JobStdio, writeLock: Any) {
         val buffer = ByteArray(8192)
         try {
             while (session.isOpen) {
                 val read = stdio.stdout.read(buffer)
                 if (read < 0) break
-                session.basicRemote.sendBinary(ByteBuffer.wrap(buffer, 0, read))
+                synchronized(writeLock) { session.basicRemote.sendBinary(ByteBuffer.wrap(buffer, 0, read)) }
             }
         } catch (e: Exception) {
             logger.debug("Terminal stdout pump ending", e)
