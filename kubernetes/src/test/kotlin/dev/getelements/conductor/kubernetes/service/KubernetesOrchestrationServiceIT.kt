@@ -427,12 +427,17 @@ class KubernetesOrchestrationServiceIT {
         val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
         service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
 
-        service.streamStdio(execution, MULTI_CONTAINER_SECONDARY).use { stdio ->
+        // streamStdio() is exec-like (kubectl exec, not kubectl attach): with no explicit command it
+        // execs a fresh /bin/sh rather than attaching to the container's own long-running process, so
+        // the expected greeting has to be requested via an explicit command instead of relying on the
+        // container's background `while true; do echo ...; sleep 1; done` loop to have just emitted it.
+        val echoCommand = listOf("echo", "hello-from-$MULTI_CONTAINER_SECONDARY")
+        service.streamStdio(execution, MULTI_CONTAINER_SECONDARY, echoCommand).use { stdio ->
             val line = stdio.stdout.bufferedReader().readLine()
             assertEquals(line, "hello-from-$MULTI_CONTAINER_SECONDARY")
         }
 
-        service.streamStdio(execution, MULTI_CONTAINER_PRIMARY).use { stdio ->
+        service.streamStdio(execution, MULTI_CONTAINER_PRIMARY, listOf("echo", "hello-from-$MULTI_CONTAINER_PRIMARY")).use { stdio ->
             val line = stdio.stdout.bufferedReader().readLine()
             assertEquals(line, "hello-from-$MULTI_CONTAINER_PRIMARY")
         }
