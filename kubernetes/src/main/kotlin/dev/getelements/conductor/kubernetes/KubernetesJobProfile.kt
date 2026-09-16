@@ -33,7 +33,11 @@ data class KubernetesJobProfile(
     /** `namazu.conductor/completions` → `spec.completions` */
     val completions: Int? = null,
     /** `namazu.conductor/parallelism` → `spec.parallelism` */
-    val parallelism: Int? = null
+    val parallelism: Int? = null,
+    /** `namazu.conductor/terminal-job` — hints that this profile should default to an interactive tty */
+    override val terminalJob: Boolean = false,
+    /** `namazu.conductor/description` — Markdown, surfaced to the admin dashboard */
+    override val description: String? = null
 ) : JobProfile {
 
     override val id: String

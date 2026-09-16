@@ -69,6 +69,47 @@ metadata:
     namazu.conductor/service-type: LoadBalancer
 ```
 
+### `namazu.conductor/terminal-job` (annotation)
+
+`"true"`/`"false"`, defaults to `false`. Hints that a profile is meant to be launched with an
+interactive terminal attached: when a `JobRequest` doesn't specify `tty`/`command` explicitly, the
+admin dashboard's one-click "Start Terminal" launch defaults `tty` to `true` and `command` to a shell
+for this profile. Setting it alongside `workload-kind: job` logs a warning and is otherwise a no-op —
+job pods are transient and complete on their own, so there's nothing useful to keep an interactive
+session attached to.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/terminal-job: "true"
+```
+
+### `namazu.conductor/description` (annotation)
+
+An optional human-readable description, rendered as Markdown on the admin dashboard's "Available Jobs
+& Services" page. Absent → no description shown.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/description: |
+      A **minimal** profile for smoke-testing terminal attachment.
+```
+
+### `namazu.conductor/default-container-exec.<container-name>` (annotation)
+
+Default command to pre-fill the admin dashboard's "Attach Terminal" action for the named container,
+space-tokenized (e.g. `/bin/bash -l`). One annotation per container — Kubernetes annotation keys allow
+only a single `/` (separating `prefix/name`), so per-container values are addressed by a name suffix
+rather than a nested key. Purely a UI convenience; it doesn't affect how the container is launched, and
+it's still freely editable before attaching. Absent → the input starts blank.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/default-container-exec.app: "/bin/bash -l"
+```
+
 ## Endpoints, Services & Placement
 
 When a template declares `expose-ports`, `execute()` creates the workload and a `Service` of the requested type. The Service is labelled `namazu.conductor/owned-by=<workload-name>`, which lets `stop()` delete both the workload and its Service without persisting any state. When no ports are exposed, endpoints are resolved directly from the pod IP and its container ports (or empty for a port-less one-off Job).

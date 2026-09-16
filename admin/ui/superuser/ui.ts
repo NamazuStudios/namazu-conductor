@@ -3,6 +3,59 @@ import type { JobExecution } from './types'
 
 const h = React.createElement
 
+/**
+ * Catches a render error in its subtree and shows an inline message instead of blanking the whole
+ * page — e.g. one malformed profile's Markdown description shouldn't take down the entire list.
+ */
+export class ErrorBoundary extends React.Component<{ children?: React.ReactNode }, { error: Error | null }> {
+  constructor(props: { children?: React.ReactNode }) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  render() {
+    if (this.state.error) {
+      return h('div', { className: 'rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-xs text-destructive' },
+        `Failed to render: ${this.state.error.message}`)
+    }
+    return this.props.children
+  }
+}
+
+export function Accordion(props: {
+  isExpanded: boolean
+  onToggle: () => void
+  header: React.ReactNode
+  children?: React.ReactNode
+}) {
+  return h('div', { className: 'rounded-lg border bg-card' },
+    h('div', { className: 'flex items-center gap-3 px-4 py-3' },
+      h('button', { className: 'text-xs opacity-50 shrink-0', onClick: props.onToggle }, props.isExpanded ? '▼' : '▶'),
+      h('div', { className: 'flex-1 min-w-0' }, props.header)),
+    props.isExpanded && props.children &&
+      h('div', { className: 'border-t px-4 py-3' }, props.children))
+}
+
+export function Pagination(props: { page: number; pageCount: number; onChange: (page: number) => void }) {
+  if (props.pageCount <= 1) return null
+  return h('div', { className: 'flex items-center justify-center gap-3 pt-2' },
+    h('button', {
+      disabled: props.page <= 0,
+      onClick: () => props.onChange(props.page - 1),
+      className: 'px-3 py-1 rounded border text-sm hover:bg-muted disabled:opacity-40 transition-colors',
+    }, '← Prev'),
+    h('span', { className: 'text-xs text-muted-foreground' }, `Page ${props.page + 1} of ${props.pageCount}`),
+    h('button', {
+      disabled: props.page >= props.pageCount - 1,
+      onClick: () => props.onChange(props.page + 1),
+      className: 'px-3 py-1 rounded border text-sm hover:bg-muted disabled:opacity-40 transition-colors',
+    }, 'Next →'))
+}
+
 export function StatusIndicator(props: { loading: boolean; status: string | null; error: string | null }) {
   let dot: React.ReactNode
   let label: string

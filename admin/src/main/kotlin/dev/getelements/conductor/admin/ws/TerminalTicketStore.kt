@@ -18,32 +18,34 @@ internal object TerminalTicketStore {
 
     private val TTL: Duration = Duration.ofSeconds(30)
 
-    private data class Ticket(val jobId: String, val containerId: String?, val expiresAt: Instant)
+    internal data class Ticket(val jobId: String, val containerId: String?, val command: List<String>?, val expiresAt: Instant)
 
     private val tickets = ConcurrentHashMap<String, Ticket>()
     private val random = SecureRandom()
 
     /**
      * Mints a new ticket authorizing a single connection to [jobId] / [containerId] (`null` for the
-     * primary container).
+     * primary container), optionally exec-ing [command] instead of attaching to the container's own
+     * process (`null` uses the provider's default).
      */
-    fun mint(jobId: String, containerId: String?): String {
+    fun mint(jobId: String, containerId: String?, command: List<String>? = null): String {
         purgeExpired()
         val bytes = ByteArray(32)
         random.nextBytes(bytes)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        tickets[token] = Ticket(jobId, containerId, Instant.now().plus(TTL))
+        tickets[token] = Ticket(jobId, containerId, command, Instant.now().plus(TTL))
         return token
     }
 
     /**
-     * Validates and consumes (single-use) [token] for the given [jobId] / [containerId]. Returns
-     * `true` if the ticket existed, was unexpired, and matched; `false` otherwise. Consumes the
-     * ticket either way if it existed, so it can never be replayed.
+     * Validates and consumes (single-use) [token] for the given [jobId] / [containerId]. Returns the
+     * matched [Ticket] (so the caller can read its [Ticket.command]) if it existed, was unexpired, and
+     * matched; `null` otherwise. Consumes the ticket either way if it existed, so it can never be
+     * replayed.
      */
-    fun consume(token: String, jobId: String, containerId: String?): Boolean {
-        val ticket = tickets.remove(token) ?: return false
-        return Instant.now().isBefore(ticket.expiresAt) && ticket.jobId == jobId && ticket.containerId == containerId
+    fun consume(token: String, jobId: String, containerId: String?): Ticket? {
+        val ticket = tickets.remove(token) ?: return null
+        return if (Instant.now().isBefore(ticket.expiresAt) && ticket.jobId == jobId && ticket.containerId == containerId) ticket else null
     }
 
     private fun purgeExpired() {

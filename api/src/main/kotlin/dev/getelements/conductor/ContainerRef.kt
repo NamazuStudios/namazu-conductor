@@ -27,6 +27,14 @@ data class ContainerRef(
      * (e.g. to [dev.getelements.conductor.service.OrchestrationService.streamStdio]). Exactly one
      * entry in a given container list should be primary.
      */
-    val primary: Boolean
+    val primary: Boolean,
+
+    /**
+     * The command to default an interactive terminal attach to for this container, if the provider
+     * has one configured (e.g. Kubernetes' `namazu.conductor/default-container-exec.<container-name>`
+     * annotation). `null` if the provider doesn't support or wasn't given one — callers should fall
+     * back to their own default (e.g. a shell) in that case.
+     */
+    val defaultCommand: List<String>? = null
 
 )

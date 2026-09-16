@@ -15,19 +15,29 @@ class ConductorAdminApplication : Application() {
         @ElementDefaultAttribute(value = "true")
         val AUTH_ENABLED: String = "dev.getelements.elements.auth.enabled"
 
-        @JvmField
-        @ElementDefaultAttribute(value = "/conductor/admin")
-        val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
-
         /**
          * Mounts the terminal WebSocket endpoints ([dev.getelements.conductor.admin.ws.PrimaryContainerTerminalEndpoint],
-         * [dev.getelements.conductor.admin.ws.ContainerTerminalEndpoint]) at the same context path as
-         * the REST API, so the dashboard can derive the WebSocket URL from the REST base path it
-         * already knows: `ws://<host>/conductor/admin/service/{jobId}[/{containerId}]`.
+         * [dev.getelements.conductor.admin.ws.ContainerTerminalEndpoint]): `ws://<host>/conductor/admin/ws/service/{jobId}[/{containerId}]`.
+         *
+         * Deliberately a **different** context path from [RS_ROOT] rather than sharing one — the REST
+         * and WebSocket loaders (`JakartaRsLoader`/`JakartaWebsocketLoader`) each register their context
+         * path in a shared `HttpPathRegistry`, and having both claim the exact same path for one Element
+         * is suspected to cause the WebSocket loader's endpoint scan to silently find nothing (see
+         * https://github.com/NamazuStudios/elements/issues/95). Keep this and [RS_ROOT] non-overlapping.
          */
         @JvmField
-        @ElementDefaultAttribute(value = "/conductor/admin")
+        @ElementDefaultAttribute(value = "/conductor/admin/ws")
         val WS_ROOT: String = "dev.getelements.elements.element.ws.root"
+
+        /**
+         * Mounts the REST API ([ConductorAdminResource], [ConductorAdminJobsResource]):
+         * `http://<host>/conductor/admin/rest/...`.
+         *
+         * Deliberately a **different** context path from [WS_ROOT] — see that field's doc for why.
+         */
+        @JvmField
+        @ElementDefaultAttribute(value = "/conductor/admin/rest")
+        val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
 
     }
 

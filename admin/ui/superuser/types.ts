@@ -2,6 +2,7 @@ export interface ContainerRef {
   id: string
   name: string
   primary: boolean
+  defaultCommand?: string[]
 }
 
 export interface JobEndpoint {
@@ -21,6 +22,8 @@ export interface JobExecution {
 export interface JobProfile {
   id: string
   containers?: ContainerRef[]
+  terminalJob?: boolean
+  description?: string
   [key: string]: unknown
 }
 
