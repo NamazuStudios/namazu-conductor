@@ -31,7 +31,8 @@ internal object TerminalSessionHandler {
 
     fun onOpen(session: Session, jobId: String, containerId: String?) {
         val ticket = session.requestParameterMap["ticket"]?.firstOrNull()
-        if (ticket == null || !TerminalTicketStore.consume(ticket, jobId, containerId)) {
+        val consumed = ticket?.let { TerminalTicketStore.consume(it, jobId, containerId) }
+        if (consumed == null) {
             closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "invalid or expired ticket")
             return
         }
@@ -43,7 +44,7 @@ internal object TerminalSessionHandler {
         }
 
         val stdio = try {
-            lookup.service.streamStdio(lookup.execution, containerId)
+            lookup.service.streamStdio(lookup.execution, containerId, consumed.command)
         } catch (e: Exception) {
             logger.warn("Failed to open stdio for job '{}' container '{}'", jobId, containerId, e)
             closeQuietly(session, CloseReason.CloseCodes.UNEXPECTED_CONDITION, (e.message ?: "stdio unavailable").take(120))

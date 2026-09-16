@@ -30,6 +30,8 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.slf4j.LoggerFactory
 
+private val TERMINAL_COMMAND_SUGGESTION = listOf("/bin/sh")
+
 data class ProviderExecutionResult(
     val element: String,
     val executions: List<JobExecution>?,
@@ -131,13 +133,20 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
                 .entity(mapOf("error" to "Profile not found: ${request.profileId}"))
                 .build()
 
+        // A terminalJob profile implies tty (and a shell to run) when the caller didn't specify one —
+        // covers both the admin UI's one-click "Start Terminal" button and any other caller that just
+        // wants "the terminal this profile is meant for" without spelling out the details.
+        val effectiveTty = request.tty ?: profile.terminalJob
+        val effectiveCommand = request.command
+            ?: (if (effectiveTty) TERMINAL_COMMAND_SUGGESTION else emptyList())
+
         val jobRequest = JobRequest(
             profile     = profile,
             args        = request.args ?: emptyList(),
-            command     = request.command ?: emptyList(),
+            command     = effectiveCommand,
             environment = request.environment ?: emptyMap(),
             placement   = request.placement?.map { it.toPlacement() } ?: emptyList(),
-            tty         = request.tty ?: false
+            tty         = effectiveTty
         )
 
         return try {
@@ -222,7 +231,7 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
                 .build()
         }
 
-        val ticket = TerminalTicketStore.mint(request.jobId, request.containerId)
+        val ticket = TerminalTicketStore.mint(request.jobId, request.containerId, request.command)
         return Response.ok(TerminalTicketResponse(ticket)).build()
     }
 
