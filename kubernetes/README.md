@@ -69,6 +69,20 @@ metadata:
     namazu.conductor/service-type: LoadBalancer
 ```
 
+### `namazu.conductor/default-container-exec.<container-name>` (annotation)
+
+Default command to pre-fill the admin dashboard's "Attach Terminal" action for the named container,
+space-tokenized (e.g. `/bin/bash -l`). One annotation per container — Kubernetes annotation keys allow
+only a single `/` (separating `prefix/name`), so per-container values are addressed by a name suffix
+rather than a nested key. Purely a UI convenience; it doesn't affect how the container is launched, and
+it's still freely editable before attaching. Absent → the input starts blank.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/default-container-exec.app: "/bin/bash -l"
+```
+
 ## Endpoints, Services & Placement
 
 When a template declares `expose-ports`, `execute()` creates the workload and a `Service` of the requested type. The Service is labelled `namazu.conductor/owned-by=<workload-name>`, which lets `stop()` delete both the workload and its Service without persisting any state. When no ports are exposed, endpoints are resolved directly from the pod IP and its container ports (or empty for a port-less one-off Job).

@@ -8,6 +8,8 @@
 # annotation marks this profile as terminal-capable: the admin dashboard's "Available Jobs & Services"
 # page shows a one-click "Start Terminal 💻" button for it, which launches the job with tty/command
 # defaults implied automatically (see ConductorAdminJobsResource.execute()) — no manual form needed.
+# The `namazu.conductor/default-container-exec.shell` annotation pre-fills the Running Jobs page's
+# "Attach Terminal" input for the `shell` container instead of leaving it blank.
 #
 # Usage:
 #     ./kubernetes/install-terminal-test-pod.sh
@@ -28,6 +30,7 @@ metadata:
   annotations:
     namazu.conductor/workload-kind: pod
     namazu.conductor/terminal-job: "true"
+    namazu.conductor/default-container-exec.shell: "/bin/bash -l"
     namazu.conductor/description: |
       A minimal **bash** container for testing the admin dashboard's web-based terminal.
 

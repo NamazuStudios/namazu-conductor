@@ -134,7 +134,7 @@ class KubernetesOrchestrationService @Inject constructor(
             namespace = template.metadata?.namespace ?: namespace,
             name = templateName,
             primaryContainer = container.name,
-            containers = containerRefsFor(containers),
+            containers = containerRefsFor(containers, annotations),
             workloadKind = kind,
             exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
             serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
@@ -222,6 +222,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
+        val execAnnotations = execAnnotationsFor(profile.containers)
 
         val ownerRef = when (profile.workloadKind) {
             WorkloadKind.POD -> {
@@ -232,6 +233,7 @@ class KubernetesOrchestrationService @Inject constructor(
                             .withNamespace(namespace)
                             .addToLabels(templateLabels)
                             .addToLabels(LABEL_OWNED_BY, runName)
+                            .addToAnnotations(execAnnotations)
                             .build()
                     )
                     .withSpec(spec)
@@ -250,6 +252,7 @@ class KubernetesOrchestrationService @Inject constructor(
                 val podMeta = ObjectMetaBuilder()
                     .addToLabels(templateLabels)
                     .addToLabels(LABEL_OWNED_BY, runName)
+                    .addToAnnotations(execAnnotations)
                     .build()
                 val job = JobBuilder()
                     .withMetadata(
@@ -603,7 +606,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = name),
-                    containers = containerRefsFor(pod.spec?.containers ?: emptyList())
+                    containers = containerRefsFor(pod.spec?.containers ?: emptyList(), pod.metadata?.annotations ?: emptyMap())
                 )
             }
 
@@ -618,7 +621,10 @@ class KubernetesOrchestrationService @Inject constructor(
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name),
-                    containers = containerRefsFor(job.spec?.template?.spec?.containers ?: emptyList())
+                    containers = containerRefsFor(
+                        job.spec?.template?.spec?.containers ?: emptyList(),
+                        job.spec?.template?.metadata?.annotations ?: emptyMap()
+                    )
                 )
             }
 
@@ -975,8 +981,28 @@ class KubernetesOrchestrationService @Inject constructor(
         client.services().inNamespace(namespace).resource(service).create()
     }
 
-    private fun containerRefsFor(containers: List<Container>): List<ContainerRef> =
-        containers.mapIndexed { i, c -> ContainerRef(id = c.name, name = c.name, primary = i == 0) }
+    private fun containerRefsFor(containers: List<Container>, annotations: Map<String, String>): List<ContainerRef> =
+        containers.mapIndexed { i, c ->
+            ContainerRef(
+                id = c.name,
+                name = c.name,
+                primary = i == 0,
+                defaultCommand = parseCommandAnnotation(annotations["$ANN_DEFAULT_CONTAINER_EXEC_PREFIX${c.name}"])
+            )
+        }
+
+    /** Space-tokenizes an exec-command annotation value, mirroring how the admin dashboard's free-text
+     *  command input is tokenized client-side. `null`/blank input yields `null`, not an empty list. */
+    private fun parseCommandAnnotation(value: String?): List<String>? =
+        value?.trim()?.split(Regex("\\s+"))?.filter(String::isNotBlank)?.takeIf { it.isNotEmpty() }
+
+    /** Serializes [ContainerRef.defaultCommand] back into annotation form, to be copied onto the Pod/Job
+     *  created from a profile so a later [listExecutions] can recover it from the live object alone. */
+    private fun execAnnotationsFor(containers: List<ContainerRef>): Map<String, String> =
+        containers.mapNotNull { c ->
+            c.defaultCommand?.takeIf { it.isNotEmpty() }
+                ?.let { "$ANN_DEFAULT_CONTAINER_EXEC_PREFIX${c.name}" to it.joinToString(" ") }
+        }.toMap()
 
     private fun applyOverrides(
         spec: PodSpec,
@@ -1086,6 +1112,8 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_TERMINAL_JOB = "namazu.conductor/terminal-job"
 
         const val ANN_DESCRIPTION = "namazu.conductor/description"
+
+        const val ANN_DEFAULT_CONTAINER_EXEC_PREFIX = "namazu.conductor/default-container-exec."
 
         const val ANN_REPLICAS = "namazu.conductor/replicas"
 
