@@ -4,8 +4,8 @@
 # terminal (xterm.js) can be tested end-to-end against real pods. Run ./kubernetes/start-minikube.sh
 # first.
 #
-# 'conductor-terminal-test' (two containers, `shell` + `sidecar`) and 'conductor-opencode-test' (one
-# container, `opencode`) both just sleep so their pod stays Running on its own. The
+# 'bash' (two containers, `shell` + `sidecar`) and 'opencode' (three containers, one per AI coding
+# agent CLI: `opencode`, `claude`, `qwen`) both just sleep so their pod stays Running on its own. The
 # `namazu.conductor/terminal-job` annotation marks each profile as terminal-capable: the admin
 # dashboard's "Available Jobs & Services" page shows a one-click "Start Terminal 💻" button for it,
 # which launches the job with tty/command defaults implied automatically (see
@@ -14,20 +14,23 @@
 #
 # Each container also declares its own `namazu.conductor/default-container-exec.<name>` annotation,
 # which pre-fills that container's "Attach Terminal" input on the Running Jobs page — `shell` defaults
-# to `/bin/bash`, `sidecar` to `/bin/sh`, `opencode` to `opencode` itself, demonstrating that the
-# default is genuinely per-container rather than shared across the whole profile.
+# to `/bin/bash`, `sidecar` to `/bin/sh`, `opencode`/`claude`/`qwen` to themselves, demonstrating that
+# the default is genuinely per-container rather than shared across the whole profile.
 #
-# The `opencode` container installs the latest stable build of the opencode CLI
-# (https://opencode.ai) at startup via its official install script — this requires the cluster to
-# have outbound internet access. The installed binary's location isn't hardcoded (the installer's own
-# layout isn't part of this script's contract), so the startup command searches for it afterward and
-# symlinks it to /usr/local/bin so a plain `opencode` exec (no shell, no profile sourcing) resolves it.
+# `opencode` and `claude` use openEuler's official pre-built images (openeuler/opencode,
+# openeuler/claude-code) with the CLI already on PATH — confirmed via `docker inspect`/`docker run`
+# before writing this, since an earlier version of this script tried installing opencode itself via a
+# curl|bash script at container startup and that install silently failed in practice (the pod stayed
+# Running with no error surfaced anywhere except `kubectl logs`, and the CLI was simply never on PATH).
+# There's no equivalent official image for qwen-code, so `qwen` still installs itself at startup via
+# `npm install -g @qwen-code/qwen-code` on a node:22 base image (verified working locally) — its
+# install output is intentionally not silenced, so `kubectl logs` shows what happened if it ever fails.
 #
 # Usage:
 #     ./kubernetes/install-terminal-test-pod.sh
 #
 # Cleanup:
-#     kubectl delete podtemplate conductor-terminal-test conductor-opencode-test -n default
+#     kubectl delete podtemplate bash opencode -n default
 #
 set -euo pipefail
 
@@ -35,7 +38,7 @@ kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: PodTemplate
 metadata:
-  name: conductor-terminal-test
+  name: bash
   namespace: default
   labels:
     namazu.conductor/job-set: default
@@ -67,7 +70,7 @@ kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: PodTemplate
 metadata:
-  name: conductor-opencode-test
+  name: opencode
   namespace: default
   labels:
     namazu.conductor/job-set: default
@@ -75,38 +78,58 @@ metadata:
     namazu.conductor/workload-kind: pod
     namazu.conductor/terminal-job: "true"
     namazu.conductor/default-container-exec.opencode: "opencode"
+    namazu.conductor/default-container-exec.claude: "claude"
+    namazu.conductor/default-container-exec.qwen: "qwen"
     namazu.conductor/description: |
-      A single-container pod running the latest stable [opencode](https://opencode.ai) CLI, for
-      testing the admin dashboard's web-based terminal against a real AI coding agent session.
+      A three-container pod, one per AI coding agent CLI, for testing the admin dashboard's web-based
+      terminal against a real agent session.
 
-      - `opencode` (`debian:bookworm-slim`) — installs opencode at startup, then stays alive via
-        `sleep infinity`. Debian (glibc), not Alpine (musl), since opencode's installer distributes a
-        precompiled binary that isn't guaranteed to run against musl's dynamic linker.
-      - Attaching a terminal (via *Start Terminal* or Running Jobs) runs `opencode` automatically.
-      - Requires the cluster to have outbound internet access to reach opencode.ai.
+      - `opencode` ([opencode.ai](https://opencode.ai), `openeuler/opencode:latest`) — the primary
+        container; *Start Terminal* attaches to it automatically.
+      - `claude` ([Claude Code](https://code.claude.com), `openeuler/claude-code`) — only reachable via
+        Running Jobs' per-container Attach Terminal row. Note: this image bakes in
+        `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` pointing at a local Ollama endpoint by default; a
+        real session needs its own auth configured.
+      - `qwen` ([Qwen Code](https://github.com/QwenLM/qwen-code)) — same, via Running Jobs. Installs
+        itself via npm at startup (no official image exists for it); check `kubectl logs <pod> -c
+        qwen` if it's not on PATH yet.
+      - All three stay alive via `sleep infinity`. `qwen` requires outbound internet access to the npm
+        registry at startup.
 template:
   spec:
     containers:
       - name: opencode
-        image: debian:bookworm-slim
+        image: openeuler/opencode:latest
+        command: ["sleep", "infinity"]
+      - name: claude
+        image: openeuler/claude-code:2.1.20-oe2403sp3
+        command: ["sleep", "infinity"]
+      - name: qwen
+        image: node:22-bookworm-slim
         command:
           - sh
           - -c
           - |
-            apt-get update >/dev/null 2>&1
-            apt-get install -y --no-install-recommends curl ca-certificates >/dev/null 2>&1
-            curl -fsSL https://opencode.ai/install | bash
-            OC_BIN=$(find /root /home /usr /opt -maxdepth 6 -type f -name opencode 2>/dev/null | head -n1)
-            [ -n "$OC_BIN" ] && ln -sf "$OC_BIN" /usr/local/bin/opencode
+            for i in 1 2 3; do
+              npm install -g @qwen-code/qwen-code@latest && break
+              echo "qwen-code install attempt $i failed, retrying in 5s..." >&2
+              sleep 5
+            done
+            if command -v qwen >/dev/null 2>&1; then
+              echo "qwen installed at $(command -v qwen)"
+            else
+              echo "qwen-code install FAILED after 3 attempts" >&2
+            fi
             sleep infinity
 EOF
 
 echo
-echo "Applied PodTemplate 'conductor-terminal-test' to namespace 'default'."
+echo "Applied PodTemplate 'bash' to namespace 'default'."
 echo "In the admin dashboard's Available Jobs & Services page, click 'Start Terminal 💻' to launch it"
 echo "(attaches to the 'shell' container). Once running, attach to either 'shell' or 'sidecar' from"
 echo "the Running Jobs page's per-container Attach Terminal row."
 echo
-echo "Applied PodTemplate 'conductor-opencode-test' to namespace 'default'."
-echo "Once its 'opencode' container finishes installing (check with 'kubectl logs'), attach a terminal"
-echo "from Running Jobs — 'opencode' will be pre-filled and ready to run."
+echo "Applied PodTemplate 'opencode' to namespace 'default'."
+echo "'opencode' and 'claude' are ready immediately (pre-built images). 'qwen' installs itself on"
+echo "startup — check 'kubectl logs <pod> -c qwen' if it's not ready yet. Attach a terminal to any of"
+echo "the three from Running Jobs — each will be pre-filled and ready to run."
