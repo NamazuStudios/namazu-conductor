@@ -45,6 +45,7 @@ interface Session {
   container: HTMLDivElement
   status: 'connecting' | 'open' | 'closed' | 'error'
   bellAudio: HTMLAudioElement
+  hasUnseenBell: boolean
 }
 
 type Listener = () => void
@@ -107,7 +108,9 @@ class TerminalSessionManager {
 
   private computeSnapshot() {
     return {
-      sessions: [...this.sessions.values()].map((s) => ({ key: s.key, label: s.label, status: s.status })),
+      sessions: [...this.sessions.values()].map((s) => ({
+        key: s.key, label: s.label, status: s.status, hasUnseenBell: s.hasUnseenBell,
+      })),
       activeKey: this.activeKey,
     }
   }
@@ -136,8 +139,10 @@ class TerminalSessionManager {
   }
 
   setActive(key: string) {
-    if (this.sessions.has(key)) {
+    const session = this.sessions.get(key)
+    if (session) {
       this.activeKey = key
+      session.hasUnseenBell = false
       this.notify()
     }
   }
@@ -180,9 +185,19 @@ class TerminalSessionManager {
 
     const bellAudio = new Audio(BELL_SOUND_PATH)
     bellAudio.volume = this.bellVolume
-    term.onBell(() => { bellAudio.currentTime = 0; void bellAudio.play().catch(() => {}) })
 
-    const session: Session = { key, label, term, fitAddon, ws: null as unknown as WebSocket, container, status: 'connecting', bellAudio }
+    const session: Session = { key, label, term, fitAddon, ws: null as unknown as WebSocket, container, status: 'connecting', bellAudio, hasUnseenBell: false }
+
+    term.onBell(() => {
+      bellAudio.currentTime = 0
+      void bellAudio.play().catch(() => {})
+      // Flag it for the drawer (🕭) only while some other session is focused — a bell on the session
+      // the user is already looking at doesn't need a separate visual callout.
+      if (session.key !== this.activeKey) {
+        session.hasUnseenBell = true
+        this.notify()
+      }
+    })
     this.sessions.set(key, session)
     this.activeKey = key
     this.notify()
@@ -253,11 +268,11 @@ class TerminalSessionManager {
 
 export const terminalSessionManager = new TerminalSessionManager()
 
-// Warn before any full-page unload while terminals are open — our own navigateTo() calls, clicking a
-// host sidebar link that happens to do a hard navigation, refreshing, or closing the tab all trigger
-// this. There's no way to prevent the host's own navigation from tearing down this bundle (and every
-// open WebSocket with it), so this is the most robust coverage achievable: it can't stop the host's
-// navigation, but it can make the browser ask for confirmation first.
+// Warn before any full-page unload while terminals are open — clicking a host sidebar link (a hard
+// navigation to a different plugin route), refreshing, or closing the tab all trigger this. There's no
+// way to prevent the host's own navigation from tearing down this bundle (and every open WebSocket
+// with it), so this is the most robust coverage achievable: it can't stop the host's navigation, but
+// it can make the browser ask for confirmation first.
 window.addEventListener('beforeunload', (event) => {
   if (!terminalSessionManager.hasOpenSessions()) return
   event.preventDefault()
@@ -329,17 +344,25 @@ function statusDotClass(status: 'connecting' | 'open' | 'closed' | 'error'): str
   return status === 'open' ? 'bg-green-500' : status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-destructive'
 }
 
-const DRAWER_WIDTH = '220px'
+const MIN_DRAWER_WIDTH = 140
+const MAX_DRAWER_WIDTH = 400
+const MIN_PANEL_HEIGHT = 240
+const PANEL_BOTTOM_MARGIN = 16
 
 /**
- * Collapsible left drawer (session list) + main viewport for all open terminal sessions, with an
- * empty state when none are open. Switching the active session re-parents its existing DOM node into
- * the host div rather than remounting it, so other open sessions keep running in the background.
+ * Collapsible, resizable left drawer (session list) + main viewport for all open terminal sessions,
+ * with an empty state when none are open. Switching the active session re-parents its existing DOM
+ * node into the host div rather than remounting it, so other open sessions keep running in the
+ * background.
  */
 export function TerminalTabs() {
   const { sessions, activeKey } = useTerminalSnapshot()
   const hostRef = React.useRef<HTMLDivElement | null>(null)
+  const panelRef = React.useRef<HTMLDivElement | null>(null)
   const [drawerOpen, setDrawerOpen] = React.useState(true)
+  const [drawerWidth, setDrawerWidth] = React.useState(220)
+  const [isResizingDrawer, setIsResizingDrawer] = React.useState(false)
+  const [panelHeight, setPanelHeight] = React.useState(420)
 
   React.useEffect(() => {
     const host = hostRef.current
@@ -354,6 +377,40 @@ export function TerminalTabs() {
     observer.observe(host)
     return () => observer.disconnect()
   }, [activeKey])
+
+  // Pins the panel's bottom to the bottom of the page instead of a fixed height that leaves a gap (or
+  // gets cramped) depending on how much the running-jobs list above takes up. There's no browser event
+  // for "an ancestor's layout changed height" short of watching the whole document, so a lightweight
+  // poll (alongside the real resize listener) keeps this accurate as jobs above are expanded/collapsed.
+  React.useEffect(() => {
+    function recompute() {
+      const el = panelRef.current
+      if (!el) return
+      const top = el.getBoundingClientRect().top
+      setPanelHeight(Math.max(MIN_PANEL_HEIGHT, Math.floor(window.innerHeight - top - PANEL_BOTTOM_MARGIN)))
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    const interval = window.setInterval(recompute, 500)
+    return () => { window.removeEventListener('resize', recompute); window.clearInterval(interval) }
+  }, [])
+
+  function startDrawerResize(e: React.MouseEvent) {
+    e.preventDefault()
+    setIsResizingDrawer(true)
+    const startX = e.clientX
+    const startWidth = drawerWidth
+    function onMove(ev: MouseEvent) {
+      setDrawerWidth(Math.min(MAX_DRAWER_WIDTH, Math.max(MIN_DRAWER_WIDTH, startWidth + (ev.clientX - startX))))
+    }
+    function onUp() {
+      setIsResizingDrawer(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   const indicator = h('span', { className: 'inline-flex items-center gap-1.5 text-xs text-muted-foreground' },
     h('span', {
@@ -372,10 +429,14 @@ export function TerminalTabs() {
 
   const activeSession = sessions.find((s) => s.key === activeKey) ?? null
 
-  return h('div', { className: 'rounded-lg border bg-background flex', style: { height: '420px' } },
+  return h('div', {
+    ref: panelRef,
+    className: 'rounded-lg border bg-background flex',
+    style: { height: `${panelHeight}px` },
+  },
     h('div', {
-      className: 'shrink-0 border-r bg-muted/30 flex flex-col overflow-hidden',
-      style: { width: drawerOpen ? DRAWER_WIDTH : '0px', transition: 'width 200ms ease' },
+      className: 'shrink-0 bg-muted/30 flex flex-col overflow-hidden',
+      style: { width: drawerOpen ? `${drawerWidth}px` : '0px', transition: isResizingDrawer ? 'none' : 'width 200ms ease' },
     },
       h('div', { className: 'flex items-center gap-2 px-3 py-2 border-b whitespace-nowrap' },
         h('h2', { className: 'text-sm font-semibold flex-1' }, 'Terminals'),
@@ -390,21 +451,26 @@ export function TerminalTabs() {
           }`,
         },
           h('span', { className: `w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass(s.status)}` }),
-          h('span', { className: 'truncate flex-1' }, s.label),
+          h('span', { className: 'truncate flex-1' }, s.hasUnseenBell ? '🕭 ' : null, s.label),
           h('button', {
             className: 'shrink-0 text-muted-foreground hover:text-destructive',
             onClick: (e: React.MouseEvent) => { e.stopPropagation(); terminalSessionManager.close(s.key) },
           }, '✕'),
         ))),
     ),
+    drawerOpen && h('div', {
+      className: 'shrink-0 w-1 cursor-col-resize hover:bg-primary/40 transition-colors',
+      onMouseDown: startDrawerResize,
+      title: 'Drag to resize',
+    }),
     h('button', {
-      className: 'shrink-0 w-5 border-r flex items-center justify-center text-xs text-muted-foreground hover:bg-muted transition-colors',
+      className: 'shrink-0 w-5 border-l border-r flex items-center justify-center text-xs text-muted-foreground hover:bg-muted transition-colors',
       onClick: () => setDrawerOpen((v) => !v),
       title: drawerOpen ? 'Collapse terminal list' : 'Expand terminal list',
     }, drawerOpen ? '‹' : '›'),
-    h('div', { className: 'flex-1 flex flex-col min-w-0' },
+    h('div', { className: 'flex-1 flex flex-col min-w-0 min-h-0' },
       h('div', { className: 'flex items-center gap-2 px-3 py-2 border-b' },
         h('span', { className: `w-1.5 h-1.5 rounded-full shrink-0 ${activeSession ? statusDotClass(activeSession.status) : 'bg-muted-foreground/40'}` }),
         h('span', { className: 'text-sm font-mono font-medium truncate' }, activeSession?.label ?? 'No terminal selected')),
-      h('div', { ref: hostRef, className: 'flex-1 p-2' })))
+      h('div', { ref: hostRef, className: 'flex-1 p-2 min-h-0 overflow-hidden' })))
 }
