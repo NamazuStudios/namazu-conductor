@@ -2,10 +2,22 @@
   "schema": "1",
   "entries": [
     {
-      "label": "Conductor",
-      "icon": "Layers",
+      "label": "Available Jobs & Services",
+      "icon": "Package",
       "bundlePath": "plugin.bundle.js",
-      "route": "conductor-admin"
+      "route": "conductor-available"
+    },
+    {
+      "label": "Running Jobs & Services",
+      "icon": "Activity",
+      "bundlePath": "plugin.bundle.js",
+      "route": "conductor-running"
+    },
+    {
+      "label": "Terminals",
+      "icon": "SquareTerminal",
+      "bundlePath": "plugin.bundle.js",
+      "route": "conductor-terminals"
     }
   ]
 }

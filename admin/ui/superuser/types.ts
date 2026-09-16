@@ -21,6 +21,8 @@ export interface JobExecution {
 export interface JobProfile {
   id: string
   containers?: ContainerRef[]
+  terminalJob?: boolean
+  description?: string
   [key: string]: unknown
 }
 

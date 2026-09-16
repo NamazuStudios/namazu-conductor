@@ -6,7 +6,25 @@ import { mintTerminalTicket } from './api'
 const h = React.createElement
 
 // Bell sound copied alongside this bundle at build time — see admin/src/main/ui/superuser/complete.oga.
-const BELL_SOUND_PATH = './complete.oga'
+// Resolved against the bundle's OWN script URL (captured once, synchronously, while this script is
+// still `document.currentScript`), not the current page URL — we now do full-page navigations across
+// three different /admin/plugin/{route} URLs, none of which are anywhere near where this bundle (and
+// its co-located asset) is actually served from.
+const BUNDLE_BASE_URL = (document.currentScript as HTMLScriptElement | null)?.src ?? window.location.href
+const BELL_SOUND_PATH = new URL('complete.oga', BUNDLE_BASE_URL).href
+
+const BELL_VOLUME_STORAGE_KEY = 'conductor-terminal-bell-volume'
+
+/** `Session.ws` may still be the initial placeholder (mint-ticket failed before connect() ran). */
+function runCatchingClose(ws: WebSocket | null) {
+  try { ws?.close() } catch { /* already closed/never opened */ }
+}
+
+function loadBellVolume(): number {
+  const raw = localStorage.getItem(BELL_VOLUME_STORAGE_KEY)
+  const parsed = raw == null ? NaN : Number(raw)
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1
+}
 
 interface Session {
   key: string
@@ -48,6 +66,8 @@ class TerminalSessionManager {
   private sessions = new Map<string, Session>()
   private listeners = new Set<Listener>()
   private activeKey: string | null = null
+  private bellVolume = loadBellVolume()
+  private execCounter = 0
 
   // useSyncExternalStore requires getSnapshot() to return a stable reference when nothing has
   // changed — recomputing a fresh object/array on every call causes an infinite re-render loop.
@@ -90,6 +110,21 @@ class TerminalSessionManager {
     return this.sessions.get(key)
   }
 
+  getBellVolume(): number {
+    return this.bellVolume
+  }
+
+  /** Applies immediately to every currently-open session's bell, and to any opened afterward. */
+  setBellVolume(volume: number) {
+    this.bellVolume = Math.min(1, Math.max(0, volume))
+    localStorage.setItem(BELL_VOLUME_STORAGE_KEY, String(this.bellVolume))
+    this.sessions.forEach((s) => { s.bellAudio.volume = this.bellVolume })
+  }
+
+  hasOpenSessions(): boolean {
+    return this.sessions.size > 0
+  }
+
   setActive(key: string) {
     if (this.sessions.has(key)) {
       this.activeKey = key
@@ -97,12 +132,31 @@ class TerminalSessionManager {
     }
   }
 
-  /** Opens (or focuses, if already open) a terminal for `element`/`jobId`/`containerId`. */
-  open(element: string, jobId: string, containerId: string | null, label: string) {
-    const key = `${element}:${jobId}:${containerId ?? 'primary'}`
-    if (this.sessions.has(key)) {
-      this.setActive(key)
-      return
+  /**
+   * Opens (or focuses/retries, if a session already exists) a terminal for `element`/`jobId`/
+   * `containerId`. `command` optionally execs a specific process for this session instead of
+   * attaching to the container's own — like `kubectl exec` vs `kubectl attach`. Omitting it reuses
+   * the same session key as any other default (no-command) attach to this container, so repeat clicks
+   * refocus/retry the same tab; specifying a command always opens a distinct new tab, since it's a
+   * semantically different request that shouldn't collide with (or silently replace) a plain attach.
+   */
+  open(element: string, jobId: string, containerId: string | null, label: string, command?: string[]) {
+    const baseKey = `${element}:${jobId}:${containerId ?? 'primary'}`
+    const key = command && command.length > 0 ? `${baseKey}:exec${this.execCounter++}` : baseKey
+
+    const existing = this.sessions.get(key)
+    if (existing) {
+      if (existing.status === 'connecting' || existing.status === 'open') {
+        this.setActive(key)
+        return
+      }
+      // A dead (errored/closed) session for this exact key — dispose it and fall through to open a
+      // genuinely fresh one instead of silently reactivating a tab that will never reconnect on its
+      // own. Without this, clicking "Attach Terminal" again after a failure looks like nothing
+      // happened at all: no new ticket minted, no new WebSocket, no request sent.
+      existing.term.dispose()
+      runCatchingClose(existing.ws)
+      this.sessions.delete(key)
     }
 
     const container = document.createElement('div')
@@ -115,6 +169,7 @@ class TerminalSessionManager {
     term.open(container)
 
     const bellAudio = new Audio(BELL_SOUND_PATH)
+    bellAudio.volume = this.bellVolume
     term.onBell(() => { bellAudio.currentTime = 0; void bellAudio.play().catch(() => {}) })
 
     const session: Session = { key, label, term, fitAddon, ws: null as unknown as WebSocket, container, status: 'connecting', bellAudio }
@@ -124,7 +179,7 @@ class TerminalSessionManager {
 
     term.writeln(`Connecting to ${label}…`)
 
-    mintTerminalTicket(jobId, containerId)
+    mintTerminalTicket(jobId, containerId, command)
       .then(({ ticket }) => this.connect(session, jobId, containerId, ticket))
       .catch((e: Error) => {
         term.writeln(`\r\nFailed to open terminal: ${e.message}`)
@@ -135,7 +190,11 @@ class TerminalSessionManager {
 
   private connect(session: Session, jobId: string, containerId: string | null, ticket: string) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const path = containerId ? `/conductor/admin/service/${jobId}/${containerId}` : `/conductor/admin/service/${jobId}`
+    // Must match ConductorAdminApplication.WS_ROOT — kept as a distinct path segment from the REST
+    // root (see api.ts) since both loaders sharing one context path is suspected to break WebSocket
+    // endpoint discovery (https://github.com/NamazuStudios/elements/issues/95).
+    const wsRoot = '/conductor/admin/ws'
+    const path = containerId ? `${wsRoot}/service/${jobId}/${containerId}` : `${wsRoot}/service/${jobId}`
     const url = `${scheme}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`
 
     const ws = new WebSocket(url)
@@ -184,6 +243,24 @@ class TerminalSessionManager {
 
 export const terminalSessionManager = new TerminalSessionManager()
 
+// Warn before any full-page unload while terminals are open — our own navigateTo() calls, clicking a
+// host sidebar link that happens to do a hard navigation, refreshing, or closing the tab all trigger
+// this. There's no way to prevent the host's own navigation from tearing down this bundle (and every
+// open WebSocket with it), so this is the most robust coverage achievable: it can't stop the host's
+// navigation, but it can make the browser ask for confirmation first.
+window.addEventListener('beforeunload', (event) => {
+  if (!terminalSessionManager.hasOpenSessions()) return
+  event.preventDefault()
+  event.returnValue = ''
+})
+
+/** Plays the terminal bell sound once, at the current volume — a manual test/utility affordance. */
+export function playBell() {
+  const audio = new Audio(BELL_SOUND_PATH)
+  audio.volume = terminalSessionManager.getBellVolume()
+  void audio.play().catch(() => {})
+}
+
 function useTerminalSnapshot() {
   return React.useSyncExternalStore(
     (listener) => terminalSessionManager.subscribe(listener),
@@ -192,9 +269,9 @@ function useTerminalSnapshot() {
 }
 
 /**
- * Tab strip + host viewport for all open terminal sessions. Renders nothing when no session is
- * open. Switching the active tab re-parents the target session's existing DOM node into the host
- * div rather than remounting it, so other open sessions keep running in the background.
+ * Tab strip + host viewport for all open terminal sessions, with an empty state when none are open.
+ * Switching the active tab re-parents the target session's existing DOM node into the host div rather
+ * than remounting it, so other open sessions keep running in the background.
  */
 export function TerminalTabs() {
   const { sessions, activeKey } = useTerminalSnapshot()
@@ -214,10 +291,25 @@ export function TerminalTabs() {
     return () => observer.disconnect()
   }, [activeKey])
 
-  if (sessions.length === 0) return null
+  const indicator = h('span', { className: 'inline-flex items-center gap-1.5 text-xs text-muted-foreground' },
+    h('span', {
+      className: `w-1.5 h-1.5 rounded-full ${sessions.length > 0 ? 'bg-green-500' : 'bg-muted-foreground/40'}`,
+    }),
+    `${sessions.length} open`)
+
+  if (sessions.length === 0) {
+    return h('div', { className: 'space-y-2' },
+      h('div', { className: 'flex items-center gap-2' },
+        h('h2', { className: 'text-lg font-semibold' }, 'Terminals'),
+        indicator),
+      h('p', { className: 'text-sm text-muted-foreground' },
+        'No terminals are currently open. Attach one from a running job’s container list.'))
+  }
 
   return h('div', { className: 'space-y-2' },
-    h('h2', { className: 'text-lg font-semibold' }, 'Terminals'),
+    h('div', { className: 'flex items-center gap-2' },
+      h('h2', { className: 'text-lg font-semibold' }, 'Terminals'),
+      indicator),
     h('div', { className: 'flex items-center gap-1 flex-wrap border-b' },
       sessions.map((s) => h('div', {
         key: s.key,

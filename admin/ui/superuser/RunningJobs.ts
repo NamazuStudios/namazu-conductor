@@ -13,11 +13,56 @@ function statusColorClasses(status: string): string {
   return 'text-muted-foreground bg-muted'
 }
 
-function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void }) {
+/**
+ * Per-container "Attach Terminal" row, with an optional command override — like `kubectl exec` vs
+ * `kubectl attach`. Left blank, attaches with the provider's default (e.g. a shell); a naive
+ * whitespace-split of whatever's typed otherwise, which is an intentional simplification for this
+ * advanced/power-user path (not full shell quoting/parsing).
+ */
+function ContainerAttachRow(props: { element: string; jobId: string; running: boolean; container: { id: string; name: string; primary: boolean }; label: string }) {
+  const { container: c } = props
+  const [command, setCommand] = React.useState('')
+
+  function handleAttach() {
+    const tokens = command.trim().split(/\s+/).filter(Boolean)
+    terminalSessionManager.open(props.element, props.jobId, c.primary ? null : c.id, props.label, tokens.length > 0 ? tokens : undefined)
+  }
+
+  return h('div', { className: 'flex items-center gap-2 text-xs' },
+    h('span', { className: 'font-mono flex-1' }, c.name, c.primary && h('span', { className: 'ml-1.5 text-muted-foreground' }, '(primary)')),
+    h('input', {
+      value: command,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => setCommand(e.target.value),
+      placeholder: '/bin/sh (optional)',
+      className: 'w-40 rounded border bg-background px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary',
+      title: 'Command to exec instead of the container’s default shell',
+    }),
+    h('button', {
+      disabled: !props.running,
+      className: 'shrink-0 px-2.5 py-1 rounded border text-xs hover:bg-muted disabled:opacity-50 transition-colors',
+      onClick: handleAttach,
+      title: `Attach a terminal to container '${c.name}'`,
+    }, '▤ Attach Terminal'))
+}
+
+function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; highlight?: boolean }) {
   const ex = props.execution
   const [isExpanded, setExpanded] = React.useState(false)
   const [isStopping, setStopping] = React.useState(false)
   const [stopError, setStopError] = React.useState<string | null>(null)
+  const [isFlashing, setFlashing] = React.useState(false)
+  const rowRef = React.useRef<HTMLDivElement | null>(null)
+  const hasHandledHighlight = React.useRef(false)
+
+  React.useEffect(() => {
+    if (!props.highlight || hasHandledHighlight.current) return
+    hasHandledHighlight.current = true
+    setExpanded(true)
+    setFlashing(true)
+    rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const timeout = setTimeout(() => setFlashing(false), 2500)
+    return () => clearTimeout(timeout)
+  }, [props.highlight])
 
   function handleStop() {
     setStopping(true)
@@ -30,7 +75,10 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   const containers = ex.containers ?? []
 
-  return h('div', { className: 'rounded-lg border bg-card' },
+  return h('div', {
+    ref: rowRef,
+    className: `rounded-lg border bg-card transition-shadow ${isFlashing ? 'ring-2 ring-primary' : ''}`,
+  },
     h('div', { className: 'flex items-center gap-3 px-4 py-2.5 flex-wrap' },
       h('button', { className: 'text-xs opacity-50 shrink-0', onClick: () => setExpanded((v) => !v) }, isExpanded ? '▼' : '▶'),
       h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
@@ -38,25 +86,27 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
       ex.endpoints && ex.endpoints.length > 0 &&
         h('span', { className: 'font-mono text-xs text-muted-foreground shrink-0' },
           ex.endpoints.map((ep) => `${ep.host}:${ep.port}/${ep.protocol}`).join(', ')),
-      ex.status === 'RUNNING' && containers.map((c) => h('button', {
-        key: c.id,
-        className: 'shrink-0 px-2.5 py-1 rounded border text-xs hover:bg-muted disabled:opacity-50 transition-colors',
-        onClick: () => terminalSessionManager.open(
-          props.element, ex.id, c.primary ? null : c.id,
-          containers.length > 1 ? `${ex.id.slice(0, 8)}/${c.name}` : ex.id.slice(0, 8),
-        ),
-        title: `Attach a terminal to container '${c.name}'`,
-      }, `▤ ${containers.length > 1 ? c.name : 'Terminal'}`)),
       h('button', {
         disabled: isStopping,
         onClick: handleStop,
         className: 'shrink-0 px-2.5 py-1 rounded border text-xs text-destructive border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors',
       }, isStopping ? 'Stopping…' : 'Stop')),
     stopError && h('div', { className: 'border-t px-4 py-2 text-xs text-destructive font-mono' }, stopError),
+    isExpanded && containers.length > 0 &&
+      h('div', { className: 'border-t px-4 py-3 space-y-1.5' },
+        h('div', { className: 'text-xs font-medium text-muted-foreground' }, 'Containers'),
+        containers.map((c) => h(ContainerAttachRow, {
+          key: c.id,
+          element: props.element,
+          jobId: ex.id,
+          running: ex.status === 'RUNNING',
+          container: c,
+          label: containers.length > 1 ? `${ex.id.slice(0, 8)}/${c.name}` : ex.id.slice(0, 8),
+        }))),
     isExpanded && Boolean(ex.details) && h('div', { className: 'border-t px-4 py-3' }, h(DetailGrid, { obj: ex.details })))
 }
 
-export function RunningJobsSection() {
+export function RunningJobsSection(props: { highlightId?: string | null }) {
   const [data, setData] = React.useState<{ loading: boolean; providers: ProviderExecutionsResult[]; error: string | null }>({
     loading: true, providers: [], error: null,
   })
@@ -94,5 +144,10 @@ export function RunningJobsSection() {
       h('div', { className: 'space-y-2' },
         allExecutions.map((item) => h('div', { key: `${item.element}:${item.execution.id}` },
           h('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.element),
-          h(RunningJobRow, { execution: item.execution, element: item.element, onRefresh: load })))))
+          h(RunningJobRow, {
+            execution: item.execution,
+            element: item.element,
+            onRefresh: load,
+            highlight: Boolean(props.highlightId) && item.execution.id === props.highlightId,
+          })))))
 }
