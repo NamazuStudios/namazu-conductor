@@ -4,7 +4,6 @@ import { executeJob, fetchProfiles } from './api'
 import { Accordion, ErrorBoundary, Pagination, StatusIndicator } from './ui'
 import { RunForm, defaultAdvancedOptions, derivePlacementList } from './RunForm'
 import type { AdvancedOptions } from './RunForm'
-import { navigateTo, ROUTES } from './nav'
 import type { JobProfile, ProviderProfilesResult } from './types'
 
 const h = React.createElement
@@ -20,6 +19,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   const [advancedExpanded, setAdvancedExpanded] = React.useState(false)
   const [starting, setStarting] = React.useState(false)
   const [startError, setStartError] = React.useState<string | null>(null)
+  const [startedId, setStartedId] = React.useState<string | null>(null)
   const isTerminalJob = Boolean(profile.terminalJob)
   const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() => defaultAdvancedOptions(isTerminalJob))
 
@@ -29,7 +29,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   )
 
   function handleStart() {
-    setStarting(true); setStartError(null)
+    setStarting(true); setStartError(null); setStartedId(null)
 
     const environment: Record<string, string> = {}
     advanced.env.forEach((pair) => { if (pair.key.trim()) environment[pair.key.trim()] = pair.value })
@@ -46,7 +46,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       placement: derivePlacementList(advanced.placement),
       tty: advanced.tty,
     })
-      .then((execution) => navigateTo(ROUTES.running, { highlight: execution.id }))
+      .then((execution) => { setStarting(false); setStartedId(execution.id) })
       .catch((e: Error) => { setStartError(e.message || 'Failed to start job'); setStarting(false) })
   }
 
@@ -65,6 +65,8 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
 
   return h(Accordion, { isExpanded: props.isExpanded, onToggle: props.onToggle, header },
     startError && h('p', { className: 'text-xs text-destructive mb-2' }, startError),
+    startedId && h('p', { className: 'text-xs text-green-700 mb-2 font-mono' },
+      `Started ✓ ${startedId} — see Running Jobs & Services.`),
     descriptionHtml && h('div', {
       className: 'prose prose-sm max-w-none mb-3 text-sm',
       dangerouslySetInnerHTML: { __html: descriptionHtml },
