@@ -101,7 +101,7 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
           jobId: ex.id,
           running: ex.status === 'RUNNING',
           container: c,
-          label: containers.length > 1 ? `${ex.id.slice(0, 8)}/${c.name}` : ex.id.slice(0, 8),
+          label: containers.length > 1 ? `${ex.id}/${c.name}` : ex.id,
         }))),
     isExpanded && Boolean(ex.details) && h('div', { className: 'border-t px-4 py-3' }, h(DetailGrid, { obj: ex.details })))
 }

@@ -272,11 +272,25 @@ export function playBell() {
 
 export function BellControls() {
   const [volume, setVolume] = React.useState(() => terminalSessionManager.getBellVolume())
+  const previousVolumeRef = React.useRef(volume > 0 ? volume : 1)
 
   function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const next = Number(e.target.value) / 100
+    if (next > 0) previousVolumeRef.current = next
     setVolume(next)
     terminalSessionManager.setBellVolume(next)
+  }
+
+  function toggleMute() {
+    if (volume > 0) {
+      previousVolumeRef.current = volume
+      setVolume(0)
+      terminalSessionManager.setBellVolume(0)
+    } else {
+      const restored = previousVolumeRef.current || 1
+      setVolume(restored)
+      terminalSessionManager.setBellVolume(restored)
+    }
   }
 
   return h('div', { className: 'flex items-center gap-3' },
@@ -286,7 +300,12 @@ export function BellControls() {
       title: 'Play the terminal bell sound',
     }, '🔔'),
     h('label', { className: 'flex items-center gap-1.5 text-xs text-muted-foreground' },
-      volume === 0 ? '🔇' : '🔊',
+      h('button', {
+        type: 'button',
+        onClick: toggleMute,
+        className: 'hover:opacity-70 transition-opacity',
+        title: volume === 0 ? 'Unmute terminal bell' : 'Mute terminal bell',
+      }, volume === 0 ? '🔇' : '🔊'),
       h('input', {
         type: 'range',
         min: 0,
@@ -305,14 +324,21 @@ function useTerminalSnapshot() {
   )
 }
 
+function statusDotClass(status: 'connecting' | 'open' | 'closed' | 'error'): string {
+  return status === 'open' ? 'bg-green-500' : status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-destructive'
+}
+
+const DRAWER_WIDTH = '220px'
+
 /**
- * Tab strip + host viewport for all open terminal sessions, with an empty state when none are open.
- * Switching the active tab re-parents the target session's existing DOM node into the host div rather
- * than remounting it, so other open sessions keep running in the background.
+ * Collapsible left drawer (session list) + main viewport for all open terminal sessions, with an
+ * empty state when none are open. Switching the active session re-parents its existing DOM node into
+ * the host div rather than remounting it, so other open sessions keep running in the background.
  */
 export function TerminalTabs() {
   const { sessions, activeKey } = useTerminalSnapshot()
   const hostRef = React.useRef<HTMLDivElement | null>(null)
+  const [drawerOpen, setDrawerOpen] = React.useState(true)
 
   React.useEffect(() => {
     const host = hostRef.current
@@ -343,31 +369,41 @@ export function TerminalTabs() {
         'No terminals are currently open. Attach one from a running job’s container list.'))
   }
 
-  return h('div', { className: 'space-y-2' },
-    h('div', { className: 'flex items-center gap-2' },
-      h('h2', { className: 'text-lg font-semibold' }, 'Terminals'),
-      indicator),
-    h('div', { className: 'flex items-center gap-1 flex-wrap border-b' },
-      sessions.map((s) => h('div', {
-        key: s.key,
-        className: `flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono cursor-pointer border-b-2 ${
-          s.key === activeKey ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-        }`,
-      },
-        h('span', { onClick: () => terminalSessionManager.setActive(s.key) }, s.label),
-        h('span', {
-          className: `w-1.5 h-1.5 rounded-full ${
-            s.status === 'open' ? 'bg-green-500' : s.status === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-destructive'
-          }`,
-        }),
-        h('button', {
-          className: 'text-muted-foreground hover:text-destructive ml-1',
-          onClick: (e: React.MouseEvent) => { e.stopPropagation(); terminalSessionManager.close(s.key) },
-        }, '✕'),
-      ))),
+  const activeSession = sessions.find((s) => s.key === activeKey) ?? null
+
+  return h('div', { className: 'rounded-lg border bg-background flex', style: { height: '420px' } },
     h('div', {
-      ref: hostRef,
-      className: 'rounded-lg border bg-background p-2',
-      style: { height: '384px' },
-    }))
+      className: 'shrink-0 border-r bg-muted/30 flex flex-col overflow-hidden',
+      style: { width: drawerOpen ? DRAWER_WIDTH : '0px', transition: 'width 200ms ease' },
+    },
+      h('div', { className: 'flex items-center gap-2 px-3 py-2 border-b whitespace-nowrap' },
+        h('h2', { className: 'text-sm font-semibold flex-1' }, 'Terminals'),
+        indicator),
+      h('div', { className: 'flex-1 overflow-y-auto' },
+        sessions.map((s) => h('div', {
+          key: s.key,
+          onClick: () => terminalSessionManager.setActive(s.key),
+          title: s.label,
+          className: `flex items-center gap-1.5 px-3 py-2 text-xs font-mono cursor-pointer border-l-2 whitespace-nowrap ${
+            s.key === activeKey ? 'border-primary bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`,
+        },
+          h('span', { className: `w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass(s.status)}` }),
+          h('span', { className: 'truncate flex-1' }, s.label),
+          h('button', {
+            className: 'shrink-0 text-muted-foreground hover:text-destructive',
+            onClick: (e: React.MouseEvent) => { e.stopPropagation(); terminalSessionManager.close(s.key) },
+          }, '✕'),
+        ))),
+    ),
+    h('button', {
+      className: 'shrink-0 w-5 border-r flex items-center justify-center text-xs text-muted-foreground hover:bg-muted transition-colors',
+      onClick: () => setDrawerOpen((v) => !v),
+      title: drawerOpen ? 'Collapse terminal list' : 'Expand terminal list',
+    }, drawerOpen ? '‹' : '›'),
+    h('div', { className: 'flex-1 flex flex-col min-w-0' },
+      h('div', { className: 'flex items-center gap-2 px-3 py-2 border-b' },
+        h('span', { className: `w-1.5 h-1.5 rounded-full shrink-0 ${activeSession ? statusDotClass(activeSession.status) : 'bg-muted-foreground/40'}` }),
+        h('span', { className: 'text-sm font-mono font-medium truncate' }, activeSession?.label ?? 'No terminal selected')),
+      h('div', { ref: hostRef, className: 'flex-1 p-2' })))
 }
