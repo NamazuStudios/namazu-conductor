@@ -1,6 +1,6 @@
 import React from 'react'
 import { fetchJobs, stopJob } from './api'
-import { DetailGrid } from './ui'
+import { Accordion, DetailGrid } from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
 
@@ -47,7 +47,6 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
 
 function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; isExpanded: boolean; onToggle: () => void }) {
   const ex = props.execution
-  const { isExpanded } = props
   const [isStopping, setStopping] = React.useState(false)
   const [stopError, setStopError] = React.useState<string | null>(null)
 
@@ -62,22 +61,22 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   const containers = ex.containers ?? []
 
-  return h('div', { className: 'rounded-lg border bg-card' },
-    h('div', { className: 'flex items-center gap-3 px-4 py-2.5 flex-wrap' },
-      h('button', { className: 'text-xs opacity-50 shrink-0', onClick: props.onToggle }, isExpanded ? '▼' : '▶'),
-      h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
-      h('span', { className: `text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${statusColorClasses(ex.status)}` }, ex.status),
-      ex.endpoints && ex.endpoints.length > 0 &&
-        h('span', { className: 'font-mono text-xs text-muted-foreground shrink-0' },
-          ex.endpoints.map((ep) => `${ep.host}:${ep.port}/${ep.protocol}`).join(', ')),
-      h('button', {
-        disabled: isStopping,
-        onClick: handleStop,
-        className: 'shrink-0 px-2.5 py-1 rounded border text-xs text-destructive border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors',
-      }, isStopping ? 'Stopping…' : 'Stop')),
-    stopError && h('div', { className: 'border-t px-4 py-2 text-xs text-destructive font-mono' }, stopError),
-    isExpanded && containers.length > 0 &&
-      h('div', { className: 'border-t px-4 py-3 space-y-1.5' },
+  const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
+    h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
+    h('span', { className: `text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${statusColorClasses(ex.status)}` }, ex.status),
+    ex.endpoints && ex.endpoints.length > 0 &&
+      h('span', { className: 'font-mono text-xs text-muted-foreground shrink-0' },
+        ex.endpoints.map((ep) => `${ep.host}:${ep.port}/${ep.protocol}`).join(', ')),
+    h('button', {
+      disabled: isStopping,
+      onClick: (e: React.MouseEvent) => { e.stopPropagation(); handleStop() },
+      className: 'shrink-0 px-2.5 py-1 rounded border text-xs text-destructive border-destructive/40 hover:bg-destructive/10 disabled:opacity-50 transition-colors',
+    }, isStopping ? 'Stopping…' : 'Stop'))
+
+  return h(Accordion, { isExpanded: props.isExpanded, onToggle: props.onToggle, header },
+    stopError && h('p', { className: 'text-xs text-destructive mb-2' }, stopError),
+    containers.length > 0 &&
+      h('div', { className: 'space-y-1.5 mb-3' },
         h('div', { className: 'text-xs font-medium text-muted-foreground' }, 'Containers'),
         containers.map((c) => h(ContainerAttachRow, {
           key: c.id,
@@ -87,7 +86,7 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
           container: c,
           label: containers.length > 1 ? `${ex.id}/${c.name}` : ex.id,
         }))),
-    isExpanded && Boolean(ex.details) && h('div', { className: 'border-t px-4 py-3' }, h(DetailGrid, { obj: ex.details })))
+    Boolean(ex.details) && h(DetailGrid, { obj: ex.details }))
 }
 
 export function RunningJobsSection() {
@@ -95,6 +94,7 @@ export function RunningJobsSection() {
     loading: true, providers: [], error: null,
   })
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
+  const [sectionExpanded, setSectionExpanded] = React.useState(true)
 
   const load = React.useCallback(() => {
     fetchJobs()
@@ -122,21 +122,16 @@ export function RunningJobsSection() {
     })
   }
 
-  return h('div', { className: 'space-y-3' },
-    h('div', { className: 'flex items-center justify-between' },
-      h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
-      h('div', { className: 'flex items-center gap-2' },
-        h('button', {
-          onClick: () => setExpandedIds(new Set()),
-          disabled: expandedIds.size === 0,
-          className: 'px-3 py-1.5 rounded border text-sm hover:bg-muted disabled:opacity-50 transition-colors',
-        }, 'Collapse all'),
-        h('button', {
-          onClick: load,
-          disabled: data.loading,
-          className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50',
-        }, refreshIcon, data.loading ? ' Refreshing…' : ' Refresh'))),
-    data.error && h('p', { className: 'text-xs text-destructive' }, data.error),
+  const header = h('div', { className: 'flex items-center justify-between gap-3' },
+    h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
+    h('button', {
+      onClick: (e: React.MouseEvent) => { e.stopPropagation(); load() },
+      disabled: data.loading,
+      className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50',
+    }, refreshIcon, data.loading ? ' Refreshing…' : ' Refresh'))
+
+  return h(Accordion, { isExpanded: sectionExpanded, onToggle: () => setSectionExpanded((v) => !v), header },
+    data.error && h('p', { className: 'text-xs text-destructive mb-2' }, data.error),
     !data.loading && allExecutions.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
     allExecutions.length > 0 &&
