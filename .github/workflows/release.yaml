@@ -7,6 +7,10 @@ on:
         description: 'Perform a dry run (no commits, tags, or Maven Central deploy)'
         required: false
         default: 'false'
+      resume_from_build:
+        description: 'Resume a release whose version bump/tag/commit already landed but the build+deploy step failed (skips re-bumping/re-tagging; uses the currently committed version as the release version)'
+        required: false
+        default: 'false'
 
 concurrency:
   group: conductor-integration
@@ -45,7 +49,9 @@ jobs:
         run: |
           set -x
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          if [[ "$VERSION" == *-SNAPSHOT ]]; then
+          if [[ "${{ github.event.inputs.resume_from_build }}" == "true" ]]; then
+            RELEASE_VERSION="$VERSION"
+          elif [[ "$VERSION" == *-SNAPSHOT ]]; then
             RELEASE_VERSION="${VERSION%-SNAPSHOT}"
           else
             RELEASE_VERSION="$VERSION"
@@ -58,6 +64,7 @@ jobs:
           echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
       - name: Verify branch is in a SNAPSHOT state
+        if: ${{ github.event.inputs.resume_from_build != 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           if [[ "$VERSION" != *-SNAPSHOT ]]; then
@@ -82,7 +89,7 @@ jobs:
           echo "No files or tags have been changed."
 
       - name: Prepare release version (real run)
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event.inputs.dry_run != 'true' && github.event.inputs.resume_from_build != 'true' }}
         run: |
           set -x
           mvn versions:set -DnewVersion=${{ steps.version.outputs.release_version }} -B --no-transfer-progress
