@@ -147,6 +147,25 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
 
+      # Temporary: the stdio-bridge restart loop above has twice left the bridge unreachable for
+      # StdioBridgeClientIT under this workflow's combined minikube+reactor load, even past a 15s
+      # client-side retry. Capture real evidence instead of guessing again.
+      - name: Diagnose stdio-bridge state on failure
+        if: failure()
+        run: |
+          echo "==== docker ps -a ===="
+          docker ps -a
+          echo "==== docker ps -a --filter ancestor=namazu-stdio-bridge:it ===="
+          docker ps -a --filter ancestor=namazu-stdio-bridge:it
+          echo "==== self-restart loop process tree ===="
+          ps auxf | grep -E "docker run|toy-entrypoint" | grep -v grep || echo "(no matching processes)"
+          echo "==== /tmp/stdio-bridge.log ===="
+          cat /tmp/stdio-bridge.log || echo "(missing)"
+          echo "==== memory ===="
+          free -h
+          echo "==== disk ===="
+          df -h
+
       - name: Create GitHub release
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@v2
