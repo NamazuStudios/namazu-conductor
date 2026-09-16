@@ -122,6 +122,14 @@ class KubernetesOrchestrationService @Inject constructor(
 
         val templateName = template.metadata?.name ?: return null
 
+        val terminalJob = annotations[ANN_TERMINAL_JOB]?.trim()?.toBoolean() ?: false
+        if (terminalJob && kind == WorkloadKind.JOB) {
+            logger.warn(
+                "PodTemplate '$templateName' sets $ANN_TERMINAL_JOB=true with workload-kind=job — " +
+                    "job pods are transient and can't be usefully attached to as a terminal"
+            )
+        }
+
         return KubernetesJobProfile(
             namespace = template.metadata?.namespace ?: namespace,
             name = templateName,
@@ -134,7 +142,9 @@ class KubernetesOrchestrationService @Inject constructor(
             backoffLimit = parseIntAnnotation(templateName, annotations, ANN_BACKOFF_LIMIT),
             activeDeadlineSeconds = parseLongAnnotation(templateName, annotations, ANN_ACTIVE_DEADLINE_SECONDS),
             completions = parseIntAnnotation(templateName, annotations, ANN_COMPLETIONS),
-            parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM)
+            parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM),
+            terminalJob = terminalJob,
+            description = annotations[ANN_DESCRIPTION]
         )
     }
 
@@ -755,20 +765,27 @@ class KubernetesOrchestrationService @Inject constructor(
 
     /**
      * Opens a live, bidirectional stdio session on the Pod backing [execution] (resolved via
-     * [locatePod] for a Job), via Kubernetes exec/attach — the same mechanism as `kubectl attach`.
-     * [containerId] selects which container to attach to (matched by container name); `null` (the
-     * default) attaches to the workload's first container, mirroring how [toProfile] chooses the
-     * profile's primary container. [JobStdio.resize] is populated so callers can live-resize the
-     * remote pty when the container was launched with [dev.getelements.conductor.JobRequest.tty].
+     * [locatePod] for a Job), via Kubernetes exec — the same mechanism as `kubectl exec -it`.
+     * [containerId] selects which container to run in (matched by container name); `null` (the
+     * default) targets the workload's first container, mirroring how [toProfile] chooses the profile's
+     * primary container. [command] selects the process to run for this session (default `/bin/sh` if
+     * omitted) — independent of whatever the container's own PID 1 is doing, and independent of
+     * whether the container was launched with [dev.getelements.conductor.JobRequest.tty], since
+     * `exec`'s pty allocation (`withTTY()`) is a per-connection request-time flag, not something baked
+     * into the pod spec at creation time. [JobStdio.resize] is populated so callers can live-resize the
+     * remote pty.
      *
-     * Attach requires the container to actually be running; short-lived Jobs are typically no longer
+     * Exec requires the container to actually be running; short-lived Jobs are typically no longer
      * attachable by the time a caller gets around to streaming their stdio (use [getFutureForStatus]
-     * / [getStageForStatus] with [JobStatus.RUNNING] to know when it's safe to call this).
+     * / [getStageForStatus] with [JobStatus.RUNNING] to know when it's safe to call this). Even once
+     * the pod phase reports `Running`, there's a brief window where kubelet's exec pipe for a specific
+     * container isn't yet serviceable — the retry loop below absorbs that.
      *
-     * @throws StdioUnavailableException if the Pod can't be found, isn't currently `Running`, or
-     *   [containerId] doesn't name a container in the pod
+     * @throws StdioUnavailableException if the Pod can't be found, isn't currently `Running`,
+     *   [containerId] doesn't name a container in the pod, the target container isn't yet ready, or
+     *   the exec connection couldn't be established after retrying
      */
-    override fun streamStdio(execution: JobExecution, containerId: String?): JobStdio {
+    override fun streamStdio(execution: JobExecution, containerId: String?, command: List<String>?): JobStdio {
         val (ns, kind, name) = decodeId(execution.id)
 
         val podName = when (kind) {
@@ -788,34 +805,57 @@ class KubernetesOrchestrationService @Inject constructor(
         val phase = pod.status?.phase
         if (phase != "Running") {
             throw StdioUnavailableException(
-                "Pod '$podName' is not Running (phase='$phase') — stdio attach requires a running process"
+                "Pod '$podName' is not Running (phase='$phase') — stdio exec requires a running process"
             )
         }
 
         val podContainers = pod.spec?.containers ?: emptyList()
-        val containerName = if (containerId != null) {
-            podContainers.firstOrNull { it.name == containerId }?.name
+        val targetContainer = if (containerId != null) {
+            podContainers.firstOrNull { it.name == containerId }
                 ?: throw StdioUnavailableException(
                     "Container '$containerId' not found in pod '$podName' — available containers: " +
                         podContainers.map { it.name }
                 )
         } else {
-            podContainers.firstOrNull()?.name
+            podContainers.firstOrNull()
         }
+
+        val containerName = targetContainer?.name
+        val containerStatus = pod.status?.containerStatuses?.firstOrNull { it.name == containerName }
+        if (containerStatus != null && (containerStatus.ready != true || containerStatus.state?.running == null)) {
+            throw StdioUnavailableException(
+                "Container '$containerName' in pod '$podName' is not yet ready for exec — try again in a moment"
+            )
+        }
+
         val containerResource = if (containerName != null) resource.inContainer(containerName) else resource
+        val execCommand = (command?.takeIf { it.isNotEmpty() } ?: listOf("/bin/sh")).toTypedArray()
 
-        val execWatch = containerResource
-            .redirectingInput()
-            .redirectingOutput()
-            .redirectingError()
-            .attach()
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                val execWatch = containerResource
+                    .redirectingInput()
+                    .redirectingOutput()
+                    .redirectingError()
+                    .withTTY()
+                    .exec(*execCommand)
 
-        return JobStdio(
-            stdin = execWatch.input,
-            stdout = execWatch.output,
-            stderr = execWatch.error,
-            onClose = execWatch::close,
-            resize = execWatch::resize
+                return JobStdio(
+                    stdin = execWatch.input,
+                    stdout = execWatch.output,
+                    stderr = execWatch.error,
+                    onClose = execWatch::close,
+                    resize = execWatch::resize
+                )
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < 2) Thread.sleep(1000)
+            }
+        }
+        throw StdioUnavailableException(
+            "Failed to exec into container '$containerName' in pod '$podName' after retrying",
+            lastError
         )
     }
 
@@ -1042,6 +1082,10 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_COMPLETIONS = "namazu.conductor/completions"
 
         const val ANN_PARALLELISM = "namazu.conductor/parallelism"
+
+        const val ANN_TERMINAL_JOB = "namazu.conductor/terminal-job"
+
+        const val ANN_DESCRIPTION = "namazu.conductor/description"
 
         const val ANN_REPLICAS = "namazu.conductor/replicas"
 

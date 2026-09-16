@@ -24,4 +24,18 @@ interface JobProfile {
      */
     val containers: List<ContainerRef>
 
+    /**
+     * Whether this profile is meant to be launched with an interactive terminal attached. Providers
+     * that support it should use this as a hint to default [dev.getelements.conductor.JobRequest.tty]
+     * (and a sensible shell command) when a caller doesn't specify one explicitly. Defaults to `false`
+     * for providers that don't have a way to express this.
+     */
+    val terminalJob: Boolean get() = false
+
+    /**
+     * An optional human-readable description of this profile, in Markdown. `null` if the provider
+     * doesn't support or wasn't given one.
+     */
+    val description: String? get() = null
+
 }
