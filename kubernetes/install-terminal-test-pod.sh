@@ -79,19 +79,22 @@ metadata:
       A single-container pod running the latest stable [opencode](https://opencode.ai) CLI, for
       testing the admin dashboard's web-based terminal against a real AI coding agent session.
 
-      - `opencode` (`alpine:3`) — installs opencode at startup, then stays alive via `sleep infinity`.
+      - `opencode` (`debian:bookworm-slim`) — installs opencode at startup, then stays alive via
+        `sleep infinity`. Debian (glibc), not Alpine (musl), since opencode's installer distributes a
+        precompiled binary that isn't guaranteed to run against musl's dynamic linker.
       - Attaching a terminal (via *Start Terminal* or Running Jobs) runs `opencode` automatically.
       - Requires the cluster to have outbound internet access to reach opencode.ai.
 template:
   spec:
     containers:
       - name: opencode
-        image: alpine:3
+        image: debian:bookworm-slim
         command:
           - sh
           - -c
           - |
-            apk add --no-cache bash curl ca-certificates >/dev/null 2>&1
+            apt-get update >/dev/null 2>&1
+            apt-get install -y --no-install-recommends curl ca-certificates >/dev/null 2>&1
             curl -fsSL https://opencode.ai/install | bash
             OC_BIN=$(find /root /home /usr /opt -maxdepth 6 -type f -name opencode 2>/dev/null | head -n1)
             [ -n "$OC_BIN" ] && ln -sf "$OC_BIN" /usr/local/bin/opencode
