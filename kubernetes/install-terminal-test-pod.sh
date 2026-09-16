@@ -70,7 +70,7 @@ kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: PodTemplate
 metadata:
-  name: opencode
+  name: agents
   namespace: default
   labels:
     namazu.conductor/job-set: default
