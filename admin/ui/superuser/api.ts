@@ -7,7 +7,7 @@ declare global {
 // Must match ConductorAdminApplication.RS_ROOT — kept as a distinct path segment from the WebSocket
 // root (see terminal.ts) since both loaders sharing one context path is suspected to break WebSocket
 // endpoint discovery (https://github.com/NamazuStudios/elements/issues/95).
-const REST_ROOT = '/conductor/admin/rest'
+const REST_ROOT = '/conductor/admin-console/rest'
 
 export function authHeaders(): Record<string, string> {
   const token = window.__elementsApiClient?.getSessionToken?.()

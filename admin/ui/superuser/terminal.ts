@@ -218,7 +218,7 @@ class TerminalSessionManager {
     // Must match ConductorAdminApplication.WS_ROOT — kept as a distinct path segment from the REST
     // root (see api.ts) since both loaders sharing one context path is suspected to break WebSocket
     // endpoint discovery (https://github.com/NamazuStudios/elements/issues/95).
-    const wsRoot = '/conductor/admin/ws'
+    const wsRoot = '/conductor/admin-console/ws'
     const path = containerId ? `${wsRoot}/service/${jobId}/${containerId}` : `${wsRoot}/service/${jobId}`
     const url = `${scheme}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`
 
