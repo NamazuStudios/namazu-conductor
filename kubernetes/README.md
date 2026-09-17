@@ -114,6 +114,8 @@ metadata:
 
 When a template declares `expose-ports`, `execute()` creates the workload and a `Service` of the requested type. The Service is labelled `namazu.conductor/owned-by=<workload-name>`, which lets `stop()` delete both the workload and its Service without persisting any state. When no ports are exposed, endpoints are resolved directly from the pod IP and its container ports (or empty for a port-less one-off Job).
 
+When a Service is created (both `execute()` and `deploy()`), the primary container is given two env vars so it can identify its own Service without hardcoding it: `NAMAZU_CONDUCTOR_SERVICE_NAME` (the Service's name, same as the workload name) and `NAMAZU_CONDUCTOR_SERVICE_PORTS` (the raw `expose-ports` value, e.g. `"7777/udp,8080/tcp"`). Neither is set when `expose-ports` is absent.
+
 Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
 
 Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/zone` node selector (zone is finer-grained than region; its `id` is the target zone). `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
