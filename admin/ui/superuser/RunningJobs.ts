@@ -1,4 +1,5 @@
 import React from 'react'
+import { marked } from 'marked'
 import { fetchJobs, stopJob } from './api'
 import { Accordion, DetailGrid } from './ui'
 import { terminalSessionManager } from './terminal'
@@ -108,7 +109,10 @@ export function RunningJobsSection() {
     return () => clearInterval(interval)
   }, [load])
 
-  const allExecutions = data.providers.flatMap((p) => (p.executions ?? []).map((execution) => ({ element: p.element, execution })))
+  const allExecutions = data.providers.flatMap((p) =>
+    (p.executions ?? []).map((execution) => ({ element: p.element, jobSetLabel: p.jobSetName ?? p.element, execution })))
+
+  const providerNotes = data.providers.filter((p) => p.jobSetDescription)
 
   const refreshIcon: React.ReactNode = data.loading
     ? h('span', { className: 'w-3 h-3 rounded-full bg-gray-400 animate-pulse inline-block' })
@@ -132,12 +136,21 @@ export function RunningJobsSection() {
 
   return h(Accordion, { isExpanded: sectionExpanded, onToggle: () => setSectionExpanded((v) => !v), header },
     data.error && h('p', { className: 'text-xs text-destructive mb-2' }, data.error),
+    providerNotes.map((p) => h('div', {
+      key: `jobset-${p.element}`,
+      className: 'rounded-lg border bg-muted/30 p-3 mb-2',
+    },
+      h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
+      h('div', {
+        className: 'prose prose-sm max-w-none text-sm',
+        dangerouslySetInnerHTML: { __html: marked.parse(p.jobSetDescription as string, { async: false }) as string },
+      }))),
     !data.loading && allExecutions.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
     allExecutions.length > 0 &&
       h('div', { className: 'space-y-2' },
         allExecutions.map((item) => h('div', { key: `${item.element}:${item.execution.id}` },
-          h('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.element),
+          h('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.jobSetLabel),
           h(RunningJobRow, {
             execution: item.execution,
             element: item.element,

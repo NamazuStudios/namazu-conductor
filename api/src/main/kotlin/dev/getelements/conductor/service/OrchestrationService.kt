@@ -26,6 +26,18 @@ interface OrchestrationService {
     fun getAvailableProfiles(): List<JobProfile>;
 
     /**
+     * A friendly, human-readable name for this provider's job set, for display in the admin panel.
+     * `null` if the provider doesn't have a job-set concept.
+     */
+    val jobSetName: String? get() = null
+
+    /**
+     * An optional Markdown description of this provider's job set, for display in the admin panel.
+     * `null` if the provider doesn't have a job-set concept, or none was configured.
+     */
+    val jobSetDescription: String? get() = null
+
+    /**
      * Finds the available profile with the supplied id returning null if it does not exist.
      */
     fun findAvailableProfile(id : String): JobProfile? {

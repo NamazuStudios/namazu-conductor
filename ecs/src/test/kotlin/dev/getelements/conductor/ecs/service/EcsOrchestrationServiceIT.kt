@@ -140,6 +140,8 @@ class EcsOrchestrationServiceIT {
             subnets        = subnets,
             securityGroups = securityGroups,
             jobSet         = "default",
+            jobSetName     = "default",
+            jobSetDescription = "",
             ecsClient      = ecsClient,
             ec2Client      = ec2Client,
             applicationAutoScalingClient = applicationAutoScalingClient,

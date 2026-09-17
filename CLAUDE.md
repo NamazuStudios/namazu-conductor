@@ -75,6 +75,10 @@ labels and annotations on the `PodTemplate`:
 
 - **Label** `namazu.conductor/job-set=<value>` — only templates matching the configured `JOBSET`
   attribute are surfaced as profiles (the per-instance filter; analogous to the ECS `jobSet` tag).
+  `JOBSET_NAME`/`JOBSET_DESCRIPTION` (kubernetes and ecs only) are purely cosmetic companions — a
+  friendly name and optional Markdown blurb the admin dashboard shows in place of the raw job set
+  value, exposed via `OrchestrationService.jobSetName`/`jobSetDescription` (default `null` for
+  providers with no job-set concept, e.g. edgegap/multiplay).
 - **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`),
   `job` (one-off, `batch/v1 Job`), or `daemon` (persistent `Deployment`, surfaced via
   `DaemonOrchestrationService.getAvailableDaemons()` instead of `getAvailableProfiles()` — see

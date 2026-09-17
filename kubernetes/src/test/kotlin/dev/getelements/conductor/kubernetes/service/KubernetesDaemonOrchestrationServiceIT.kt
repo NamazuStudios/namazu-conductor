@@ -90,6 +90,8 @@ class KubernetesDaemonOrchestrationServiceIT {
         service = KubernetesOrchestrationService(
             namespace = namespace,
             jobSet = jobSet,
+            jobSetName = jobSet,
+            jobSetDescription = "",
             pollInterval = "3000",
             watchEnabled = "false",
             client = client,

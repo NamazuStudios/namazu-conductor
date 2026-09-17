@@ -46,6 +46,21 @@ object EcsAttributes {
     const val JOBSET = "dev.getelements.conductor.ecs.job.set"
 
     /**
+     * A friendly, human-readable name for this job set, shown in the admin panel wherever the raw
+     * [JOBSET] value would otherwise be displayed. Defaults to `"default"`, matching [JOBSET]'s own
+     * default so an unconfigured deployment still shows something sensible.
+     */
+    @ElementDefaultAttribute("default")
+    const val JOBSET_NAME = "dev.getelements.conductor.ecs.job.set.name"
+
+    /**
+     * An optional Markdown description of this job set, rendered in the admin panel (Available Jobs /
+     * Running Jobs pages) to give operators context about what it's for. Empty by default.
+     */
+    @ElementDefaultAttribute("")
+    const val JOBSET_DESCRIPTION = "dev.getelements.conductor.ecs.job.set.description"
+
+    /**
      * Port on which a `namazu-stdio-bridge` sidecar (if included in the task definition's container
      * image) listens for stdio WebSocket connections. ECS has no native container stdio API, so
      * [dev.getelements.conductor.ecs.service.EcsOrchestrationService.streamStdio] depends on this

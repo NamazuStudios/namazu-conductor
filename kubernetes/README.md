@@ -10,6 +10,8 @@ A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 J
 |---|---|---|---|
 | Namespace | `dev.getelements.conductor.kubernetes.namespace` | `default` | Namespace in which templates are discovered and workloads created |
 | Jobset | `dev.getelements.conductor.kubernetes.job.set` | `default` | Only templates labelled `namazu.conductor/job-set` matching this value are surfaced as profiles |
+| Job set name | `dev.getelements.conductor.kubernetes.job.set.name` | `default` | Friendly, human-readable name for this job set, shown in the admin dashboard wherever the raw job set value would otherwise be displayed |
+| Job set description | `dev.getelements.conductor.kubernetes.job.set.description` | _(empty)_ | Optional Markdown description of this job set, rendered in the admin dashboard's Available Jobs / Running Jobs pages |
 | Kubeconfig path | `dev.getelements.conductor.kubernetes.kubeconfig.path` | _(auto-detect)_ | Optional path to a kubeconfig file. When empty, Fabric8 auto-detects (in-cluster service account, then `~/.kube/config`) |
 | Master URL | `dev.getelements.conductor.kubernetes.master.url` | _(from config)_ | Optional API server URL override |
 | Poll interval | `dev.getelements.conductor.kubernetes.poll.interval.ms` | `5000` | Interval at which workload status is polled while awaiting a target status |
@@ -26,6 +28,10 @@ metadata:
   labels:
     namazu.conductor/job-set: default
 ```
+
+The `job.set.name`/`job.set.description` attributes don't affect discovery — they're purely
+cosmetic, giving the admin dashboard a friendly label and Markdown blurb for this job set instead
+of showing the raw `jobset` value.
 
 ### `namazu.conductor/workload-kind` (annotation)
 
