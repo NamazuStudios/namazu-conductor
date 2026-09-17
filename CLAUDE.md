@@ -300,4 +300,6 @@ mvn install -Pbuild-ui
 
 ## Tests
 
-`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `StdioBridgeClientIT` in both `ecs` and `edgegap`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `multiplay`, `admin`, and `debug` have no tests.
+`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `multiplay`, `admin`, and `debug` have no tests.
+
+`StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
