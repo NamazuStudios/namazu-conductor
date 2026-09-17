@@ -221,6 +221,7 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: profile.namespace
 
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
+        applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
         val execAnnotations = execAnnotationsFor(profile.containers)
 
@@ -337,6 +338,7 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: profile.namespace
 
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
+        applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
 
         val podMeta = ObjectMetaBuilder()
@@ -1017,11 +1019,29 @@ class KubernetesOrchestrationService @Inject constructor(
         if (command.isNotEmpty()) container.command = command
         if (args.isNotEmpty()) container.args = args
 
-        if (environment.isNotEmpty()) {
-            val merged = container.env.orEmpty().associateBy { it.name }.toMutableMap()
-            environment.forEach { (key, value) -> merged[key] = EnvVar(key, value, null) }
-            container.env = merged.values.toList()
-        }
+        if (environment.isNotEmpty()) mergeEnv(container, environment)
+    }
+
+    /** Merges [values] into [container]'s env by name, preserving any entries already declared on the
+     *  PodTemplate's container and overwriting only keys present in [values]. */
+    private fun mergeEnv(container: Container, values: Map<String, String>) {
+        val merged = container.env.orEmpty().associateBy { it.name }.toMutableMap()
+        values.forEach { (key, value) -> merged[key] = EnvVar(key, value, null) }
+        container.env = merged.values.toList()
+    }
+
+    /** Injects the workload's own Service identity into its primary container's env — a no-op when
+     *  [exposePorts] declares no ports, since no Service is created in that case ([createServiceIfRequested]). */
+    private fun applyServiceEnv(spec: PodSpec, primaryContainer: String, runName: String, exposePorts: String) {
+        if (parseExposePorts(exposePorts).isEmpty()) return
+        val container = spec.containers.first { it.name == primaryContainer }
+        mergeEnv(
+            container,
+            mapOf(
+                SERVICE_NAME_ENV_VAR to runName,
+                SERVICE_PORTS_ENV_VAR to exposePorts
+            )
+        )
     }
 
     private fun applyTty(spec: PodSpec, primaryContainer: String) {
@@ -1124,6 +1144,10 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_TARGET_CPU_UTILIZATION_PERCENTAGE = "namazu.conductor/target-cpu-utilization-percentage"
 
         const val ZONE_LABEL = "topology.kubernetes.io/zone"
+
+        const val SERVICE_NAME_ENV_VAR = "NAMAZU_CONDUCTOR_SERVICE_NAME"
+
+        const val SERVICE_PORTS_ENV_VAR = "NAMAZU_CONDUCTOR_SERVICE_PORTS"
 
     }
 

@@ -39,6 +39,20 @@ class ConductorAdminApplication : Application() {
         @ElementDefaultAttribute(value = "/conductor/admin/rest")
         val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
 
+        /**
+         * Serves the dashboard UI plugin bundle: `http://<host>/conductor/admin/ui/...`.
+         *
+         * Without this override, the UI loader falls back to the element's raw package name
+         * (`dev.getelements.conductor.admin`) as the path segment in the default `/app/ui/{prefix}`
+         * scheme, which collides with a reserved system API path in production and gets silently
+         * refused ("Static content path '/app/ui/dev.getelements.conductor.admin' is inside a
+         * reserved system API path"). Deliberately not `APPLICATION_PREFIX`, which would also override
+         * [WS_ROOT]/[RS_ROOT]'s defaults and reintroduce the collision described there.
+         */
+        @JvmField
+        @ElementDefaultAttribute(value = "/conductor/admin/ui")
+        val UI_CONTENT_URI: String = "dev.getelements.element.ui.uri"
+
     }
 
     override fun getClasses(): Set<Class<*>> = setOf(

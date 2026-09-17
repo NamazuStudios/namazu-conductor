@@ -8,6 +8,7 @@ import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationServi
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.LABEL_JOB_SET
+import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.LABEL_OWNED_BY
 import io.fabric8.kubernetes.api.model.ContainerBuilder
 import io.fabric8.kubernetes.api.model.NamespaceBuilder
 import io.fabric8.kubernetes.api.model.PodTemplate
@@ -188,6 +189,40 @@ class KubernetesOrchestrationServiceIT {
 
     @Test
     fun loadBalancerServiceServesHttp() = runServerProfile(loadBalancerTemplate)
+
+    @Test
+    fun serviceEnvVarsInjectedWhenPortsExposed() {
+        val profile = service.findAvailableProfile("$namespace:$nodePortTemplate")
+            ?: throw AssertionError("Profile '$namespace:$nodePortTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        val (ns, _, podName) = decodeExecutionId(execution.id)
+        val pod = client.pods().inNamespace(ns).withName(podName).get()
+            ?: throw AssertionError("Pod '$podName' not found")
+        val env = pod.spec?.containers.orEmpty().first().env.orEmpty().associate { it.name to it.value }
+
+        assertEquals(env[KubernetesOrchestrationService.SERVICE_NAME_ENV_VAR], podName)
+        assertEquals(env[KubernetesOrchestrationService.SERVICE_PORTS_ENV_VAR], "$podPort/$podProtocol")
+    }
+
+    @Test
+    fun serviceEnvVarsAbsentWhenNoPortsExposed() {
+        val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+            ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        val (ns, _, jobName) = decodeExecutionId(execution.id)
+        val pod = client.pods().inNamespace(ns).withLabel(LABEL_OWNED_BY, jobName).list().items.firstOrNull()
+            ?: throw AssertionError("No Pod found owned by Job '$jobName'")
+        val env = pod.spec?.containers.orEmpty().first().env.orEmpty().map { it.name }
+
+        assertFalse(env.contains(KubernetesOrchestrationService.SERVICE_NAME_ENV_VAR))
+        assertFalse(env.contains(KubernetesOrchestrationService.SERVICE_PORTS_ENV_VAR))
+    }
 
     @Test
     fun oneOffJobReachesCompletion() {
