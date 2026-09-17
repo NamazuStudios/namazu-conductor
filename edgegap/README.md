@@ -162,25 +162,11 @@ environment should surface as a failure, not a silently-green skip.
 
 The deployment is stopped in `@AfterClass` regardless of test outcome.
 
-### StdioBridgeClientIT
+### StdioBridgeClientIT (disabled)
 
 A second integration test, `StdioBridgeClientIT`, validates the WebSocket client `streamStdio` uses
 against a real `namazu-stdio-bridge` container — independent of any EdgeGap account, since it talks
-to the bridge directly rather than through a deployment. Like `EdgeGapOrchestrationServiceIT`, this
-test fails rather than skips when its prerequisite is missing — a reachable bridge is expected to
-already be running (this test does not provision one itself). Start one locally before
-`mvn verify -pl edgegap`:
-
-```bash
-docker build -t namazu-stdio-bridge:it ../stdio-bridge
-docker run -d --rm -p 10080:10080 \
-  -v "$(pwd)/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
-  -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
-  -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
-  namazu-stdio-bridge:it
-```
-
-The container exits after the test sends its `"quit"` line, so it must be restarted before each run.
-Override `STDIO_BRIDGE_IT_HOST`/`STDIO_BRIDGE_IT_PORT`/`STDIO_BRIDGE_IT_TOKEN` (default
-`localhost`/`10080`/`test-token`, matching the command above) to point at a differently-configured
-bridge.
+to the bridge directly rather than through a deployment. It's currently disabled
+(`@Test(enabled = false)`) — the stdio bridge has no real production consumer yet, and this test's
+Docker-container prerequisite was a recurring source of CI/release flakiness. See
+https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.

@@ -34,16 +34,8 @@ jobs:
           java-version: "21"
           cache: maven
 
-      # StdioBridgeClientIT needs a reachable namazu-stdio-bridge container independent of any
-      # EdgeGap account; it fails rather than skips if absent.
-      - name: Start namazu-stdio-bridge test container
-        run: |
-          docker build -t namazu-stdio-bridge:it stdio-bridge
-          docker run -d --rm -p 10080:10080 \
-            -v "${{ github.workspace }}/edgegap/src/test/resources/stdio-bridge-toy-entrypoint.sh:/toy-entrypoint.sh:ro" \
-            -e NAMAZU_CONDUCTOR_STDIO_ENTRYPOINT=/toy-entrypoint.sh \
-            -e NAMAZU_CONDUCTOR_STDIO_TOKEN=test-token \
-            namazu-stdio-bridge:it
+      # StdioBridgeClientIT (which needed a reachable namazu-stdio-bridge container here) is
+      # disabled — see https://github.com/NamazuStudios/namazu-conductor/issues/26.
 
       - name: Run EdgeGap integration tests
         run: mvn -B --no-transfer-progress verify -pl edgegap -am

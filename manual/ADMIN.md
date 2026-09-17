@@ -48,7 +48,7 @@ Each provider is listed by its fully-qualified element name (e.g. `dev.getelemen
 
 The admin element exposes a single endpoint for programmatic access.
 
-### `GET /conductor/admin/profiles`
+### `GET /conductor/admin-console/rest/profiles`
 
 Returns the current profile list from every deployed `OrchestrationService` provider.
 
@@ -123,12 +123,16 @@ Returns the current profile list from every deployed `OrchestrationService` prov
 
 ## Configuration
 
-The admin element exposes two attributes. Both have defaults and do not normally need to be overridden.
+The admin element exposes several attributes. All have defaults and do not normally need to be overridden.
 
 | Attribute | Key | Default | Description |
 |---|---|---|---|
 | Auth enabled | `dev.getelements.elements.auth.enabled` | `true` | Enables the Elements auth filter. Set to `false` only in isolated development environments. |
-| REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin` | Base path for the JAX-RS application. Change this if another element already occupies that path. |
+| REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin-console/rest` | Base path for the JAX-RS application. Change this if another element already occupies that path. |
+| WebSocket root | `dev.getelements.elements.element.ws.root` | `/conductor/admin-console/ws` | Base path for the terminal WebSocket endpoints. |
+| UI content root | `dev.getelements.element.ui.uri` | `/conductor/admin-console/ui` | Base path the dashboard UI plugin bundle is served from. |
+
+These are safe to override per-deployment: the dashboard UI discovers its own REST/WS roots at runtime rather than assuming the compiled-in defaults, so an override doesn't require rebuilding the frontend.
 
 ---
 

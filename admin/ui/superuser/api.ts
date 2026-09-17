@@ -4,14 +4,53 @@ declare global {
   }
 }
 
-// Must match ConductorAdminApplication.RS_ROOT — kept as a distinct path segment from the WebSocket
-// root (see terminal.ts) since both loaders sharing one context path is suspected to break WebSocket
-// endpoint discovery (https://github.com/NamazuStudios/elements/issues/95).
-const REST_ROOT = '/conductor/admin/rest'
+const ELEMENT_NAME = 'dev.getelements.conductor.admin'
+const RS_ROOT_ATTRIBUTE = 'dev.getelements.elements.element.rs.root'
+const WS_ROOT_ATTRIBUTE = 'dev.getelements.elements.element.ws.root'
+
+// Used only if attribute discovery (below) fails or returns something unusable — must match
+// ConductorAdminApplication's compiled-in @ElementDefaultAttribute values.
+const FALLBACK_REST_ROOT = '/conductor/admin-console/rest'
+const FALLBACK_WS_ROOT = '/conductor/admin-console/ws'
 
 export function authHeaders(): Record<string, string> {
   const token = window.__elementsApiClient?.getSessionToken?.()
   return token ? { 'Elements-SessionSecret': token } : {}
+}
+
+let ownAttributesPromise: Promise<Record<string, unknown>> | null = null
+
+/**
+ * Discovers this element's own resolved attributes — in particular RS_ROOT/WS_ROOT — via the
+ * platform's `GET /api/rest/elements/system` endpoint, which reports each deployed element's
+ * live `Attributes` map (post any deploy-time override, not just compiled-in defaults). Each
+ * Conductor deployment is expected to run independently and may configure its own namespace, so
+ * this dashboard can't assume a fixed path; it asks the platform instead of hardcoding one.
+ * Falls back to the compiled-in default on any failure (older platform version without this
+ * endpoint, network error, unexpected response shape) rather than breaking the dashboard.
+ */
+function resolveOwnAttributes(): Promise<Record<string, unknown>> {
+  if (!ownAttributesPromise) {
+    ownAttributesPromise = fetch('/api/rest/elements/system', { credentials: 'include', headers: authHeaders() })
+      .then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+      .then((elements: Array<{ definition?: { name?: string }; attributes?: Record<string, unknown> }>) =>
+        elements.find(e => e.definition?.name === ELEMENT_NAME)?.attributes ?? {})
+      .catch(() => ({}))
+  }
+  return ownAttributesPromise
+}
+
+function stringAttribute(attrs: Record<string, unknown>, key: string, fallback: string): string {
+  const value = attrs[key]
+  return typeof value === 'string' && value.length > 0 ? value : fallback
+}
+
+export async function resolveRestRoot(): Promise<string> {
+  return stringAttribute(await resolveOwnAttributes(), RS_ROOT_ATTRIBUTE, FALLBACK_REST_ROOT)
+}
+
+export async function resolveWsRoot(): Promise<string> {
+  return stringAttribute(await resolveOwnAttributes(), WS_ROOT_ATTRIBUTE, FALLBACK_WS_ROOT)
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,12 +76,14 @@ function postJson<T>(path: string, payload: unknown): Promise<T> {
   })
 }
 
-export function fetchProfiles() {
-  return requestJson<{ status: string; providers: import('./types').ProviderProfilesResult[] }>(`${REST_ROOT}/profiles`)
+export async function fetchProfiles() {
+  const root = await resolveRestRoot()
+  return requestJson<{ status: string; providers: import('./types').ProviderProfilesResult[] }>(`${root}/profiles`)
 }
 
-export function fetchJobs() {
-  return requestJson<{ status: string; providers: import('./types').ProviderExecutionsResult[] }>(`${REST_ROOT}/jobs`)
+export async function fetchJobs() {
+  const root = await resolveRestRoot()
+  return requestJson<{ status: string; providers: import('./types').ProviderExecutionsResult[] }>(`${root}/jobs`)
 }
 
 export interface ExecuteJobRequestBody {
@@ -55,14 +96,17 @@ export interface ExecuteJobRequestBody {
   tty?: boolean
 }
 
-export function executeJob(body: ExecuteJobRequestBody) {
-  return postJson<import('./types').JobExecution>(`${REST_ROOT}/jobs`, body)
+export async function executeJob(body: ExecuteJobRequestBody) {
+  const root = await resolveRestRoot()
+  return postJson<import('./types').JobExecution>(`${root}/jobs`, body)
 }
 
-export function stopJob(element: string, id: string) {
-  return postJson<void>(`${REST_ROOT}/jobs/stop`, { element, id })
+export async function stopJob(element: string, id: string) {
+  const root = await resolveRestRoot()
+  return postJson<void>(`${root}/jobs/stop`, { element, id })
 }
 
-export function mintTerminalTicket(jobId: string, containerId: string | null, command?: string[]) {
-  return postJson<{ ticket: string }>(`${REST_ROOT}/jobs/terminal-ticket`, { jobId, containerId, command })
+export async function mintTerminalTicket(jobId: string, containerId: string | null, command?: string[]) {
+  const root = await resolveRestRoot()
+  return postJson<{ ticket: string }>(`${root}/jobs/terminal-ticket`, { jobId, containerId, command })
 }

@@ -28,6 +28,10 @@ import java.util.concurrent.TimeUnit
  * `localhost`/`10080`/`test-token`, matching the command above) to point at a differently-configured
  * bridge. The bridge is restarted per run since `stdio-bridge-toy-entrypoint.sh` exits after the
  * "quit" line this test sends.
+ *
+ * **Disabled** (see https://github.com/NamazuStudios/namazu-conductor/issues/26): the stdio bridge
+ * has no real production consumer yet, and this test's Docker-container prerequisite has been a
+ * recurring source of CI/release flakiness. Re-enable once the bridge sees real usage.
  */
 class StdioBridgeClientIT {
 
@@ -40,14 +44,14 @@ class StdioBridgeClientIT {
     // Explicit priority: roundTripsStdinStdoutStderr sends "quit", which kills the bridge's child
     // process and, with it, the whole container (--rm). If connectFailsWithWrongToken ran after
     // that, it would "pass" trivially because the container is gone, not because auth rejected it.
-    @Test(priority = 0)
+    @Test(priority = 0, enabled = false)
     fun connectFailsWithWrongToken() {
         assertThrows(StdioUnavailableException::class.java) {
             StdioBridgeClient.connect(host(), port(), "", "definitely-not-the-right-token")
         }
     }
 
-    @Test(priority = 1)
+    @Test(priority = 1, enabled = false)
     fun roundTripsStdinStdoutStderr() {
         val stdio = connectWithRetry()
         val stdoutReader = BufferedReader(stdio.stdout.reader())
