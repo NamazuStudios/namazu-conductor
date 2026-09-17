@@ -118,8 +118,10 @@ The ECS element is configured via Namazu Elements attributes:
 | Subnets | `dev.getelements.conductor.ecs.subnets` | *(required, no default)* |
 | Security Groups | `dev.getelements.conductor.ecs.security.groups` | *(required, no default)* |
 | Job Set | `dev.getelements.conductor.ecs.job.set` | `default` |
+| Job Set Name | `dev.getelements.conductor.ecs.job.set.name` | `default` |
+| Job Set Description | `dev.getelements.conductor.ecs.job.set.description` | *(empty)* |
 
-Set `dev.getelements.conductor.ecs.region` to the AWS region your cluster lives in (e.g. `us-east-1`). Set `dev.getelements.conductor.ecs.cluster` to the cluster name or ARN. Provide a comma-separated list of subnet IDs and security group IDs for the remaining two required attributes. The job set defaults to `default` and only needs to be changed if you are running multiple isolated Conductor environments.
+Set `dev.getelements.conductor.ecs.region` to the AWS region your cluster lives in (e.g. `us-east-1`). Set `dev.getelements.conductor.ecs.cluster` to the cluster name or ARN. Provide a comma-separated list of subnet IDs and security group IDs for the remaining two required attributes. The job set defaults to `default` and only needs to be changed if you are running multiple isolated Conductor environments. Job Set Name/Description are purely cosmetic — a friendly label and optional Markdown blurb shown in the admin dashboard in place of the raw job set value.
 
 ---
 

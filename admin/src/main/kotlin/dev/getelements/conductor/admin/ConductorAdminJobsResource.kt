@@ -35,7 +35,9 @@ private val TERMINAL_COMMAND_SUGGESTION = listOf("/bin/sh")
 data class ProviderExecutionResult(
     val element: String,
     val executions: List<JobExecution>?,
-    val error: String?
+    val error: String?,
+    val jobSetName: String? = null,
+    val jobSetDescription: String? = null
 )
 
 @Tag(name = "Conductor Admin")
@@ -78,7 +80,14 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
             }
             serviceOptional.map { supplier ->
                 try {
-                    ProviderExecutionResult(element = name, executions = supplier.get().listExecutions(), error = null)
+                    val service = supplier.get()
+                    ProviderExecutionResult(
+                        element = name,
+                        executions = service.listExecutions(),
+                        error = null,
+                        jobSetName = service.jobSetName,
+                        jobSetDescription = service.jobSetDescription
+                    )
                 } catch (e: Exception) {
                     logger.warn("Failed to list executions from element {}", name, e)
                     ProviderExecutionResult(element = name, executions = null, error = e.message)

@@ -11,11 +11,12 @@ const PAGE_SIZE = 10
 
 interface FlatProfile {
   element: string
+  jobSetLabel: string
   profile: JobProfile
 }
 
 function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: () => void }) {
-  const { element, profile } = props.item
+  const { element, jobSetLabel, profile } = props.item
   const [advancedExpanded, setAdvancedExpanded] = React.useState(false)
   const [starting, setStarting] = React.useState(false)
   const [startError, setStartError] = React.useState<string | null>(null)
@@ -54,7 +55,10 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
     h('span', { className: 'font-mono text-sm font-medium' }, profile.id),
-    h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary' }, element),
+    h('span', {
+      className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary',
+      title: jobSetLabel !== element ? `Element: ${element}` : undefined,
+    }, jobSetLabel),
     isTerminalJob && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground' }, 'terminal job'),
     h('span', { className: 'flex-1' }),
     h('button', {
@@ -105,9 +109,11 @@ export function AvailableJobsPage() {
   }, [])
 
   const flat: FlatProfile[] = data.providers.flatMap((p) =>
-    (p.profiles ?? []).map((profile) => ({ element: p.element, profile })))
+    (p.profiles ?? []).map((profile) => ({ element: p.element, jobSetLabel: p.jobSetName ?? p.element, profile })))
 
   const providerErrors = data.providers.filter((p) => p.error)
+
+  const providerNotes = data.providers.filter((p) => p.jobSetDescription)
 
   const pageCount = Math.max(1, Math.ceil(flat.length / PAGE_SIZE))
   const pageItems = flat.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
@@ -123,6 +129,15 @@ export function AvailableJobsPage() {
       key: p.element,
       className: 'rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive',
     }, `${p.element}: ${p.error}`)),
+    providerNotes.map((p) => h('div', {
+      key: `jobset-${p.element}`,
+      className: 'rounded-lg border bg-muted/30 p-3',
+    },
+      h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
+      h('div', {
+        className: 'prose prose-sm max-w-none text-sm',
+        dangerouslySetInnerHTML: { __html: marked.parse(p.jobSetDescription as string, { async: false }) as string },
+      }))),
     !data.loading && flat.length === 0 && providerErrors.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No job profiles available.'),
     flat.length > 0 &&

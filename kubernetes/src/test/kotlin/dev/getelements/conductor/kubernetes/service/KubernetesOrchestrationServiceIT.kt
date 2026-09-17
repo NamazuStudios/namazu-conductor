@@ -133,6 +133,8 @@ class KubernetesOrchestrationServiceIT {
         service = KubernetesOrchestrationService(
             namespace = namespace,
             jobSet = jobSet,
+            jobSetName = jobSet,
+            jobSetDescription = "",
             pollInterval = "3000",
             watchEnabled = env("KUBERNETES_IT_WATCH_ENABLED", "false"),
             client = client,

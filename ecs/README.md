@@ -9,7 +9,9 @@ The `ecs` module implements `OrchestrationService` for AWS ECS, supporting both 
 | Cluster | `dev.getelements.conductor.ecs.cluster` | _(required)_ | Short name or ARN of the ECS cluster |
 | Subnets | `dev.getelements.conductor.ecs.subnets` | _(required for `awsvpc`)_ | Comma-separated VPC subnet IDs |
 | Security Groups | `dev.getelements.conductor.ecs.security.groups` | _(required for `awsvpc`)_ | Comma-separated security group IDs |
-| Jobset | `dev.getelements.conductor.ecs.jobset` | `default` | Only task definitions tagged with `namazu.conductor:jobSet` matching this value are surfaced as profiles |
+| Jobset | `dev.getelements.conductor.ecs.job.set` | `default` | Only task definitions tagged with `namazu.conductor:jobSet` matching this value are surfaced as profiles |
+| Job set name | `dev.getelements.conductor.ecs.job.set.name` | `default` | Friendly, human-readable name for this job set, shown in the admin dashboard wherever the raw job set value would otherwise be displayed |
+| Job set description | `dev.getelements.conductor.ecs.job.set.description` | _(empty)_ | Optional Markdown description of this job set, rendered in the admin dashboard's Available Jobs / Running Jobs pages |
 | Stdio Bridge Port | `dev.getelements.conductor.ecs.stdio.bridge.port` | `10080` | Port a `namazu-stdio-bridge` sidecar (if included in the task's image) listens on for `streamStdio`. Must be declared in the container's port mappings to be reachable. |
 | Stdio Bridge Base Path | `dev.getelements.conductor.ecs.stdio.bridge.base.path` | _(none)_ | Must match the bridge's own `NAMAZU_CONDUCTOR_STDIO_URI`. |
 
@@ -24,6 +26,10 @@ All tags use the `namazu.conductor:` prefix. They are set on the task definition
 ```
 namazu.conductor:jobSet = default
 ```
+
+The `job.set.name`/`job.set.description` attributes don't affect discovery — they're purely
+cosmetic, giving the admin dashboard a friendly label and Markdown blurb for this job set instead
+of showing the raw `jobset` value.
 
 ### `namazu.conductor:launchType`
 
@@ -141,7 +147,7 @@ Tags:
 Configure each conductor with the matching attribute:
 
 ```
-dev.getelements.conductor.ecs.jobset = game-sessions
+dev.getelements.conductor.ecs.job.set = game-sessions
 ```
 
 ## Stdio Streaming

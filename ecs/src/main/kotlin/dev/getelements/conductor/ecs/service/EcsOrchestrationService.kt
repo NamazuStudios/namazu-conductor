@@ -81,6 +81,8 @@ class EcsOrchestrationService @Inject constructor(
     @Named(EcsAttributes.SUBNETS) private val subnets: String,
     @Named(EcsAttributes.SECURITY_GROUPS) private val securityGroups: String,
     @Named(EcsAttributes.JOBSET) private val jobSet: String,
+    @Named(EcsAttributes.JOBSET_NAME) override val jobSetName: String,
+    @Named(EcsAttributes.JOBSET_DESCRIPTION) jobSetDescription: String,
     @Named(EcsAttributes.STDIO_BRIDGE_PORT) stdioBridgePort: String = "10080",
     @Named(EcsAttributes.STDIO_BRIDGE_BASE_PATH) private val stdioBridgeBasePath: String = "",
     private val ecsClient: EcsClient,
@@ -90,6 +92,8 @@ class EcsOrchestrationService @Inject constructor(
 ) : OrchestrationService, DaemonOrchestrationService {
 
     private val stdioBridgePortNum: Int = stdioBridgePort.toIntOrNull() ?: DEFAULT_STDIO_BRIDGE_PORT
+
+    override val jobSetDescription: String? = jobSetDescription.ifBlank { null }
 
     /**
      * Returns one [EcsJobProfile] per active ECS task definition family whose

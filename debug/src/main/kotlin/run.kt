@@ -22,7 +22,7 @@ fun main() {
                 builder
                     .elementPackage()
                     .pathAttributes(mapOf("dev.getelements.conductor.ecs" to props))
-                    .elmArtifact("dev.getelements.conductor:ecs:elm:1.2.0-SNAPSHOT")
+                    .elmArtifact("dev.getelements.conductor:ecs:elm:1.2.4-SNAPSHOT")
                     .endElementPackage()
             }
 
@@ -30,7 +30,7 @@ fun main() {
                 builder
                     .elementPackage()
                     .pathAttributes(mapOf("dev.getelements.conductor.edgegap" to props))
-                    .elmArtifact("dev.getelements.conductor:edgegap:elm:1.2.0-SNAPSHOT")
+                    .elmArtifact("dev.getelements.conductor:edgegap:elm:1.2.4-SNAPSHOT")
                     .endElementPackage()
             }
 
@@ -38,13 +38,13 @@ fun main() {
                 builder
                     .elementPackage()
                     .pathAttributes(mapOf("dev.getelements.conductor.kubernetes" to props))
-                    .elmArtifact("dev.getelements.conductor:kubernetes:elm:1.2.0-SNAPSHOT")
+                    .elmArtifact("dev.getelements.conductor:kubernetes:elm:1.2.4-SNAPSHOT")
                     .endElementPackage()
             }
 
             builder
                 .elementPackage()
-                .elmArtifact("dev.getelements.conductor:admin:elm:1.2.0-SNAPSHOT")
+                .elmArtifact("dev.getelements.conductor:admin:elm:1.2.4-SNAPSHOT")
                 .endElementPackage()
 
             builder.build()

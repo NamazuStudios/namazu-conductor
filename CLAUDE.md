@@ -75,6 +75,25 @@ labels and annotations on the `PodTemplate`:
 
 - **Label** `namazu.conductor/job-set=<value>` — only templates matching the configured `JOBSET`
   attribute are surfaced as profiles (the per-instance filter; analogous to the ECS `jobSet` tag).
+  `JOBSET_NAME`/`JOBSET_DESCRIPTION` (kubernetes and ecs only) are purely cosmetic companions — a
+  friendly name and optional Markdown blurb the admin dashboard shows in place of the raw job set
+  value, exposed via `OrchestrationService.jobSetName`/`jobSetDescription` (default `null` for
+  providers with no job-set concept, e.g. edgegap/multiplay).
+  **Caveat:** running multiple job-set-scoped `kubernetes`/`ecs` deployments side-by-side is the
+  intended usage but isn't safe yet, at two separate layers:
+  1. A single deployment's `packages` list can't actually contain two entries pointing at the same
+     `elmArtifact` (e.g. two `kubernetes` instances differentiated only by `JOBSET`) — the second one
+     silently fails to stage (`FileSystemAlreadyExistsException` swallowed in
+     `StandardElementRuntimeService.stageFromPackageDefinition`), leaving the deployment `UNSTABLE`.
+     Blocked on `NamazuStudios/elements#103`.
+  2. Even past that, aggregating two job-set deployments under one shared `admin` deployment isn't
+     safe either — `admin`'s REST aggregation (`ElementLookup.kt`, `ConductorAdminResource.kt`) keys
+     every deployed provider by `element.elementRecord.definition().name()` (the static package
+     name), which is identical across two job-set deployments of the same provider, so they collapse
+     into one in the dashboard. Blocked on `NamazuStudios/elements#99` — `ElementDeployment` has no
+     stable per-deployment name, only an internal ObjectId, so `admin` has nothing else to key by.
+  Will work as intended once both land and `admin`'s aggregation is updated to key by deployment
+  identity instead of package name.
 - **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`),
   `job` (one-off, `batch/v1 Job`), or `daemon` (persistent `Deployment`, surfaced via
   `DaemonOrchestrationService.getAvailableDaemons()` instead of `getAvailableProfiles()` — see

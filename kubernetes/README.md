@@ -10,6 +10,8 @@ A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 J
 |---|---|---|---|
 | Namespace | `dev.getelements.conductor.kubernetes.namespace` | `default` | Namespace in which templates are discovered and workloads created |
 | Jobset | `dev.getelements.conductor.kubernetes.job.set` | `default` | Only templates labelled `namazu.conductor/job-set` matching this value are surfaced as profiles |
+| Job set name | `dev.getelements.conductor.kubernetes.job.set.name` | `default` | Friendly, human-readable name for this job set, shown in the admin dashboard wherever the raw job set value would otherwise be displayed |
+| Job set description | `dev.getelements.conductor.kubernetes.job.set.description` | _(empty)_ | Optional Markdown description of this job set, rendered in the admin dashboard's Available Jobs / Running Jobs pages |
 | Kubeconfig path | `dev.getelements.conductor.kubernetes.kubeconfig.path` | _(auto-detect)_ | Optional path to a kubeconfig file. When empty, Fabric8 auto-detects (in-cluster service account, then `~/.kube/config`) |
 | Master URL | `dev.getelements.conductor.kubernetes.master.url` | _(from config)_ | Optional API server URL override |
 | Poll interval | `dev.getelements.conductor.kubernetes.poll.interval.ms` | `5000` | Interval at which workload status is polled while awaiting a target status |
@@ -26,6 +28,10 @@ metadata:
   labels:
     namazu.conductor/job-set: default
 ```
+
+The `job.set.name`/`job.set.description` attributes don't affect discovery — they're purely
+cosmetic, giving the admin dashboard a friendly label and Markdown blurb for this job set instead
+of showing the raw `jobset` value.
 
 ### `namazu.conductor/workload-kind` (annotation)
 
@@ -277,6 +283,25 @@ Configure each conductor with the matching attribute:
 ```
 dev.getelements.conductor.kubernetes.job.set = game-sessions
 ```
+
+**Caveat:** this partitioning is the intended usage and works correctly for template discovery
+itself, but running two `kubernetes` instances differentiated only by `jobset` isn't safe yet:
+
+- If both are packaged into the **same deployment**, the second one silently fails to stage at all
+  — a deployment's `packages` list can't actually contain two entries pointing at the same
+  `elmArtifact` coordinate (`FileSystemAlreadyExistsException` swallowed in
+  `StandardElementRuntimeService.stageFromPackageDefinition`), leaving the deployment `UNSTABLE`
+  with no loud error. Blocked on `NamazuStudios/elements#103`.
+- Even past that, if both conductors' deployments are aggregated by the *same* `admin` deployment,
+  the admin dashboard can't yet tell them apart — its REST layer (`ElementLookup.kt`,
+  `ConductorAdminResource.kt`) identifies each provider by its static package name
+  (`dev.getelements.conductor.kubernetes`), which both job-set deployments share, so the dashboard
+  collapses them into one. Blocked on `NamazuStudios/elements#99` (no stable per-deployment identity
+  — `ElementDeployment` exposes only an internal ObjectId, not a name). (Running a separate `admin`
+  deployment per job set doesn't avoid this either — that hits the same class of bug one level up,
+  via `#99`'s plugin-route collision between two `admin` deployments.)
+
+Both will work as intended once resolved upstream and `admin`'s aggregation is updated accordingly.
 
 ## Integration Test
 

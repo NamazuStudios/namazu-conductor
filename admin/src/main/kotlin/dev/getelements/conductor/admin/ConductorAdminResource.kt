@@ -25,7 +25,9 @@ data class ProviderResult(
     val element: String,
     val providerType: String?,
     val profiles: List<Any>?,
-    val error: String?
+    val error: String?,
+    val jobSetName: String? = null,
+    val jobSetDescription: String? = null
 )
 
 @Tag(name = "Conductor Admin")
@@ -71,12 +73,15 @@ class ConductorAdminResource @Inject constructor(private val userService: UserSe
             }
             serviceOptional.map { supplier ->
                 try {
-                    val profiles = supplier.get().getAvailableProfiles()
+                    val service = supplier.get()
+                    val profiles = service.getAvailableProfiles()
                     ProviderResult(
                         element = name,
                         providerType = profiles.firstOrNull()?.javaClass?.simpleName,
                         profiles = profiles,
-                        error = null
+                        error = null,
+                        jobSetName = service.jobSetName,
+                        jobSetDescription = service.jobSetDescription
                     )
                 } catch (e: Exception) {
                     logger.warn("Failed to retrieve profiles from element {}", name, e)

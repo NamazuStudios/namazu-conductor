@@ -87,6 +87,8 @@ import java.util.concurrent.Future
 class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.NAMESPACE) private val namespace: String,
     @Named(KubernetesAttributes.JOBSET) private val jobSet: String,
+    @Named(KubernetesAttributes.JOBSET_NAME) override val jobSetName: String,
+    @Named(KubernetesAttributes.JOBSET_DESCRIPTION) jobSetDescription: String,
     @Named(KubernetesAttributes.POLL_INTERVAL) pollInterval: String,
     @Named(KubernetesAttributes.WATCH_ENABLED) watchEnabled: String = "false",
     private val client: KubernetesClient,
@@ -98,6 +100,8 @@ class KubernetesOrchestrationService @Inject constructor(
     private val pollIntervalMs: Long = pollInterval.toLongOrNull() ?: DEFAULT_POLL_INTERVAL_MS
 
     private val isWatchEnabled: Boolean = watchEnabled.toBoolean()
+
+    override val jobSetDescription: String? = jobSetDescription.ifBlank { null }
 
     /**
      * Returns one [KubernetesJobProfile] per `PodTemplate` in the configured namespace labelled

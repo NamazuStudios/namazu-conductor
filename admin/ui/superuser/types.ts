@@ -32,12 +32,16 @@ export interface ProviderProfilesResult {
   providerType?: string
   profiles?: JobProfile[]
   error?: string | null
+  jobSetName?: string | null
+  jobSetDescription?: string | null
 }
 
 export interface ProviderExecutionsResult {
   element: string
   executions?: JobExecution[]
   error?: string | null
+  jobSetName?: string | null
+  jobSetDescription?: string | null
 }
 
 export interface PlacementInput {
