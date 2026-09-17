@@ -56,11 +56,18 @@ import java.util.concurrent.TimeUnit
  *   from; defaults to `conductor-integration-test-deployer`.
  * - `CFN_IMAGE_NAME` — (optional) image name and tag within the ECR registry;
  *   defaults to `conductor-integration-test:latest`.
+ * - `CFN_KEEP_STACK` — (optional) `true` to leave the stack running after the suite instead of
+ *   deleting it — for fast local iteration against a stack started with
+ *   `ecs/cloudformation/start-integration-test-stack.sh` (see `ecs/README.md`). Defaults to `false`
+ *   (delete after the suite), matching CI's behavior of a fresh stack per run. [deployStack] already
+ *   reuses/updates a pre-existing stack via its `AlreadyExistsException` handling, so this flag only
+ *   needs to change teardown, not setup.
  */
 class EcsOrchestrationServiceIT {
 
     private val logger = LoggerFactory.getLogger(EcsOrchestrationServiceIT::class.java)
 
+    private var keepStack: Boolean = false
     private lateinit var stackName: String
     private lateinit var taskFamily: String
     private lateinit var ec2TaskFamily: String
@@ -86,6 +93,7 @@ class EcsOrchestrationServiceIT {
             ?: error("AWS_REGION environment variable is not set")
 
         stackName = System.getenv("CFN_STACK_NAME") ?: "conductor-integration-test"
+        keepStack = System.getenv("CFN_KEEP_STACK")?.equals("true", ignoreCase = true) == true
 
         val awsRegion = Region.of(region)
         cfnClient = CloudFormationClient.builder().region(awsRegion).build()
@@ -166,42 +174,46 @@ class EcsOrchestrationServiceIT {
         if (::applicationAutoScalingClient.isInitialized) applicationAutoScalingClient.close()
         if (::httpClient.isInitialized) httpClient.close()
 
-        if (::deployerEc2Client.isInitialized && ::vpcId.isInitialized) {
-            try {
-                scrubVpcDependencies(vpcId)
-            } catch (e: Exception) {
-                // Don't let a scrub failure skip deleteStack below — deleting the stack's own
-                // ASG/instances often clears whatever dependency blocked the scrub, and even if
-                // deleteStack also fails, the DELETE_FAILED retry path below (or the next run's
-                // deployStack) will scrub and retry again. Leaving this unhandled would abort
-                // tearDown entirely, orphaning the whole stack (including any running EC2/Fargate
-                // resources) with no automatic recovery.
-                logger.warn("Failed to scrub VPC dependencies for '{}' — attempting stack deletion anyway", vpcId, e)
-            }
-        }
-
-        if (::cfnClient.isInitialized) {
-            try {
-                cfnClient.deleteStack { it.stackName(stackName) }
+        if (keepStack) {
+            logger.info("CFN_KEEP_STACK=true — leaving stack '{}' running for the next local run", stackName)
+        } else {
+            if (::deployerEc2Client.isInitialized && ::vpcId.isInitialized) {
                 try {
-                    cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
+                    scrubVpcDependencies(vpcId)
                 } catch (e: Exception) {
-                    val status = runCatching {
-                        cfnClient.describeStacks { it.stackName(stackName) }.stacks().firstOrNull()?.stackStatus()
-                    }.getOrNull()
-                    if (status == StackStatus.DELETE_FAILED && ::deployerEc2Client.isInitialized) {
-                        logger.warn("Stack '{}' is DELETE_FAILED — scrubbing remaining VPC dependencies and retrying", stackName)
-                        scrubAndDeleteStack()
-                    } else {
-                        throw e
-                    }
+                    // Don't let a scrub failure skip deleteStack below — deleting the stack's own
+                    // ASG/instances often clears whatever dependency blocked the scrub, and even if
+                    // deleteStack also fails, the DELETE_FAILED retry path below (or the next run's
+                    // deployStack) will scrub and retry again. Leaving this unhandled would abort
+                    // tearDown entirely, orphaning the whole stack (including any running EC2/Fargate
+                    // resources) with no automatic recovery.
+                    logger.warn("Failed to scrub VPC dependencies for '{}' — attempting stack deletion anyway", vpcId, e)
                 }
-            } catch (e: Exception) {
-                logger.warn("Failed to delete stack '{}'", stackName, e)
             }
-            cfnClient.close()
+
+            if (::cfnClient.isInitialized) {
+                try {
+                    cfnClient.deleteStack { it.stackName(stackName) }
+                    try {
+                        cfnClient.waiter().waitUntilStackDeleteComplete { it.stackName(stackName) }
+                    } catch (e: Exception) {
+                        val status = runCatching {
+                            cfnClient.describeStacks { it.stackName(stackName) }.stacks().firstOrNull()?.stackStatus()
+                        }.getOrNull()
+                        if (status == StackStatus.DELETE_FAILED && ::deployerEc2Client.isInitialized) {
+                            logger.warn("Stack '{}' is DELETE_FAILED — scrubbing remaining VPC dependencies and retrying", stackName)
+                            scrubAndDeleteStack()
+                        } else {
+                            throw e
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.warn("Failed to delete stack '{}'", stackName, e)
+                }
+            }
         }
 
+        if (::cfnClient.isInitialized) cfnClient.close()
         if (::deployerEc2Client.isInitialized) deployerEc2Client.close()
     }
 
