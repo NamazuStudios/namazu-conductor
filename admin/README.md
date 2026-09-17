@@ -29,6 +29,10 @@ The admin element has no required configuration. Both attributes have sensible d
 |---|---|---|---|
 | Auth enabled | `dev.getelements.elements.auth.enabled` | `true` | Enables the Elements auth filter. Set to `false` only in isolated development environments. |
 | REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin-console/rest` | Base path for the JAX-RS application. Change this only if another element already occupies that path. |
+| WebSocket root | `dev.getelements.elements.element.ws.root` | `/conductor/admin-console/ws` | Base path for the terminal WebSocket endpoints. Must stay distinct from the REST root (see the field doc on `WS_ROOT` in `ConductorAdminApplication.kt`). |
+| UI content root | `dev.getelements.element.ui.uri` | `/conductor/admin-console/ui` | Base path the dashboard UI plugin bundle is served from. |
+
+You can safely override any of these per-deployment — the dashboard UI discovers its own REST/WS roots at runtime (via the platform's `GET /api/rest/elements/system`, which reports each element's live, resolved attributes) rather than assuming the compiled-in defaults, so it doesn't need a matching frontend rebuild.
 
 ## REST API
 
