@@ -44,7 +44,10 @@ data class ProviderExecutionResult(
 @Path("/jobs")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-class ConductorAdminJobsResource @Inject constructor(private val userService: UserService) {
+class ConductorAdminJobsResource @Inject constructor(
+    private val userService: UserService,
+    private val terminalTicketStore: TerminalTicketStore
+) {
 
     private val logger = LoggerFactory.getLogger(ConductorAdminJobsResource::class.java)
 
@@ -240,7 +243,7 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
                 .build()
         }
 
-        val ticket = TerminalTicketStore.mint(request.jobId, request.containerId, request.command)
+        val ticket = terminalTicketStore.mint(request.jobId, request.containerId, request.command)
         return Response.ok(TerminalTicketResponse(ticket)).build()
     }
 

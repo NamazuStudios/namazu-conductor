@@ -2,6 +2,7 @@ package dev.getelements.conductor.admin.ws
 
 import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.admin.ElementLookup
+import dev.getelements.elements.sdk.ElementSupplier
 import jakarta.websocket.CloseReason
 import jakarta.websocket.Session
 import org.slf4j.LoggerFactory
@@ -45,9 +46,17 @@ internal object TerminalSessionHandler {
         """"type"\s*:\s*"resize".*?"cols"\s*:\s*(\d+).*?"rows"\s*:\s*(\d+)"""
     )
 
+    // TerminalSessionHandler is instantiated by the JSR-356 container (per the @ServerEndpoint
+    // classes that delegate to it), not by Guice, so it can't take TerminalTicketStore as a
+    // constructor dependency the way ConductorAdminJobsResource does. ElementSupplier/ServiceLocator
+    // is the SDK's sanctioned way to reach a Guice-managed singleton from non-Guice-managed code.
+    private val ticketStore: TerminalTicketStore
+        get() = ElementSupplier.getElementLocal(TerminalSessionHandler::class.java).get().serviceLocator
+            .getInstance(TerminalTicketStore::class.java)
+
     fun onOpen(session: Session, jobId: String, containerId: String?) {
         val ticket = session.requestParameterMap["ticket"]?.firstOrNull()
-        val consumed = ticket?.let { TerminalTicketStore.consume(it, jobId, containerId) }
+        val consumed = ticket?.let { ticketStore.consume(it, jobId, containerId) }
         if (consumed == null) {
             closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "invalid or expired ticket")
             return
