@@ -2,7 +2,7 @@ import React from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import xtermCss from '@xterm/xterm/css/xterm.css?inline'
-import { mintTerminalTicket } from './api'
+import { mintTerminalTicket, resolveWsRoot } from './api'
 
 const h = React.createElement
 
@@ -213,12 +213,9 @@ class TerminalSessionManager {
       })
   }
 
-  private connect(session: Session, jobId: string, containerId: string | null, ticket: string) {
+  private async connect(session: Session, jobId: string, containerId: string | null, ticket: string) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    // Must match ConductorAdminApplication.WS_ROOT — kept as a distinct path segment from the REST
-    // root (see api.ts) since both loaders sharing one context path is suspected to break WebSocket
-    // endpoint discovery (https://github.com/NamazuStudios/elements/issues/95).
-    const wsRoot = '/conductor/admin-console/ws'
+    const wsRoot = await resolveWsRoot()
     const path = containerId ? `${wsRoot}/service/${jobId}/${containerId}` : `${wsRoot}/service/${jobId}`
     const url = `${scheme}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`
 
