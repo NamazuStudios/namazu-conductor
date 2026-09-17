@@ -130,7 +130,7 @@ The admin element exposes several attributes. All have defaults and do not norma
 | Auth enabled | `dev.getelements.elements.auth.enabled` | `true` | Enables the Elements auth filter. Set to `false` only in isolated development environments. |
 | REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin-console/rest` | Base path for the JAX-RS application. Change this if another element already occupies that path. |
 | WebSocket root | `dev.getelements.elements.element.ws.root` | `/conductor/admin-console/ws` | Base path for the terminal WebSocket endpoints. |
-| UI content root | `dev.getelements.element.ui.uri` | `/conductor/admin-console/ui` | Base path the dashboard UI plugin bundle is served from. |
+| UI content root | `dev.getelements.element.ui.uri` | `/app/ui/conductor-admin-console` | Base path the dashboard UI plugin bundle is served from. Deliberately kept under `/app/ui/` — the dashboard's plugin loader only discovers UI content whose URI contains that literal substring, so anything else silently never appears in the sidebar (see [NamazuStudios/elements#102](https://github.com/NamazuStudios/elements/issues/102)). |
 
 These are safe to override per-deployment: the dashboard UI discovers its own REST/WS roots at runtime rather than assuming the compiled-in defaults, so an override doesn't require rebuilding the frontend.
 
@@ -139,3 +139,5 @@ These are safe to override per-deployment: the dashboard UI discovers its own RE
 ## Multiple Providers
 
 The admin element queries every element in the deployment registry at request time. If you deploy multiple Conductor providers (e.g. both ECS and Kubernetes), each appears as a separate entry in the `providers` array with its own profile list. There is no static configuration required — new providers are picked up automatically on the next request.
+
+**This does not extend to multiple deployments of the *same* provider** (e.g. two `kubernetes` deployments differentiated only by job set) — the admin element identifies each provider by its static package name, which is identical across such deployments, so they collapse into one entry instead of appearing separately. See the "Multiple conductor instances on one cluster" caveat in `kubernetes/README.md` for why (blocked on [NamazuStudios/elements#99](https://github.com/NamazuStudios/elements/issues/99)).

@@ -79,6 +79,14 @@ labels and annotations on the `PodTemplate`:
   friendly name and optional Markdown blurb the admin dashboard shows in place of the raw job set
   value, exposed via `OrchestrationService.jobSetName`/`jobSetDescription` (default `null` for
   providers with no job-set concept, e.g. edgegap/multiplay).
+  **Caveat:** running multiple job-set-scoped `kubernetes`/`ecs` deployments side-by-side under one
+  shared `admin` deployment is the intended usage but isn't safe yet — `admin`'s REST aggregation
+  (`ElementLookup.kt`, `ConductorAdminResource.kt`) keys every deployed provider by
+  `element.elementRecord.definition().name()` (the static package name), which is identical across
+  two job-set deployments of the same provider, so they collapse into one in the dashboard. This is
+  blocked on `NamazuStudios/elements#99` — `ElementDeployment` has no stable per-deployment name,
+  only an internal ObjectId, so `admin` has nothing else to key by. Will work as intended once that
+  lands and `admin`'s aggregation is updated to key by deployment identity instead of package name.
 - **Annotation** `namazu.conductor/workload-kind` — `pod` (default; long-standing, bare `Pod`),
   `job` (one-off, `batch/v1 Job`), or `daemon` (persistent `Deployment`, surfaced via
   `DaemonOrchestrationService.getAvailableDaemons()` instead of `getAvailableProfiles()` — see

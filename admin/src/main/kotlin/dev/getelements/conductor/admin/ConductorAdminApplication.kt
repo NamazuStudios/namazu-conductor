@@ -52,17 +52,21 @@ class ConductorAdminApplication : Application() {
         val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
 
         /**
-         * Serves the dashboard UI plugin bundle: `http://<host>$NAMESPACE/ui/...`.
+         * Serves the dashboard UI plugin bundle: `http://<host>/app/ui/conductor-admin-console/...`.
          *
-         * Without this override, the UI loader falls back to the element's raw package name
-         * (`dev.getelements.conductor.admin`) as the path segment in the default `/app/ui/{prefix}`
-         * scheme, which collides with a reserved system API path in production and gets silently
-         * refused ("Static content path '/app/ui/dev.getelements.conductor.admin' is inside a
-         * reserved system API path"). Deliberately not `APPLICATION_PREFIX`, which would also override
-         * [WS_ROOT]/[RS_ROOT]'s defaults.
+         * Deliberately kept under the SDK's default `/app/ui/` prefix rather than under [NAMESPACE]
+         * like [WS_ROOT]/[RS_ROOT] — the admin console dashboard frontend's plugin loader
+         * (`extractUiBasePaths()` in `elements-web-ui`) only recognizes a deployed container's UI
+         * content if its URI contains the literal substring `/app/ui/`; anything else is silently
+         * never fetched, so the plugin never appears in the sidebar, even though the backend serves
+         * it correctly (see https://github.com/NamazuStudios/elements/issues/102). The segment name
+         * is `conductor-admin-console` rather than the raw package name
+         * (`dev.getelements.conductor.admin`) to avoid the reserved-system-path collision that
+         * originally motivated overriding this attribute in the first place ("Static content path
+         * '/app/ui/dev.getelements.conductor.admin' is inside a reserved system API path").
          */
         @JvmField
-        @ElementDefaultAttribute(value = "$NAMESPACE/ui")
+        @ElementDefaultAttribute(value = "/app/ui/conductor-admin-console")
         val UI_CONTENT_URI: String = "dev.getelements.element.ui.uri"
 
     }
