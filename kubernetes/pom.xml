@@ -88,10 +88,35 @@
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
         </dependency>
-        <!-- Fabric8 Kubernetes client for PodTemplate discovery and Pod/Job/Service management -->
+        <!--
+            Fabric8 Kubernetes client for PodTemplate discovery and Pod/Job/Service management.
+            Excludes the default okhttp transport (kubernetes-httpclient-okhttp, which pulls
+            okhttp3 3.12.12) in favor of kubernetes-httpclient-jdk (java.net.http.HttpClient):
+            okhttp 3.12.x's OkHostnameVerifier.verifyIpAddress() does a raw string comparison
+            between a connection's IPv6 literal and the certificate SAN entries without
+            normalizing either to canonical form first, so a compressed literal
+            (e.g. fdca:6171:bb80::1) never matches an equivalent fully-expanded SAN entry
+            (fdca:6171:bb80:0:0:0:0:1) and every in-cluster API call fails with
+            SSLPeerUnverifiedException on IPv6/dual-stack clusters
+            (https://github.com/NamazuStudios/namazu-conductor/issues/28). The JDK HttpClient
+            transport verifies hostnames via the JDK's own X509ExtendedTrustManager/SSLParameters
+            endpoint-identification path instead, which canonicalizes IP literals correctly.
+            KubernetesClientBuilder auto-discovers whichever HttpClient.Factory is on the
+            classpath via ServiceLoader, so this is a pure dependency swap — no code changes.
+        -->
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.fabric8</groupId>
+                    <artifactId>kubernetes-httpclient-okhttp</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-httpclient-jdk</artifactId>
         </dependency>
         <!-- TestNG for integration tests -->
         <dependency>
