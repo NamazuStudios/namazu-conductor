@@ -285,15 +285,23 @@ dev.getelements.conductor.kubernetes.job.set = game-sessions
 ```
 
 **Caveat:** this partitioning is the intended usage and works correctly for template discovery
-itself, but if both conductors' deployments are aggregated by the *same* `admin` deployment, the
-admin dashboard can't yet tell them apart — its REST layer (`ElementLookup.kt`,
-`ConductorAdminResource.kt`) identifies each provider by its static package name
-(`dev.getelements.conductor.kubernetes`), which both job-set deployments share, so the dashboard
-collapses them into one. This is blocked on `NamazuStudios/elements#99` (no stable per-deployment
-identity — `ElementDeployment` exposes only an internal ObjectId, not a name) and will work once
-that's resolved and `admin`'s aggregation is updated accordingly. (Running a separate `admin`
-deployment per job set doesn't avoid this either — that hits the same class of bug one level up,
-via `NamazuStudios/elements#99`'s plugin-route collision between two `admin` deployments.)
+itself, but running two `kubernetes` instances differentiated only by `jobset` isn't safe yet:
+
+- If both are packaged into the **same deployment**, the second one silently fails to stage at all
+  — a deployment's `packages` list can't actually contain two entries pointing at the same
+  `elmArtifact` coordinate (`FileSystemAlreadyExistsException` swallowed in
+  `StandardElementRuntimeService.stageFromPackageDefinition`), leaving the deployment `UNSTABLE`
+  with no loud error. Blocked on `NamazuStudios/elements#103`.
+- Even past that, if both conductors' deployments are aggregated by the *same* `admin` deployment,
+  the admin dashboard can't yet tell them apart — its REST layer (`ElementLookup.kt`,
+  `ConductorAdminResource.kt`) identifies each provider by its static package name
+  (`dev.getelements.conductor.kubernetes`), which both job-set deployments share, so the dashboard
+  collapses them into one. Blocked on `NamazuStudios/elements#99` (no stable per-deployment identity
+  — `ElementDeployment` exposes only an internal ObjectId, not a name). (Running a separate `admin`
+  deployment per job set doesn't avoid this either — that hits the same class of bug one level up,
+  via `#99`'s plugin-route collision between two `admin` deployments.)
+
+Both will work as intended once resolved upstream and `admin`'s aggregation is updated accordingly.
 
 ## Integration Test
 
