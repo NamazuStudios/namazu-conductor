@@ -211,6 +211,28 @@ The test requires a deployer stack deployed from `cloudformation/integration-tes
 | `CFN_STACK_NAME` | No | `conductor-integration-test` | Name of the integration test CloudFormation stack |
 | `CFN_DEPLOYER_STACK_NAME` | No | `conductor-integration-test-deployer` | Name of the deployer stack, used to resolve the ECR repository URI |
 | `CFN_IMAGE_NAME` | No | `conductor-integration-test:latest` | Image name and tag within the ECR repository |
+| `CFN_KEEP_STACK` | No | `false` | `true` leaves the stack running after the suite instead of deleting it — see "Faster local iteration" below |
+
+### Faster local iteration
+
+By default the test creates the CloudFormation stack fresh and deletes it in `@AfterClass`, every
+single run — several minutes of pure setup/teardown on each `mvn verify -pl ecs`. For a work
+session where you're iterating on the `ecs` module, start the stack once and keep it running:
+
+```bash
+./ecs/cloudformation/start-integration-test-stack.sh
+
+CFN_KEEP_STACK=true AWS_ACCESS_KEY_ID=<deployer-key> AWS_SECRET_ACCESS_KEY=<deployer-secret> \
+AWS_REGION=us-east-1 mvn verify -pl ecs -am   # repeat as many times as you like
+
+./ecs/cloudformation/stop-integration-test-stack.sh   # when you're done for the session
+```
+
+`deployStack` already reuses/updates a pre-existing stack (via its `AlreadyExistsException`
+handling), so `CFN_KEEP_STACK` only needs to change teardown, not setup. **Leaving the stack running
+costs roughly $10-20/month** (one always-on t3.small spot EC2 instance — kept alive by the stack's
+Auto Scaling Group — plus its public IPv4 fee; everything else in the stack, including the Fargate
+tasks, has no idle cost). Don't forget to stop it when you're done.
 
 ### StdioBridgeClientIT (disabled)
 
