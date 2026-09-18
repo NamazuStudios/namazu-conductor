@@ -37,6 +37,11 @@ import java.util.concurrent.TimeUnit
  * client-to-server only — a regex match is used instead of a JSON library since this is a single,
  * tightly-scoped message shape we define ourselves, not general-purpose JSON parsing. Binary frames
  * carry raw terminal bytes in both directions (keystrokes in, pty output out) throughout.
+ *
+ * Bell-triggered toast notifications (issue #37) are deliberately *not* a control message here: a
+ * container surfaces one by writing a custom OSC escape sequence to its own stdout, which already
+ * flows through unmodified as part of the ordinary binary pty stream and is parsed client-side by
+ * xterm.js — see `admin/README.md`'s "Toast notifications" section and `admin/ui/superuser/terminal.ts`.
  */
 internal object TerminalSessionHandler {
 

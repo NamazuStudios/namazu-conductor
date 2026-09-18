@@ -25,6 +25,30 @@ const BELL_SOUND_PATH = new URL('complete.oga', BUNDLE_BASE_URL).href
 
 const BELL_VOLUME_STORAGE_KEY = 'conductor-terminal-bell-volume'
 
+// Custom OSC (Operating System Command) escape sequence a container/job can write to its own stdout
+// to surface a toast in the operator's dashboard — e.g. `printf '\e]9001;Build finished\a'`. This
+// travels in-band over the *existing* raw binary pty stream (same channel `onBell()` below already
+// relies on for the BEL control character), so — unlike the resize control message, which is a
+// dedicated JSON WS text frame — it needs no server-side changes at all: xterm's own parser already
+// correctly reassembles OSC sequences split across WebSocket frames/pty reads, exactly as it already
+// does for BEL and title-change (OSC 0/2) sequences. 9001 is an arbitrary, unassigned OSC number
+// (see https://github.com/NamazuStudios/namazu-conductor/issues/37) chosen to avoid colliding with
+// established conventions (OSC 9 iTerm2 growl, OSC 777 konsole/xterm notify, OSC 1337 iTerm2 proprietary).
+const TOAST_OSC_IDENT = 9001
+
+// Shared across all sessions (see TerminalSessionManager.toastHistory) per issue #37 — history
+// survives switching tabs; no need to persist across page reloads.
+const MAX_TOAST_HISTORY = 200
+const TOAST_POPUP_DURATION_MS = 6000
+
+interface ToastEntry {
+  id: string
+  timestamp: number
+  message: string
+  sessionKey: string
+  sessionLabel: string
+}
+
 /** `Session.ws` may still be the initial placeholder (connect() hasn't run yet, or threw before assigning it). */
 function runCatchingClose(ws: WebSocket | null) {
   try { ws?.close() } catch { /* already closed/never opened */ }
@@ -79,6 +103,9 @@ class TerminalSessionManager {
   private activeKey: string | null = null
   private bellVolume = loadBellVolume()
   private execCounter = 0
+  private toastCounter = 0
+  private toastHistory: ToastEntry[] = []
+  private transientToasts: ToastEntry[] = []
 
   // useSyncExternalStore requires getSnapshot() to return a stable reference when nothing has
   // changed — recomputing a fresh object/array on every call causes an infinite re-render loop.
@@ -112,6 +139,8 @@ class TerminalSessionManager {
         key: s.key, label: s.label, status: s.status, hasUnseenBell: s.hasUnseenBell,
       })),
       activeKey: this.activeKey,
+      toastHistory: this.toastHistory,
+      transientToasts: this.transientToasts,
     }
   }
 
@@ -136,6 +165,35 @@ class TerminalSessionManager {
 
   hasOpenSessions(): boolean {
     return this.sessions.size > 0
+  }
+
+  getToastHistory(): ToastEntry[] {
+    return this.toastHistory
+  }
+
+  clearToastHistory() {
+    this.toastHistory = []
+    this.notify()
+  }
+
+  /** Dismisses a transient popup early (e.g. the user clicked its ✕) without touching history. */
+  dismissToastPopup(id: string) {
+    this.transientToasts = this.transientToasts.filter((t) => t.id !== id)
+    this.notify()
+  }
+
+  private pushToast(session: Session, message: string) {
+    const entry: ToastEntry = {
+      id: `toast-${this.toastCounter++}`,
+      timestamp: Date.now(),
+      message,
+      sessionKey: session.key,
+      sessionLabel: session.label,
+    }
+    this.toastHistory = [...this.toastHistory, entry].slice(-MAX_TOAST_HISTORY)
+    this.transientToasts = [...this.transientToasts, entry]
+    this.notify()
+    setTimeout(() => this.dismissToastPopup(entry.id), TOAST_POPUP_DURATION_MS)
   }
 
   setActive(key: string) {
@@ -180,6 +238,11 @@ class TerminalSessionManager {
         session.hasUnseenBell = true
         this.notify()
       }
+    })
+    term.parser.registerOscHandler(TOAST_OSC_IDENT, (data) => {
+      const message = data.trim()
+      if (message) this.pushToast(session, message)
+      return true
     })
     this.sessions.set(key, session)
     this.activeKey = key
@@ -309,7 +372,73 @@ export function BellControls() {
         onChange: handleVolumeChange,
         className: 'w-24',
         title: 'Terminal bell volume',
-      })))
+      })),
+    h(ToastHistoryMenu))
+}
+
+/** Expandable menu (next to the volume/mute controls) showing the shared toast history ring buffer. */
+function ToastHistoryMenu() {
+  const { toastHistory } = useTerminalSnapshot()
+  const [open, setOpen] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [open])
+
+  return h('div', { className: 'relative', ref: rootRef },
+    h('button', {
+      className: 'relative px-2.5 py-1 rounded border text-xs hover:bg-muted transition-colors',
+      onClick: () => setOpen((v) => !v),
+      title: 'Toast notification history',
+    }, '📝', toastHistory.length > 0 && h('span', {
+      className: 'absolute -top-1.5 -right-1.5 min-w-[1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-4 text-center',
+    }, toastHistory.length)),
+    open && h('div', {
+      className: 'absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto rounded-lg border bg-popover shadow-lg z-50 text-xs',
+    },
+      h('div', { className: 'flex items-center justify-between px-3 py-2 border-b sticky top-0 bg-popover' },
+        h('span', { className: 'font-semibold' }, 'Toast history'),
+        h('button', {
+          className: 'text-muted-foreground hover:text-destructive disabled:opacity-40 disabled:hover:text-muted-foreground',
+          disabled: toastHistory.length === 0,
+          onClick: () => terminalSessionManager.clearToastHistory(),
+        }, 'Clear')),
+      toastHistory.length === 0
+        ? h('div', { className: 'px-3 py-4 text-center text-muted-foreground' }, 'No toasts yet')
+        : h('div', { className: 'divide-y' },
+            [...toastHistory].reverse().map((t) => h('div', { key: t.id, className: 'px-3 py-2 space-y-0.5' },
+              h('div', { className: 'flex items-center justify-between gap-2 text-muted-foreground' },
+                h('span', { className: 'font-mono truncate' }, t.sessionLabel),
+                h('span', { className: 'shrink-0' }, new Date(t.timestamp).toLocaleTimeString())),
+              h('div', { className: 'break-words text-foreground' }, t.message))))))
+}
+
+/**
+ * Transient popups for freshly-received toasts, auto-dismissed after `TOAST_POPUP_DURATION_MS`.
+ * Mount once near the top of the page hosting `TerminalTabs`/`BellControls` — not per-tab, since a
+ * toast should surface even while its originating session isn't the active one.
+ */
+export function ToastPopups() {
+  const { transientToasts } = useTerminalSnapshot()
+  if (transientToasts.length === 0) return null
+  return h('div', { className: 'fixed top-4 right-4 z-[100] w-80 space-y-2' },
+    transientToasts.map((t) => h('div', {
+      key: t.id,
+      className: 'rounded-lg border bg-popover shadow-lg px-3 py-2 text-xs',
+    },
+      h('div', { className: 'flex items-center justify-between gap-2' },
+        h('span', { className: 'font-mono font-semibold truncate text-muted-foreground' }, t.sessionLabel),
+        h('button', {
+          className: 'text-muted-foreground hover:text-foreground',
+          onClick: () => terminalSessionManager.dismissToastPopup(t.id),
+        }, '✕')),
+      h('div', { className: 'mt-0.5 break-words' }, t.message))))
 }
 
 function useTerminalSnapshot() {
