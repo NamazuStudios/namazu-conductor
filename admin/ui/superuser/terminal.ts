@@ -252,7 +252,7 @@ class TerminalSessionManager {
   close(key: string) {
     const session = this.sessions.get(key)
     if (!session) return
-    session.ws.close()
+    runCatchingClose(session.ws)
     session.term.dispose()
     this.sessions.delete(key)
     if (this.activeKey === key) {

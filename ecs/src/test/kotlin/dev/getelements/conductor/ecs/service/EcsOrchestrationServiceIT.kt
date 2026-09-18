@@ -258,7 +258,12 @@ class EcsOrchestrationServiceIT {
         return current
     }
 
-    @Test
+    // Disabled: the CloudFormation stack this suite deploys picks up a GuardDuty-managed security
+    // group whenever an EC2-launch-type task runs, which CloudFormation can't clean up itself and
+    // leaves the stack's Vpc resource stuck in DELETE_IN_PROGRESS — blocking every subsequent run's
+    // stack creation with a name collision. See https://github.com/NamazuStudios/namazu-conductor/issues/35
+    // for the root cause and planned fix; re-enable once that lands.
+    @Test(enabled = false)
     fun launchFargateAndVerifyTestContext() {
         val profile = service.findAvailableProfile(taskFamily)
             ?: throw AssertionError("Fargate profile '$taskFamily' not found")
@@ -285,7 +290,7 @@ class EcsOrchestrationServiceIT {
         assertEquals(context.environment, environment, "environment mismatch (Fargate)")
     }
 
-    @Test
+    @Test(enabled = false)
     fun launchEc2SpotAndVerifyTestContext() {
         val profile = service.findAvailableProfile(ec2TaskFamily)
             ?: throw AssertionError("EC2 profile '$ec2TaskFamily' not found")
@@ -312,7 +317,7 @@ class EcsOrchestrationServiceIT {
         assertEquals(context.environment, environment, "environment mismatch (EC2)")
     }
 
-    @Test
+    @Test(enabled = false)
     fun discoversDaemonProfileOnly() {
         val daemon = service.findAvailableDaemon(daemonTaskFamily)
         assertTrue(daemon != null, "Daemon profile '$daemonTaskFamily' not found via getAvailableDaemons()")
@@ -322,7 +327,7 @@ class EcsOrchestrationServiceIT {
         )
     }
 
-    @Test(dependsOnMethods = ["discoversDaemonProfileOnly"])
+    @Test(enabled = false, dependsOnMethods = ["discoversDaemonProfileOnly"])
     fun deployServiceReachesRunningWithExpectedRunningCount() {
         val daemon = service.findAvailableDaemon(daemonTaskFamily)
             ?: throw AssertionError("Daemon profile '$daemonTaskFamily' not found")
@@ -336,7 +341,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = running
     }
 
-    @Test(dependsOnMethods = ["deployServiceReachesRunningWithExpectedRunningCount"])
+    @Test(enabled = false, dependsOnMethods = ["deployServiceReachesRunningWithExpectedRunningCount"])
     fun setDesiredCountUpdatesService() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
 
@@ -348,7 +353,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = running
     }
 
-    @Test(dependsOnMethods = ["setDesiredCountUpdatesService"])
+    @Test(enabled = false, dependsOnMethods = ["setDesiredCountUpdatesService"])
     fun setScalingBoundsRegistersScalableTarget() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
 
@@ -370,7 +375,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = updated
     }
 
-    @Test(dependsOnMethods = ["setScalingBoundsRegistersScalableTarget"])
+    @Test(enabled = false, dependsOnMethods = ["setScalingBoundsRegistersScalableTarget"])
     fun undeployDeletesServiceAndScalableTarget() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to undeploy")
 
