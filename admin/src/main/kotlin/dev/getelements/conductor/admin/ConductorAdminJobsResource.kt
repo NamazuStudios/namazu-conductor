@@ -9,6 +9,7 @@ import dev.getelements.conductor.admin.model.TerminalTicketResponse
 import dev.getelements.conductor.admin.ws.TerminalTicketStore
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
+import dev.getelements.elements.sdk.ElementSupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
 import dev.getelements.elements.sdk.jakarta.rs.AuthSchemes
 import dev.getelements.elements.sdk.model.user.User
@@ -44,12 +45,19 @@ data class ProviderExecutionResult(
 @Path("/jobs")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-class ConductorAdminJobsResource @Inject constructor(
-    private val userService: UserService,
-    private val terminalTicketStore: TerminalTicketStore
-) {
+class ConductorAdminJobsResource @Inject constructor(private val userService: UserService) {
 
     private val logger = LoggerFactory.getLogger(ConductorAdminJobsResource::class.java)
+
+    // JAX-RS resources in this SDK are instantiated by HK2 (bridged to Guice via guice-bridge), not
+    // constructed by Guice directly — the bridge doesn't expose every Guice binding to HK2's own
+    // dependency resolution (confirmed in production: adding TerminalTicketStore as a second
+    // constructor parameter broke *every* endpoint on this resource with
+    // UnsatisfiedDependencyException, since HK2 couldn't satisfy it at all). Reach it the same way
+    // TerminalSessionHandler does instead — that path never goes through HK2.
+    private val terminalTicketStore: TerminalTicketStore
+        get() = ElementSupplier.getElementLocal(ConductorAdminJobsResource::class.java).get().serviceLocator
+            .getInstance(TerminalTicketStore::class.java)
 
     private fun requireSuperuser(): User? {
         val user = userService.currentUser ?: return null
