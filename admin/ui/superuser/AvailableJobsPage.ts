@@ -1,7 +1,6 @@
 import React from 'react'
-import { marked } from 'marked'
 import { executeJob, fetchProfiles } from './api'
-import { Accordion, ErrorBoundary, Pagination, StatusIndicator } from './ui'
+import { Accordion, CollapsibleMarkdown, ErrorBoundary, MarkdownBlock, Pagination, StatusIndicator } from './ui'
 import { RunForm, defaultAdvancedOptions, derivePlacementList } from './RunForm'
 import type { AdvancedOptions } from './RunForm'
 import type { JobProfile, ProviderProfilesResult } from './types'
@@ -23,11 +22,6 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   const [startedId, setStartedId] = React.useState<string | null>(null)
   const isTerminalJob = Boolean(profile.terminalJob)
   const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() => defaultAdvancedOptions(isTerminalJob))
-
-  const descriptionHtml = React.useMemo(
-    () => (profile.description ? marked.parse(profile.description, { async: false }) as string : null),
-    [profile.description],
-  )
 
   function handleStart() {
     setStarting(true); setStartError(null); setStartedId(null)
@@ -71,10 +65,8 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
     startError && h('p', { className: 'text-xs text-destructive mb-2' }, startError),
     startedId && h('p', { className: 'text-xs text-green-700 mb-2 font-mono' },
       `Started ✓ ${startedId} — see Running Jobs & Services.`),
-    descriptionHtml && h('div', {
-      className: 'prose prose-sm max-w-none mb-3 text-sm',
-      dangerouslySetInnerHTML: { __html: descriptionHtml },
-    }),
+    profile.description && h('div', { className: 'mb-3' },
+      h(CollapsibleMarkdown, { markdown: profile.description, label: 'Description' })),
     detailKeys.length > 0 &&
       h('div', { className: 'grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 mb-3' },
         detailKeys.flatMap((k) => {
@@ -134,10 +126,7 @@ export function AvailableJobsPage() {
       className: 'rounded-lg border bg-muted/30 p-3',
     },
       h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
-      h('div', {
-        className: 'prose prose-sm max-w-none text-sm',
-        dangerouslySetInnerHTML: { __html: marked.parse(p.jobSetDescription as string, { async: false }) as string },
-      }))),
+      h(MarkdownBlock, { markdown: p.jobSetDescription as string, className: 'text-sm' }))),
     !data.loading && flat.length === 0 && providerErrors.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No job profiles available.'),
     flat.length > 0 &&

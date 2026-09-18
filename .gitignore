@@ -44,4 +44,3 @@ build/
 /ecs.properties
 /edgegap.properties
 /kubernetes.properties
-/debug/kubernetes.properties
