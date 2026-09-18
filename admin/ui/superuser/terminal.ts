@@ -396,7 +396,7 @@ function ToastHistoryMenu() {
       className: 'relative px-2.5 py-1 rounded border text-xs hover:bg-muted transition-colors',
       onClick: () => setOpen((v) => !v),
       title: 'Toast notification history',
-    }, '📝', toastHistory.length > 0 && h('span', {
+    }, '🍞', toastHistory.length > 0 && h('span', {
       className: 'absolute -top-1.5 -right-1.5 min-w-[1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-4 text-center',
     }, toastHistory.length)),
     open && h('div', {

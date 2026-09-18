@@ -87,6 +87,9 @@ metadata:
     namazu.conductor/default-container-exec.claude: "claude"
     namazu.conductor/default-container-exec.qwen: "qwen"
     namazu.conductor/description: |
+
+      # Test Test
+
       A three-container pod, one per AI coding agent CLI, for testing the admin dashboard's web-based
       terminal against a real agent session.
 
