@@ -26,11 +26,17 @@
 # `npm install -g @qwen-code/qwen-code` on a node:22 base image (verified working locally) — its
 # install output is intentionally not silenced, so `kubectl logs` shows what happened if it ever fails.
 #
+# A third profile, 'markdown-test', exists purely to exercise the admin dashboard's Markdown
+# rendering (see #39): its `namazu.conductor/description` is long-form Lorem Ipsum with multiple
+# heading levels and — deliberately — paragraphs whose lines are separated by single newlines rather
+# than blank lines, the same way a real annotation value is naturally authored. That's exactly the
+# shape `marked`'s default `breaks: false` used to mangle before #39's fix.
+#
 # Usage:
 #     ./kubernetes/install-terminal-test-pod.sh
 #
 # Cleanup:
-#     kubectl delete podtemplate bash opencode -n default
+#     kubectl delete podtemplate bash agents markdown-test -n default
 #
 set -euo pipefail
 
@@ -123,13 +129,76 @@ template:
             sleep infinity
 EOF
 
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: markdown-test
+  namespace: default
+  labels:
+    namazu.conductor/job-set: default
+  annotations:
+    namazu.conductor/workload-kind: pod
+    namazu.conductor/terminal-job: "true"
+    namazu.conductor/default-container-exec.idle: "/bin/sh"
+    namazu.conductor/description: |
+      Lorem ipsum dolor sit amet, consectetur adipiscing elit. This profile exists purely to exercise
+      the admin dashboard's Markdown rendering — headings, subheadings, and multi-line paragraphs
+      authored the way a real annotation value naturally is, with plain newlines rather than
+      blank-line-separated paragraphs.
+
+      ## Getting Started
+
+      Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+      Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi.
+      Ut aliquip ex ea commodo consequat duis aute irure dolor in reprehenderit.
+
+      ### Installation
+
+      Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla
+      pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt
+      mollit anim id est laborum.
+
+      ### Configuration
+
+      Curabitur pretium tincidunt lacus, at velit vestibulum ut faucibus mi sodales.
+      Nulla facilisi. Sed euismod urna eu tincidunt consectetur, nisi nisl aliquam enim.
+      Ut aliquam massa nisl quis neque non tristique diam varius eget.
+
+      ## Advanced Usage
+
+      Aenean lacinia bibendum nulla sed consectetur. Cras mattis consectetur purus sit amet
+      fermentum. Vivamus sagittis lacus vel augue laoreet rutrum faucibus dolor auctor.
+
+      ### Troubleshooting
+
+      Vestibulum id ligula porta felis euismod semper.
+      Cras justo odio, dapibus ac facilisis in, egestas eget quam.
+      Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh.
+
+      ### FAQ
+
+      Maecenas sed diam eget risus varius blandit sit amet non magna. Donec ullamcorper nulla non
+      metus auctor fringilla. Cum sociis natoque penatibus et magnis dis parturient montes.
+template:
+  spec:
+    containers:
+      - name: idle
+        image: alpine:3
+        command: ["sh", "-c", "sleep infinity"]
+EOF
+
 echo
 echo "Applied PodTemplate 'bash' to namespace 'default'."
 echo "In the admin dashboard's Available Jobs & Services page, click 'Start Terminal 💻' to launch it"
 echo "(attaches to the 'shell' container). Once running, attach to either 'shell' or 'sidecar' from"
 echo "the Running Jobs page's per-container Attach Terminal row."
 echo
-echo "Applied PodTemplate 'opencode' to namespace 'default'."
+echo "Applied PodTemplate 'agents' to namespace 'default'."
 echo "'opencode' and 'claude' are ready immediately (pre-built images). 'qwen' installs itself on"
 echo "startup — check 'kubectl logs <pod> -c qwen' if it's not ready yet. Attach a terminal to any of"
 echo "the three from Running Jobs — each will be pre-filled and ready to run."
+echo
+echo "Applied PodTemplate 'markdown-test' to namespace 'default'."
+echo "Expand it on the Available Jobs & Services page to check the description renders proper"
+echo "headings/subheadings and preserves single-newline-separated paragraph line breaks (#39)."
