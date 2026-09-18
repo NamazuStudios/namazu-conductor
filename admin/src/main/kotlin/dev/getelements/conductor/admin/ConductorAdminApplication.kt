@@ -16,58 +16,38 @@ class ConductorAdminApplication : Application() {
         val AUTH_ENABLED: String = "dev.getelements.elements.auth.enabled"
 
         /**
-         * Base namespace for this element's REST/WS/UI context paths. Deliberately *not* `admin` as
-         * the final segment: the Elements platform pre-seeds `{httpPathPrefix}/admin` into its
-         * `HttpPathRegistry` as a reserved system path for its own built-in admin console, and an
-         * operator configuring their install's `http.path.prefix` as `/conductor` — a natural choice
-         * for a Conductor-only deployment — would make that reserved path exactly `/conductor/admin`,
-         * an ancestor of (and therefore in conflict with) anything this element mounts under it (see
-         * https://github.com/NamazuStudios/namazu-conductor/issues/24). Must stay in sync with the
-         * client-side copies in `admin/ui/superuser/api.ts` and `admin/ui/superuser/terminal.ts`.
-         */
-        private const val NAMESPACE = "/conductor/admin-console"
-
-        /**
          * Mounts the terminal WebSocket endpoints ([dev.getelements.conductor.admin.ws.PrimaryContainerTerminalEndpoint],
-         * [dev.getelements.conductor.admin.ws.ContainerTerminalEndpoint]): `ws://<host>$NAMESPACE/ws/service/{jobId}[/{containerId}]`.
+         * [dev.getelements.conductor.admin.ws.ContainerTerminalEndpoint]): `ws://<host>/conductor/ws/service/{jobId}[/{containerId}]`.
          *
-         * Deliberately a **different** context path from [RS_ROOT] rather than sharing one — the REST
-         * and WebSocket loaders (`JakartaRsLoader`/`JakartaWebsocketLoader`) each register their context
-         * path in a shared `HttpPathRegistry`, and having both claim the exact same path for one Element
-         * is suspected to cause the WebSocket loader's endpoint scan to silently find nothing (see
-         * https://github.com/NamazuStudios/elements/issues/95). Keep this and [RS_ROOT] non-overlapping.
+         * A 1.2-only feature with no prior release's contract to preserve, so it gets its own
+         * top-level segment rather than nesting under [RS_ROOT]'s `/conductor/admin` — the REST and
+         * WebSocket loaders (`JakartaRsLoader`/`JakartaWebsocketLoader`) each register their context
+         * path in a shared `HttpPathRegistry`, and having both claim the exact same path for one
+         * Element is suspected to cause the WebSocket loader's endpoint scan to silently find nothing
+         * (see https://github.com/NamazuStudios/elements/issues/95). Keep this and [RS_ROOT]
+         * non-overlapping. Must stay in sync with the client-side copy in `admin/ui/superuser/api.ts`.
          */
         @JvmField
-        @ElementDefaultAttribute(value = "$NAMESPACE/ws")
+        @ElementDefaultAttribute(value = "/conductor/ws")
         val WS_ROOT: String = "dev.getelements.elements.element.ws.root"
 
         /**
          * Mounts the REST API ([ConductorAdminResource], [ConductorAdminJobsResource]):
-         * `http://<host>$NAMESPACE/rest/...`.
+         * `http://<host>/conductor/admin/...`.
          *
-         * Deliberately a **different** context path from [WS_ROOT] — see that field's doc for why.
+         * This is the original path from the 1.1 release line, restored for backward compatibility
+         * with existing integrations after two unnecessary moves in the 1.2.x line (`/conductor/admin`
+         * → `/conductor/admin/rest` → `/conductor/admin-console/rest`, the latter landing in a patch
+         * release). An operator who sets `http.path.prefix=/conductor` will collide with the
+         * platform's own reserved `{httpPathPrefix}/admin` system path (see
+         * https://github.com/NamazuStudios/namazu-conductor/issues/24) — that risk is knowingly
+         * accepted here in favor of compatibility; such an operator can override the
+         * `dev.getelements.elements.element.rs.root` attribute directly. Must stay in sync with the
+         * client-side copy in `admin/ui/superuser/api.ts`.
          */
         @JvmField
-        @ElementDefaultAttribute(value = "$NAMESPACE/rest")
+        @ElementDefaultAttribute(value = "/conductor/admin")
         val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
-
-        /**
-         * Serves the dashboard UI plugin bundle: `http://<host>/app/ui/conductor-admin-console/...`.
-         *
-         * Deliberately kept under the SDK's default `/app/ui/` prefix rather than under [NAMESPACE]
-         * like [WS_ROOT]/[RS_ROOT] — the admin console dashboard frontend's plugin loader
-         * (`extractUiBasePaths()` in `elements-web-ui`) only recognizes a deployed container's UI
-         * content if its URI contains the literal substring `/app/ui/`; anything else is silently
-         * never fetched, so the plugin never appears in the sidebar, even though the backend serves
-         * it correctly (see https://github.com/NamazuStudios/elements/issues/102). The segment name
-         * is `conductor-admin-console` rather than the raw package name
-         * (`dev.getelements.conductor.admin`) to avoid the reserved-system-path collision that
-         * originally motivated overriding this attribute in the first place ("Static content path
-         * '/app/ui/dev.getelements.conductor.admin' is inside a reserved system API path").
-         */
-        @JvmField
-        @ElementDefaultAttribute(value = "/app/ui/conductor-admin-console")
-        val UI_CONTENT_URI: String = "dev.getelements.element.ui.uri"
 
     }
 

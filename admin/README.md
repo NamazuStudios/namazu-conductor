@@ -5,7 +5,7 @@ The `admin` module provides a superuser-only dashboard page and a matching REST 
 ## What it does
 
 - **Dashboard page** — appears in the Elements dashboard under **Conductor** (Layers icon) in the superuser sidebar. Shows a green / yellow / red status indicator and a full table of job profiles for each deployed provider, including all provider-specific metadata fields.
-- **REST endpoint** — `GET /conductor/admin-console/rest/profiles` aggregates profile data from every deployed `OrchestrationService` at request time. No static provider configuration is required; new providers are picked up automatically.
+- **REST endpoint** — `GET /conductor/admin/profiles` aggregates profile data from every deployed `OrchestrationService` at request time. No static provider configuration is required; new providers are picked up automatically.
 
 ## Deployment
 
@@ -28,15 +28,15 @@ The admin element has no required configuration. Both attributes have sensible d
 | Attribute | Key | Default | Description |
 |---|---|---|---|
 | Auth enabled | `dev.getelements.elements.auth.enabled` | `true` | Enables the Elements auth filter. Set to `false` only in isolated development environments. |
-| REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin-console/rest` | Base path for the JAX-RS application. Change this only if another element already occupies that path. |
-| WebSocket root | `dev.getelements.elements.element.ws.root` | `/conductor/admin-console/ws` | Base path for the terminal WebSocket endpoints. Must stay distinct from the REST root (see the field doc on `WS_ROOT` in `ConductorAdminApplication.kt`). |
-| UI content root | `dev.getelements.element.ui.uri` | `/app/ui/conductor-admin-console` | Base path the dashboard UI plugin bundle is served from. Deliberately kept under `/app/ui/` — the dashboard's plugin loader only discovers UI content whose URI contains that literal substring, so anything else silently never appears in the sidebar (see [NamazuStudios/elements#102](https://github.com/NamazuStudios/elements/issues/102)). |
+| REST root | `dev.getelements.elements.element.rs.root` | `/conductor/admin` | Base path for the JAX-RS application. The original 1.1 path, restored for backward compatibility. Change this only if another element already occupies that path, or if your `http.path.prefix` is `/conductor` (see [NamazuStudios/namazu-conductor#24](https://github.com/NamazuStudios/namazu-conductor/issues/24)). |
+| WebSocket root | `dev.getelements.elements.element.ws.root` | `/conductor/ws` | Base path for the terminal WebSocket endpoints. Must stay distinct from the REST root (see the field doc on `WS_ROOT` in `ConductorAdminApplication.kt`). |
+| UI content root | `dev.getelements.element.ui.uri` | *(no override)* | Base path the dashboard UI plugin bundle is served from. No override needed — the platform's implicit `/app/ui/{package name}` default already satisfies the dashboard's plugin loader (see [NamazuStudios/elements#102](https://github.com/NamazuStudios/elements/issues/102)) for a normal single-deployment install. |
 
 You can safely override any of these per-deployment — the dashboard UI discovers its own REST/WS roots at runtime (via the platform's `GET /api/rest/elements/system`, which reports each element's live, resolved attributes) rather than assuming the compiled-in defaults, so it doesn't need a matching frontend rebuild.
 
 ## REST API
 
-### `GET /conductor/admin-console/rest/profiles`
+### `GET /conductor/admin/profiles`
 
 Returns the current profile list from every deployed `OrchestrationService` provider.
 
@@ -83,8 +83,8 @@ Terminal sessions attach over WebSocket under the configured WS root (see `WS_RO
 
 | Endpoint | Purpose |
 |---|---|
-| `/service/{jobId}` | Attaches to the job's primary container |
-| `/service/{jobId}/{containerId}` | Attaches to a specific non-primary container |
+| `/conductor/ws/service/{jobId}` | Attaches to the job's primary container |
+| `/conductor/ws/service/{jobId}/{containerId}` | Attaches to a specific non-primary container |
 
 **Handshake:** the client connects with no query parameters — browsers can't set an `Authorization`
 header on the native `WebSocket()` constructor, so authorization instead happens over the connection

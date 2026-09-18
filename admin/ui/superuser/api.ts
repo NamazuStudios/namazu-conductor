@@ -10,8 +10,8 @@ const WS_ROOT_ATTRIBUTE = 'dev.getelements.elements.element.ws.root'
 
 // Used only if attribute discovery (below) fails or returns something unusable — must match
 // ConductorAdminApplication's compiled-in @ElementDefaultAttribute values.
-const FALLBACK_REST_ROOT = '/conductor/admin-console/rest'
-const FALLBACK_WS_ROOT = '/conductor/admin-console/ws'
+const FALLBACK_REST_ROOT = '/conductor/admin'
+const FALLBACK_WS_ROOT = '/conductor/ws'
 
 export function authHeaders(): Record<string, string> {
   const token = window.__elementsApiClient?.getSessionToken?.()
