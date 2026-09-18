@@ -1,4 +1,5 @@
 import React from 'react'
+import { marked } from 'marked'
 import type { JobExecution } from './types'
 
 const h = React.createElement
@@ -38,6 +39,33 @@ export function Accordion(props: {
       h('div', { className: 'flex-1 min-w-0' }, props.header)),
     props.isExpanded && props.children &&
       h('div', { className: 'border-t px-4 py-3' }, props.children))
+}
+
+/**
+ * Renders provider/profile-authored Markdown (job descriptions, job-set notes). `breaks: true` turns
+ * single newlines into `<br>` — these strings typically come from a Kubernetes annotation or ECS tag
+ * value authored with plain newlines (no blank-line-separated paragraphs), which without this option
+ * `marked` collapses into one run-on paragraph, making the source's line structure disappear entirely.
+ */
+export function MarkdownBlock(props: { markdown: string; className?: string }) {
+  const html = React.useMemo(
+    () => marked.parse(props.markdown, { async: false, breaks: true, gfm: true }) as string,
+    [props.markdown],
+  )
+  return h('div', {
+    className: `prose prose-sm max-w-none ${props.className ?? ''}`,
+    dangerouslySetInnerHTML: { __html: html },
+  })
+}
+
+/** A `MarkdownBlock` behind its own `Accordion` toggle, independent of any enclosing row's expand state. */
+export function CollapsibleMarkdown(props: { markdown: string; label?: string; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = React.useState(props.defaultExpanded ?? true)
+  return h(Accordion, {
+    isExpanded: expanded,
+    onToggle: () => setExpanded((v) => !v),
+    header: h('span', { className: 'text-xs font-medium text-muted-foreground' }, props.label ?? 'Description'),
+  }, h(MarkdownBlock, { markdown: props.markdown, className: 'text-sm' }))
 }
 
 export function Pagination(props: { page: number; pageCount: number; onChange: (page: number) => void }) {

@@ -1,7 +1,6 @@
 import React from 'react'
-import { marked } from 'marked'
 import { fetchJobs, stopJob } from './api'
-import { Accordion, DetailGrid } from './ui'
+import { Accordion, DetailGrid, MarkdownBlock } from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
 
@@ -142,10 +141,7 @@ export function RunningJobsSection() {
       className: 'rounded-lg border bg-muted/30 p-3 mb-2',
     },
       h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
-      h('div', {
-        className: 'prose prose-sm max-w-none text-sm',
-        dangerouslySetInnerHTML: { __html: marked.parse(p.jobSetDescription as string, { async: false }) as string },
-      }))),
+      h(MarkdownBlock, { markdown: p.jobSetDescription as string, className: 'text-sm' }))),
     !data.loading && allExecutions.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
     allExecutions.length > 0 &&
