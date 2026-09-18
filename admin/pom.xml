@@ -46,27 +46,6 @@
             <groupId>dev.getelements.elements</groupId>
             <artifactId>sdk-jakarta-rs</artifactId>
         </dependency>
-        <!--
-            Backs TerminalTicketStore with the same shared, per-instance MongoDB the platform's own
-            sessions use, instead of an in-JVM map (see admin's own package-info.java for why: an
-            in-memory ticket store doesn't survive a rolling redeploy across multiple admin instances).
-            Both `provided` — the platform already runs on MongoDB, so its own runtime classpath
-            already carries the driver; bundling a second copy in this .elm's lib/ would risk a
-            classloader conflict (same reasoning as jakarta.websocket-client-api below).
-        -->
-        <dependency>
-            <groupId>dev.getelements.elements</groupId>
-            <artifactId>sdk-mongo</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mongodb</groupId>
-            <artifactId>mongodb-driver-sync</artifactId>
-            <!-- Must match the mongodb-driver-core version the SDK's own transitive graph resolves
-                 to (4.10.2) — a mismatched pair throws NoClassDefFoundError at runtime. -->
-            <version>4.10.2</version>
-            <scope>provided</scope>
-        </dependency>
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
@@ -104,6 +83,11 @@
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core</artifactId>
+            <version>1.8.1</version>
         </dependency>
     </dependencies>
 

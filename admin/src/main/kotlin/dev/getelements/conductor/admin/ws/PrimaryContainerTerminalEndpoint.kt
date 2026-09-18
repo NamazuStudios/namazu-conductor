@@ -9,7 +9,8 @@ import jakarta.websocket.server.PathParam
 import jakarta.websocket.server.ServerEndpoint
 
 /**
- * Attaches to a job's primary container's stdio: `ws://.../service/{jobId}?ticket=...`. See
+ * Attaches to a job's primary container's stdio: `ws://.../service/{jobId}`. The connection is
+ * authorized by the first WebSocket text frame the client sends, not a query parameter — see
  * [TerminalSessionHandler] for the shared session logic and [ContainerTerminalEndpoint] for the
  * per-container equivalent.
  */

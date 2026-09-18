@@ -105,8 +105,3 @@ export async function stopJob(element: string, id: string) {
   const root = await resolveRestRoot()
   return postJson<void>(`${root}/jobs/stop`, { element, id })
 }
-
-export async function mintTerminalTicket(jobId: string, containerId: string | null, command?: string[]) {
-  const root = await resolveRestRoot()
-  return postJson<{ ticket: string }>(`${root}/jobs/terminal-ticket`, { jobId, containerId, command })
-}

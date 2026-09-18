@@ -15,7 +15,7 @@ function statusColorClasses(status: string): string {
 }
 
 /**
- * Per-container "Attach Terminal" row, with an optional command override — like `kubectl exec` vs
+ * Per-container "Launch Terminal" row, with an optional command override — like `kubectl exec` vs
  * `kubectl attach`. Left blank, attaches with the provider's default (e.g. a shell); a naive
  * whitespace-split of whatever's typed otherwise, which is an intentional simplification for this
  * advanced/power-user path (not full shell quoting/parsing).
@@ -24,7 +24,7 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
   const { container: c } = props
   const [command, setCommand] = React.useState(() => (c.defaultCommand ?? []).join(' '))
 
-  function handleAttach() {
+  function handleLaunch() {
     const tokens = command.trim().split(/\s+/).filter(Boolean)
     terminalSessionManager.open(props.element, props.jobId, c.primary ? null : c.id, props.label, tokens.length > 0 ? tokens : undefined)
   }
@@ -34,6 +34,7 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
     h('input', {
       value: command,
       onChange: (e: React.ChangeEvent<HTMLInputElement>) => setCommand(e.target.value),
+      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter' && props.running) handleLaunch() },
       placeholder: '/bin/sh (optional)',
       className: 'w-40 rounded border bg-background px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary',
       title: 'Command to exec instead of the container’s default shell',
@@ -41,9 +42,9 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
     h('button', {
       disabled: !props.running,
       className: 'shrink-0 px-2.5 py-1 rounded border text-xs hover:bg-muted disabled:opacity-50 transition-colors',
-      onClick: handleAttach,
-      title: `Attach a terminal to container '${c.name}'`,
-    }, '▤ Attach Terminal'))
+      onClick: handleLaunch,
+      title: `Launch a terminal for container '${c.name}'`,
+    }, '🚀 Launch Terminal'))
 }
 
 function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; isExpanded: boolean; onToggle: () => void }) {

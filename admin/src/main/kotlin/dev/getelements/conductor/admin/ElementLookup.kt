@@ -13,6 +13,41 @@ import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
  */
 internal object ElementLookup {
 
+    private const val SDK_SERVICE_ELEMENT_NAME = "dev.getelements.elements.sdk.service"
+
+    /**
+     * Resolves [serviceClass] from the Element named [elementName]'s own
+     * [dev.getelements.elements.sdk.ServiceLocator], found by scanning the Element registry rather
+     * than via [dev.getelements.elements.sdk.ElementSupplier.getElementLocal] — the latter resolves
+     * via a `ServiceLoader` lookup keyed on the *calling class's own classloader*, which fails
+     * identically for a caller instantiated outside Guice/HK2 (e.g. by the JSR-356 WebSocket
+     * container) regardless of whether the target service lives in the caller's own Element's private
+     * module or in an entirely different, core platform Element — it's a classloader problem, not a
+     * visibility one (confirmed in production: `TerminalTicketStore`, bound and exposed from
+     * [dev.getelements.conductor.admin.guice.ConductorAdminModule], was unreachable this way from
+     * [ConductorAdminJobsResource], throwing `SdkServiceNotFoundException`). Scanning the registry for
+     * the named Element and reading *its* `serviceLocator` directly mirrors
+     * [forEachOrchestrationService]'s already-proven-working pattern for cross-Element lookups.
+     */
+    private fun <T> resolveService(callerClass: Class<*>, elementName: String, serviceClass: Class<T>): T {
+        val registry = ElementRegistrySupplier.getElementLocal(callerClass).get()
+        val element = registry.stream().toList().firstOrNull { it.elementRecord.definition().name() == elementName }
+            ?: error("$elementName not found in the Element registry")
+        return element.serviceLocator.getInstance(serviceClass)
+    }
+
+    /**
+     * Resolves [serviceClass] from the core platform's `dev.getelements.elements.sdk.service` Element
+     * — where core services like `SessionService`/`UserService` are actually exposed from (see
+     * `SessionService`'s `@ElementPublic @ElementServiceExport`). The platform's own
+     * `HttpServletAuthenticationFilter` (in `common-servlet`) is the sanctioned precedent for calling
+     * `SessionService.checkAndRefreshSessionIfNecessary(secret)` outside the JAX-RS filter chain, but
+     * it gets `SessionService` via plain HK2 `@Inject` — unavailable to callers with no DI context at
+     * all (e.g. [dev.getelements.conductor.admin.ws.TerminalSessionHandler]), hence [resolveService].
+     */
+    fun <T> findCoreService(callerClass: Class<*>, serviceClass: Class<T>): T =
+        resolveService(callerClass, SDK_SERVICE_ELEMENT_NAME, serviceClass)
+
     /**
      * Calls [action] once per deployed Element that exposes an [OrchestrationService], passing the
      * Element's name and its [OrchestrationService]. Elements that don't expose one (including the

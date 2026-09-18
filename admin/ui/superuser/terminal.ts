@@ -2,7 +2,7 @@ import React from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import xtermCss from '@xterm/xterm/css/xterm.css?inline'
-import { mintTerminalTicket, resolveWsRoot } from './api'
+import { resolveWsRoot } from './api'
 
 const h = React.createElement
 
@@ -25,7 +25,7 @@ const BELL_SOUND_PATH = new URL('complete.oga', BUNDLE_BASE_URL).href
 
 const BELL_VOLUME_STORAGE_KEY = 'conductor-terminal-bell-volume'
 
-/** `Session.ws` may still be the initial placeholder (mint-ticket failed before connect() ran). */
+/** `Session.ws` may still be the initial placeholder (connect() hasn't run yet, or threw before assigning it). */
 function runCatchingClose(ws: WebSocket | null) {
   try { ws?.close() } catch { /* already closed/never opened */ }
 }
@@ -148,31 +148,14 @@ class TerminalSessionManager {
   }
 
   /**
-   * Opens (or focuses/retries, if a session already exists) a terminal for `element`/`jobId`/
-   * `containerId`. `command` optionally execs a specific process for this session instead of
-   * attaching to the container's own — like `kubectl exec` vs `kubectl attach`. Omitting it reuses
-   * the same session key as any other default (no-command) attach to this container, so repeat clicks
-   * refocus/retry the same tab; specifying a command always opens a distinct new tab, since it's a
-   * semantically different request that shouldn't collide with (or silently replace) a plain attach.
+   * Opens a brand-new terminal for `element`/`jobId`/`containerId` — every call gets its own distinct
+   * session/tab, even if one is already open for the same job/container, so launching never silently
+   * refocuses or replaces a prior session. `command` optionally execs a specific process for this
+   * session instead of attaching to the container's own — like `kubectl exec` vs `kubectl attach`.
    */
   open(element: string, jobId: string, containerId: string | null, label: string, command?: string[]) {
     const baseKey = `${element}:${jobId}:${containerId ?? 'primary'}`
-    const key = command && command.length > 0 ? `${baseKey}:exec${this.execCounter++}` : baseKey
-
-    const existing = this.sessions.get(key)
-    if (existing) {
-      if (existing.status === 'connecting' || existing.status === 'open') {
-        this.setActive(key)
-        return
-      }
-      // A dead (errored/closed) session for this exact key — dispose it and fall through to open a
-      // genuinely fresh one instead of silently reactivating a tab that will never reconnect on its
-      // own. Without this, clicking "Attach Terminal" again after a failure looks like nothing
-      // happened at all: no new ticket minted, no new WebSocket, no request sent.
-      existing.term.dispose()
-      runCatchingClose(existing.ws)
-      this.sessions.delete(key)
-    }
+    const key = `${baseKey}:${this.execCounter++}`
 
     const container = document.createElement('div')
     container.style.width = '100%'
@@ -204,26 +187,25 @@ class TerminalSessionManager {
 
     term.writeln(`Connecting to ${label}…`)
 
-    mintTerminalTicket(jobId, containerId, command)
-      .then(({ ticket }) => this.connect(session, jobId, containerId, ticket))
-      .catch((e: Error) => {
-        term.writeln(`\r\nFailed to open terminal: ${e.message}`)
-        session.status = 'error'
-        this.notify()
-      })
+    this.connect(session, jobId, containerId, command).catch((e: Error) => {
+      term.writeln(`\r\nFailed to open terminal: ${e.message}`)
+      session.status = 'error'
+      this.notify()
+    })
   }
 
-  private async connect(session: Session, jobId: string, containerId: string | null, ticket: string) {
+  private async connect(session: Session, jobId: string, containerId: string | null, command?: string[]) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const wsRoot = await resolveWsRoot()
     const path = containerId ? `${wsRoot}/service/${jobId}/${containerId}` : `${wsRoot}/service/${jobId}`
-    const url = `${scheme}://${window.location.host}${path}?ticket=${encodeURIComponent(ticket)}`
+    const url = `${scheme}://${window.location.host}${path}`
 
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     session.ws = ws
 
     ws.onopen = () => {
+      ws.send(JSON.stringify({ sessionSecret: window.__elementsApiClient?.getSessionToken?.(), command }))
       session.status = 'open'
       session.term.reset()
       this.notify()
@@ -421,7 +403,7 @@ export function TerminalTabs() {
         h('h2', { className: 'text-lg font-semibold' }, 'Terminals'),
         indicator),
       h('p', { className: 'text-sm text-muted-foreground' },
-        'No terminals are currently open. Attach one from a running job’s container list.'))
+        'No terminals are currently open. Launch one from a running job’s container list.'))
   }
 
   const activeSession = sessions.find((s) => s.key === activeKey) ?? null

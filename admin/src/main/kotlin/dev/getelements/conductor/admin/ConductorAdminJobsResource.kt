@@ -4,12 +4,8 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.admin.model.ExecuteJobRequest
 import dev.getelements.conductor.admin.model.StopJobRequest
-import dev.getelements.conductor.admin.model.TerminalTicketRequest
-import dev.getelements.conductor.admin.model.TerminalTicketResponse
-import dev.getelements.conductor.admin.ws.TerminalTicketStore
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
-import dev.getelements.elements.sdk.ElementSupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
 import dev.getelements.elements.sdk.jakarta.rs.AuthSchemes
 import dev.getelements.elements.sdk.model.user.User
@@ -48,16 +44,6 @@ data class ProviderExecutionResult(
 class ConductorAdminJobsResource @Inject constructor(private val userService: UserService) {
 
     private val logger = LoggerFactory.getLogger(ConductorAdminJobsResource::class.java)
-
-    // JAX-RS resources in this SDK are instantiated by HK2 (bridged to Guice via guice-bridge), not
-    // constructed by Guice directly — the bridge doesn't expose every Guice binding to HK2's own
-    // dependency resolution (confirmed in production: adding TerminalTicketStore as a second
-    // constructor parameter broke *every* endpoint on this resource with
-    // UnsatisfiedDependencyException, since HK2 couldn't satisfy it at all). Reach it the same way
-    // TerminalSessionHandler does instead — that path never goes through HK2.
-    private val terminalTicketStore: TerminalTicketStore
-        get() = ElementSupplier.getElementLocal(ConductorAdminJobsResource::class.java).get().serviceLocator
-            .getInstance(TerminalTicketStore::class.java)
 
     private fun requireSuperuser(): User? {
         val user = userService.currentUser ?: return null
@@ -215,44 +201,6 @@ class ConductorAdminJobsResource @Inject constructor(private val userService: Us
                 .entity(mapOf("error" to (e.message ?: "Stop failed")))
                 .build()
         }
-    }
-
-    @POST
-    @Path("/terminal-ticket")
-    @Produces(MediaType.APPLICATION_JSON)
-    @Consumes(MediaType.APPLICATION_JSON)
-    @SecurityRequirement(name = AuthSchemes.SESSION_SECRET)
-    @Operation(
-        summary = "Mint a terminal WebSocket ticket",
-        description = "Mints a short-lived, single-use ticket authorizing a WebSocket connection to " +
-            "the job's stdio at /service/{jobId} (or /service/{jobId}/{containerId} for a non-primary " +
-            "container). Browsers can't set an Authorization header on the native WebSocket handshake, " +
-            "so this ticket is passed instead as a `?ticket=` query parameter. Requires SUPERUSER level."
-    )
-    @RequestBody(
-        description = "Terminal ticket request",
-        required = true,
-        content = [Content(schema = Schema(implementation = TerminalTicketRequest::class))]
-    )
-    @ApiResponse(responseCode = "200", description = "Ticket minted.")
-    @ApiResponse(responseCode = "403", description = "Not authenticated or insufficient privilege level.")
-    @ApiResponse(responseCode = "404", description = "Job (or container) not found on any deployed provider.")
-    fun mintTerminalTicket(request: TerminalTicketRequest): Response {
-        requireSuperuser() ?: return Response.status(Response.Status.FORBIDDEN).build()
-
-        val lookup = ElementLookup.findByJobId(ConductorAdminJobsResource::class.java, request.jobId)
-            ?: return Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Job not found: ${request.jobId}"))
-                .build()
-
-        if (request.containerId != null && lookup.execution.containers.none { it.id == request.containerId }) {
-            return Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "Container not found: ${request.containerId}"))
-                .build()
-        }
-
-        val ticket = terminalTicketStore.mint(request.jobId, request.containerId, request.command)
-        return Response.ok(TerminalTicketResponse(ticket)).build()
     }
 
 }

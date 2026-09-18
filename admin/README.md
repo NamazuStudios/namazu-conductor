@@ -77,6 +77,39 @@ Returns the current profile list from every deployed `OrchestrationService` prov
 | `403 Forbidden` | Not authenticated, or user is not `SUPERUSER` |
 | `503 Service Unavailable` | No `OrchestrationService` providers are deployed |
 
+## WebSocket API
+
+Terminal sessions attach over WebSocket under the configured WS root (see `WS_ROOT` above):
+
+| Endpoint | Purpose |
+|---|---|
+| `/service/{jobId}` | Attaches to the job's primary container |
+| `/service/{jobId}/{containerId}` | Attaches to a specific non-primary container |
+
+**Handshake:** the client connects with no query parameters — browsers can't set an `Authorization`
+header on the native `WebSocket()` constructor, so authorization instead happens over the connection
+itself. The very first WebSocket **text** frame the client sends must be a JSON payload:
+
+```json
+{
+  "sessionSecret": "<a valid Elements session secret>",
+  "command": ["optional", "override", "argv"]
+}
+```
+
+`command` is optional; when omitted, the provider execs its own default (typically a shell). The
+server closes the connection with close code `VIOLATED_POLICY` if this frame doesn't arrive within 10
+seconds of connecting, is malformed, carries an invalid or expired session secret, or belongs to a
+user below `SUPERUSER` level. `UNEXPECTED_CONDITION` is used instead if authorization succeeds but the
+provider fails to open stdio for the job/container.
+
+**Steady-state framing**, once authorized:
+
+| Frame type | Direction | Contents |
+|---|---|---|
+| Binary | Both | Raw stdio bytes — keystrokes client→server, pty output server→client |
+| Text | Client→server only | Resize control message: `{"type":"resize","cols":N,"rows":N}` |
+
 ## Dashboard status indicator
 
 | Indicator | Meaning |
