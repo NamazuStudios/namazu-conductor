@@ -110,6 +110,29 @@ provider fails to open stdio for the job/container.
 | Binary | Both | Raw stdio bytes — keystrokes client→server, pty output server→client |
 | Text | Client→server only | Resize control message: `{"type":"resize","cols":N,"rows":N}` |
 
+### Toast notifications (bell-adjacent)
+
+A job/container can surface a toast in the operator's dashboard (in addition to, or instead of, an
+audible bell) by writing a custom OSC (Operating System Command) escape sequence to its own stdout:
+
+```
+\x1b]9001;<message>\x07
+```
+
+e.g. from a shell: `printf '\e]9001;Build finished\a'`. `<message>` is free text (avoid embedding a
+literal `BEL`/`0x07`, which terminates the sequence, or `ESC`, which starts a new one).
+
+This travels in-band over the existing binary pty stream — there is no separate WebSocket frame type
+for it, and no server-side involvement — the dashboard's terminal (xterm.js) parses the OSC sequence
+client-side using the same parser that already recognizes the plain `BEL` control character for the
+audible bell. `9001` is an arbitrary, unassigned OSC number chosen to avoid colliding with established
+conventions (OSC 9 iTerm2 growl, OSC 777 konsole/xterm notify, OSC 1337 iTerm2 proprietary). See
+[#37](https://github.com/NamazuStudios/namazu-conductor/issues/37).
+
+The dashboard keeps a ring buffer of the last 200 toasts (shared across a session's terminal tabs,
+alongside bell volume), shown via a history menu next to the existing bell volume/mute controls, plus
+a transient popup per toast that the operator can dismiss individually or let auto-expire.
+
 ## Dashboard status indicator
 
 | Indicator | Meaning |
