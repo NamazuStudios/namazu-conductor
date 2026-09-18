@@ -323,6 +323,35 @@ mvn install -Pbuild-ui
 
 `StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
 
+`EcsOrchestrationServiceIT` is likewise currently disabled (`@Test(enabled = false)` on every test method — disabling all of them also skips `@BeforeClass`/`@AfterClass`, so no CloudFormation stack gets created at all). Root cause: AWS GuardDuty's EC2 Runtime Monitoring auto-injects a security group into the test VPC that CloudFormation can't clean up, leaving the stack's `Vpc` resource stuck `DELETE_IN_PROGRESS` and blocking the next run's stack creation with a name collision. See https://github.com/NamazuStudios/namazu-conductor/issues/35 for the fix and re-enable it once that lands.
+
 `EcsOrchestrationServiceIT`'s CloudFormation stack is created fresh and torn down every run by default. For faster local iteration on the `ecs` module, `ecs/cloudformation/start-integration-test-stack.sh` / `stop-integration-test-stack.sh` let you start it once for a work session and reuse it across repeated `CFN_KEEP_STACK=true mvn verify -pl ecs` runs — see `ecs/README.md`'s "Faster local iteration" section (leaving it running costs ~$10-20/month, so stop it when done).
+
+**Known failure mode — stuck `conductor-integration-test` stack deletion:** AWS GuardDuty's EC2
+Runtime Monitoring auto-injects a `GuardDutyManagedSecurityGroup-*` into the test VPC whenever an
+EC2-launch-type task runs. CloudFormation doesn't own that security group and can't delete it, and
+a VPC can't be deleted while any non-default security group remains in it — so the stack's `Vpc`
+resource can sit in `DELETE_IN_PROGRESS` indefinitely, and the *next* run's stack creation then
+fails outright on a name collision with the still-deleting stack. Tracked in
+[#35](https://github.com/NamazuStudios/namazu-conductor/issues/35) for a permanent fix (teardown
+should delete this security group itself before triggering the stack deletion).
+
+If a CI run (or local `mvn verify -pl ecs`) sits with no forward progress for several minutes past
+when its own CFN stack lifecycle would normally complete (~8-12 minutes total), check for this
+condition and intervene rather than waiting indefinitely:
+```
+aws cloudformation describe-stack-events --region us-east-1 --stack-name conductor-integration-test \
+  | jq -r '.StackEvents[0] | "\(.Timestamp) \(.ResourceStatus) \(.LogicalResourceId)"'
+```
+If the most recent event is `Vpc DELETE_IN_PROGRESS` with no newer events for several minutes,
+confirm no instances/ENIs remain (`aws ec2 describe-instances`/`describe-network-interfaces`
+filtered by the stack's tag), then delete the orphaned GuardDuty security group directly to unblock
+CloudFormation's own retry — do **not** force-delete the VPC itself out from under CloudFormation,
+which can leave the stack in a worse `DELETE_FAILED` state:
+```
+aws ec2 describe-security-groups --region us-east-1 --filters "Name=vpc-id,Values=<vpc-id>"
+aws ec2 delete-security-group --region us-east-1 --group-id <GuardDutyManagedSecurityGroup id>
+```
+CloudFormation will then complete the VPC deletion on its own within the next reconciliation pass.
 
 CI itself is not redundant with a manual run: `snapshot-publish.yaml` is the single source of IT verification for every push to `main` (PR CI already covers the branch beforehand). `release.yaml` deliberately does **not** re-run the IT suites — it verifies the release commit already has a successful `snapshot-publish.yaml` run for it and fails loudly if not, rather than paying for a third redundant execution of the same tests.
