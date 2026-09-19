@@ -122,7 +122,10 @@ class KubernetesOrchestrationService @Inject constructor(
         val annotations = template.metadata?.annotations ?: emptyMap()
 
         val kind = workloadKindOf(annotations)
-        if (kind == WorkloadKind.DAEMON) return null
+        // DAEMON templates surface via getAvailableDaemons() instead; HELM has no PodTemplate-driven
+        // dispatch at all (execute() always rejects it -- see its own WorkloadKind.HELM branch), so a
+        // PodTemplate declaring it would never be usefully offered here either.
+        if (kind == WorkloadKind.DAEMON || kind == WorkloadKind.HELM) return null
 
         val templateName = template.metadata?.name ?: return null
 
@@ -294,6 +297,12 @@ class KubernetesOrchestrationService @Inject constructor(
             }
             WorkloadKind.DAEMON ->
                 throw JobException("PodTemplate '${profile.name}' is workload-kind 'daemon'; use deploy() instead of execute()")
+            WorkloadKind.HELM ->
+                throw JobException(
+                    "PodTemplate '${profile.name}' is workload-kind 'helm' -- this provider only discovers " +
+                        "and tears down an already-installed Helm release (see WorkloadKind.HELM); it cannot " +
+                        "install one from a PodTemplate, which has no chart/values to install from"
+                )
         }
 
         createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef)
@@ -605,23 +614,75 @@ class KubernetesOrchestrationService @Inject constructor(
         client.pods().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
             .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
             .filter { pod -> pod.metadata?.deletionTimestamp == null }
-            .forEach { pod ->
-                val name = pod.metadata?.name ?: return@forEach
-                val id = encodeId(namespace, WorkloadKind.POD, name)
+            .forEach pod@{ pod ->
+                val podName = pod.metadata?.name ?: return@pod
+                val annotations = pod.metadata?.annotations ?: emptyMap()
                 val status = mapPodPhase(pod.status?.phase)
+                val containers = containerRefsFor(pod.spec?.containers ?: emptyList(), annotations)
+
+                if (workloadKindOf(annotations) == WorkloadKind.HELM) {
+                    val releaseName = annotations[ANN_HELM_RELEASE]
+                    if (releaseName.isNullOrBlank()) {
+                        logger.warn(
+                            "pod '{}' in namespace '{}' declares workload-kind=helm but has no {} " +
+                                "annotation -- skipping, can't be torn down without a release name",
+                            podName, namespace, ANN_HELM_RELEASE
+                        )
+                        return@pod
+                    }
+                    // No mapEndpoints() here: it resolves a Service/Pod by the id's own name, which for
+                    // HELM is the release name, not this marker pod's name or necessarily its Service's
+                    // name either -- resolving that correctly would mean parsing the chart's own naming
+                    // scheme, which this provider has no visibility into. Left empty rather than guessed.
+                    executions += JobExecution(
+                        id = encodeId(namespace, WorkloadKind.HELM, releaseName),
+                        status = status,
+                        details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
+                        containers = containers
+                    )
+                    return@pod
+                }
+
+                val id = encodeId(namespace, WorkloadKind.POD, podName)
                 executions += JobExecution(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = name),
-                    containers = containerRefsFor(pod.spec?.containers ?: emptyList(), pod.metadata?.annotations ?: emptyMap())
+                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = podName),
+                    containers = containers
                 )
             }
 
         // Batch Jobs
         client.batch().v1().jobs().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
-            .forEach { job ->
-                val name = job.metadata?.name ?: return@forEach
+            .forEach job@{ job ->
+                val jobName = job.metadata?.name ?: return@job
+                val jobAnnotations = job.spec?.template?.metadata?.annotations ?: emptyMap()
+                val containers = containerRefsFor(
+                    job.spec?.template?.spec?.containers ?: emptyList(),
+                    jobAnnotations
+                )
+
+                if (workloadKindOf(jobAnnotations) == WorkloadKind.HELM) {
+                    val releaseName = jobAnnotations[ANN_HELM_RELEASE]
+                    if (releaseName.isNullOrBlank()) {
+                        logger.warn(
+                            "job '{}' in namespace '{}' declares workload-kind=helm but has no {} " +
+                                "annotation -- skipping, can't be torn down without a release name",
+                            jobName, namespace, ANN_HELM_RELEASE
+                        )
+                        return@job
+                    }
+                    executions += JobExecution(
+                        id = encodeId(namespace, WorkloadKind.HELM, releaseName),
+                        status = mapJobStatus(namespace, jobName, job),
+                        details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
+                        containers = containers
+                    )
+                    return@job
+                }
+
+                val name = jobName
                 val id = encodeId(namespace, WorkloadKind.JOB, name)
                 val status = mapJobStatus(namespace, name, job)
                 executions += JobExecution(
@@ -629,10 +690,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name),
-                    containers = containerRefsFor(
-                        job.spec?.template?.spec?.containers ?: emptyList(),
-                        job.spec?.template?.metadata?.annotations ?: emptyMap()
-                    )
+                    containers = containers
                 )
             }
 
@@ -717,6 +775,12 @@ class KubernetesOrchestrationService @Inject constructor(
             }
             WorkloadKind.DAEMON ->
                 throw JobException("Execution '$name' is a daemon; use getStatus() instead of getFutureForStatus()")
+            WorkloadKind.HELM ->
+                throw JobException(
+                    "Execution '$name' is workload-kind 'helm'; its status is already resolved " +
+                        "synchronously by listExecutions() -- getFutureForStatus()/getStageForStatus() " +
+                        "are not supported for it"
+                )
         }
 
         future.whenComplete { _, _ -> watch.close() }
@@ -762,6 +826,13 @@ class KubernetesOrchestrationService @Inject constructor(
                 .delete()
             WorkloadKind.DAEMON ->
                 throw JobException("Execution '$name' is a daemon; use undeploy() instead of stop()")
+            WorkloadKind.HELM -> {
+                // helm uninstall tears down every resource the chart owns itself (Services, PVCs,
+                // everything) -- there's no separate "owned Service" for this provider to additionally
+                // delete below the way there is for POD/JOB, so this returns straight out of stop().
+                stopHelmRelease(ns, name)
+                return
+            }
         }
 
         if (deleted.isEmpty()) {
@@ -775,6 +846,39 @@ class KubernetesOrchestrationService @Inject constructor(
 
         // Delete any owned Service. No-op when none was created.
         client.services().inNamespace(ns).withName(name).delete()
+    }
+
+    /**
+     * Runs `helm uninstall <releaseName> --namespace <ns>` as a subprocess -- the only way to
+     * correctly tear down a release this provider never created itself (see [WorkloadKind.HELM]).
+     * Requires the `helm` binary on `PATH` and relies on the same in-cluster kubeconfig
+     * auto-detection the Fabric8 client already uses elsewhere in this class.
+     *
+     * A "release: not found" exit is treated the same permissive way [stop] already treats an
+     * already-gone POD/JOB (log and return rather than throw), so a panel-initiated stop racing an
+     * already-uninstalled release doesn't surface as an error.
+     */
+    private fun stopHelmRelease(ns: String, releaseName: String) {
+        val process = ProcessBuilder("helm", "uninstall", releaseName, "--namespace", ns)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText()
+        val exitCode = process.waitFor()
+
+        if (exitCode != 0) {
+            if (output.contains("release: not found", ignoreCase = true)) {
+                logger.warn(
+                    "stop(): helm release '{}' in namespace '{}' already gone — nothing to uninstall",
+                    releaseName, ns
+                )
+                return
+            }
+            throw JobException(
+                "helm uninstall '$releaseName' --namespace '$ns' failed (exit $exitCode): ${output.trim()}"
+            )
+        }
+
+        logger.debug("stop(): helm uninstall '{}' in namespace '{}' succeeded", releaseName, ns)
     }
 
     /**
@@ -810,6 +914,8 @@ class KubernetesOrchestrationService @Inject constructor(
                 )
             WorkloadKind.DAEMON ->
                 throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming for daemon executions")
+            WorkloadKind.HELM ->
+                throw UnsupportedOperationException("${this::class.simpleName} does not support stdio streaming for helm executions")
         }
 
         val resource = client.pods().inNamespace(ns).withName(podName)
@@ -888,6 +994,11 @@ class KubernetesOrchestrationService @Inject constructor(
             }
             WorkloadKind.DAEMON ->
                 throw JobException("Execution '$name' is a daemon; use getStatus() instead of getFutureForStatus()")
+            WorkloadKind.HELM ->
+                throw JobException(
+                    "Execution '$name' is workload-kind 'helm'; its status is already resolved " +
+                        "synchronously by listExecutions()"
+                )
         }
     }
 
@@ -910,6 +1021,10 @@ class KubernetesOrchestrationService @Inject constructor(
             WorkloadKind.POD -> client.pods().inNamespace(ns).withName(name).get()
             WorkloadKind.JOB -> locatePod(ns, name)
             WorkloadKind.DAEMON -> null
+            // name is the release name for HELM, not a Pod/Service this provider can look up directly
+            // (see listExecutions()'s own comment on the same limitation) -- degrades to no endpoints,
+            // same as DAEMON, rather than guessing at the chart's own naming scheme.
+            WorkloadKind.HELM -> null
         } ?: return emptyList()
 
         val host = pod.status?.podIP ?: return emptyList()
@@ -1120,6 +1235,8 @@ class KubernetesOrchestrationService @Inject constructor(
         const val LABEL_OWNED_BY = "namazu.conductor/owned-by"
 
         const val ANN_WORKLOAD_KIND = "namazu.conductor/workload-kind"
+
+        const val ANN_HELM_RELEASE = "namazu.conductor/helm-release"
 
         const val ANN_EXPOSE_PORTS = "namazu.conductor/expose-ports"
 
