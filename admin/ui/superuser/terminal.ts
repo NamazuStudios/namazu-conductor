@@ -412,7 +412,14 @@ class TerminalSessionManager {
   private async connect(session: Session, jobId: string, containerId: string | null, command?: string[]) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const wsRoot = await resolveWsRoot()
-    const path = containerId ? `${wsRoot}/service/${jobId}/${containerId}` : `${wsRoot}/service/${jobId}`
+    // jobId (e.g. "$namespace:$kind:$name" for Kubernetes) contains literal colons — encode both path
+    // components rather than interpolating raw, since some proxies/WAFs in front of the Elements
+    // server mishandle unencoded colons in a path segment. Transparent server-side: Jetty's JSR-356
+    // @ServerEndpoint path-template matching decodes path params automatically, and neither value can
+    // ever contain a literal '/', so this can't introduce a spurious segment boundary.
+    const path = containerId
+      ? `${wsRoot}/service/${encodeURIComponent(jobId)}/${encodeURIComponent(containerId)}`
+      : `${wsRoot}/service/${encodeURIComponent(jobId)}`
     const url = `${scheme}://${window.location.host}${path}`
 
     const ws = new WebSocket(url)
