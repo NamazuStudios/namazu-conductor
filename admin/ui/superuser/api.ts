@@ -18,6 +18,13 @@ export function authHeaders(): Record<string, string> {
   return token ? { 'Elements-SessionSecret': token } : {}
 }
 
+/** The operator's own live session secret — used by the "Inject my session secret" run option
+ * (see `namazu.conductor/session-secret-env` in kubernetes/README.md), not for authenticating this
+ * dashboard's own requests (that's authHeaders above). */
+export function getSessionSecret(): string | undefined {
+  return window.__elementsApiClient?.getSessionToken?.()
+}
+
 let ownAttributesPromise: Promise<Record<string, unknown>> | null = null
 
 /**

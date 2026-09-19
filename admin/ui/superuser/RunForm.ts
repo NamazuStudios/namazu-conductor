@@ -15,15 +15,20 @@ export interface AdvancedOptions {
   env: KVPair[]
   placement: PlacementInput
   tty: boolean
+  /** Whether to add the operator's own session secret to `env` at launch time — see
+   * `namazu.conductor/session-secret-env`/`enable-session-secret` in kubernetes/README.md. Only
+   * meaningful (and only ever shown as a checkbox) when the profile declares an env var to put it in. */
+  injectSessionSecret: boolean
 }
 
-export function defaultAdvancedOptions(impliedTerminal: boolean): AdvancedOptions {
+export function defaultAdvancedOptions(impliedTerminal: boolean, injectSessionSecretByDefault = false): AdvancedOptions {
   return {
     args: [],
     command: impliedTerminal ? TERMINAL_COMMAND_SUGGESTION : [],
     env: [],
     placement: { type: '', region: '', ip: '', lat: '', lon: '' },
     tty: impliedTerminal,
+    injectSessionSecret: injectSessionSecretByDefault,
   }
 }
 
@@ -46,8 +51,13 @@ export function derivePlacementList(placement: PlacementInput): unknown[] {
  * no own `executeJob` call. The single "Run" button (in `AvailableJobsPage`'s `ProfileRow`) reads
  * whatever's currently here when clicked; this component just edits `props.value` via `props.onChange`.
  */
-export function RunForm(props: { value: AdvancedOptions; onChange: (value: AdvancedOptions) => void }) {
-  const { value, onChange } = props
+export function RunForm(props: {
+  value: AdvancedOptions
+  onChange: (value: AdvancedOptions) => void
+  /** Env var name from `namazu.conductor/session-secret-env` — absent hides the checkbox entirely. */
+  sessionSecretEnvVar?: string
+}) {
+  const { value, onChange, sessionSecretEnvVar } = props
 
   const updateListItem = (key: 'args' | 'command', i: number, val: string) =>
     onChange({ ...value, [key]: value[key].map((v, j) => (j === i ? val : v)) })
@@ -121,5 +131,15 @@ export function RunForm(props: { value: AdvancedOptions; onChange: (value: Advan
       }),
       h('span', null, 'Run as terminal job'),
       h('span', { className: 'text-xs text-muted-foreground' },
-        '(allocates a pty; attach a terminal from Running Jobs once it starts — Kubernetes jobs only)')))
+        '(allocates a pty; attach a terminal from Running Jobs once it starts — Kubernetes jobs only)')),
+
+    sessionSecretEnvVar && h('label', { className: 'flex items-center gap-2 text-sm cursor-pointer' },
+      h('input', {
+        type: 'checkbox',
+        checked: value.injectSessionSecret,
+        onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, injectSessionSecret: e.target.checked }),
+      }),
+      h('span', null, 'Inject my session secret'),
+      h('span', { className: 'text-xs text-muted-foreground' },
+        `(sets $${sessionSecretEnvVar} to your current session secret — visible to anything running in the container)`)))
 }

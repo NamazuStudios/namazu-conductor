@@ -148,7 +148,9 @@ class KubernetesOrchestrationService @Inject constructor(
             completions = parseIntAnnotation(templateName, annotations, ANN_COMPLETIONS),
             parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM),
             terminalJob = terminalJob,
-            description = annotations[ANN_DESCRIPTION]
+            description = annotations[ANN_DESCRIPTION],
+            sessionSecretEnv = annotations[ANN_SESSION_SECRET_ENV]?.trim()?.ifBlank { null },
+            sessionSecretEnabledByDefault = annotations[ANN_ENABLE_SESSION_SECRET]?.trim()?.toBoolean() ?: false
         )
     }
 
@@ -1136,6 +1138,10 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_TERMINAL_JOB = "namazu.conductor/terminal-job"
 
         const val ANN_DESCRIPTION = "namazu.conductor/description"
+
+        const val ANN_SESSION_SECRET_ENV = "namazu.conductor/session-secret-env"
+
+        const val ANN_ENABLE_SESSION_SECRET = "namazu.conductor/enable-session-secret"
 
         const val ANN_DEFAULT_CONTAINER_EXEC_PREFIX = "namazu.conductor/default-container-exec."
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { executeJob, fetchProfiles } from './api'
+import { executeJob, fetchProfiles, getSessionSecret } from './api'
 import { Accordion, CollapsibleMarkdown, ErrorBoundary, MarkdownBlock, Pagination, StatusIndicator } from './ui'
 import { RunForm, defaultAdvancedOptions, derivePlacementList } from './RunForm'
 import type { AdvancedOptions } from './RunForm'
@@ -22,13 +22,21 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   const [startError, setStartError] = React.useState<string | null>(null)
   const [startedId, setStartedId] = React.useState<string | null>(null)
   const isTerminalJob = Boolean(profile.terminalJob)
-  const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() => defaultAdvancedOptions(isTerminalJob))
+  const sessionSecretEnvVar = typeof profile.sessionSecretEnv === 'string' && profile.sessionSecretEnv.trim()
+    ? profile.sessionSecretEnv.trim()
+    : undefined
+  const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() =>
+    defaultAdvancedOptions(isTerminalJob, Boolean(profile.sessionSecretEnabledByDefault)))
 
   function handleStart() {
     setStarting(true); setStartError(null); setStartedId(null)
 
     const environment: Record<string, string> = {}
     advanced.env.forEach((pair) => { if (pair.key.trim()) environment[pair.key.trim()] = pair.value })
+    if (sessionSecretEnvVar && advanced.injectSessionSecret) {
+      const secret = getSessionSecret()
+      if (secret) environment[sessionSecretEnvVar] = secret
+    }
 
     executeJob({
       element,
@@ -46,7 +54,8 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       .catch((e: Error) => { setStartError(e.message || 'Failed to start job'); setStarting(false) })
   }
 
-  const detailKeys = Object.keys(profile).filter((k) => !['id', 'description', 'terminalJob', 'containers'].includes(k))
+  const detailKeys = Object.keys(profile).filter((k) =>
+    !['id', 'description', 'terminalJob', 'containers', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
     h('span', { className: 'font-mono text-sm font-medium' }, profile.id),
@@ -91,7 +100,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
         onToggle: () => setAdvancedExpanded((v) => !v),
         header: h('span', { className: 'text-sm font-medium' }, 'Advanced Run Options'),
       },
-        h(RunForm, { value: advanced, onChange: setAdvanced }))))
+        h(RunForm, { value: advanced, onChange: setAdvanced, sessionSecretEnvVar }))))
 }
 
 export function AvailableJobsPage() {

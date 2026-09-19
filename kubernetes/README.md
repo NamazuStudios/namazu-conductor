@@ -102,6 +102,28 @@ metadata:
       A **minimal** profile for smoke-testing terminal attachment.
 ```
 
+### `namazu.conductor/session-secret-env` / `namazu.conductor/enable-session-secret` (annotations)
+
+`session-secret-env` names an environment variable that the admin dashboard's "Inject my session
+secret" run option sets to the *operator's own* Elements session secret at launch time — not this
+Element's own credentials, and not persisted anywhere server-side; the value is added to
+`JobRequest.environment` client-side, the same as any other manually-added environment variable in
+the Advanced Run Options form. Absent → the checkbox doesn't appear at all, since there'd be nothing
+to inject into. This is useful when the container itself needs to call back into the Elements REST
+API as the operator (e.g. an interactive debugging/agent shell that needs `SUPERUSER`-level access).
+
+Since it puts a live, usable credential into the container's environment — readable by anything
+running in it, including via `/proc`, crash dumps, or a compromised dependency — `enable-session-secret`
+(`"true"`/`"false"`, defaults to `false`) only controls the checkbox's *default* state; the operator
+can always override it per-launch, on either side.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/session-secret-env: "ELEMENTS_SESSION_SECRET"
+    namazu.conductor/enable-session-secret: "false"
+```
+
 ### `namazu.conductor/default-container-exec.<container-name>` (annotation)
 
 Default command to pre-fill the admin dashboard's "Attach Terminal" action for the named container,

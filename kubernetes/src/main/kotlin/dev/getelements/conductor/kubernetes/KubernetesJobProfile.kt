@@ -37,7 +37,20 @@ data class KubernetesJobProfile(
     /** `namazu.conductor/terminal-job` — hints that this profile should default to an interactive tty */
     override val terminalJob: Boolean = false,
     /** `namazu.conductor/description` — Markdown, surfaced to the admin dashboard */
-    override val description: String? = null
+    override val description: String? = null,
+    /**
+     * `namazu.conductor/session-secret-env` — the environment variable name the admin dashboard's
+     * "Inject my session secret" run option should set to the *operator's own* Elements session
+     * secret at launch time (not this Element's own credentials). `null` (the annotation absent)
+     * hides that option entirely — there'd be nothing to inject into.
+     */
+    val sessionSecretEnv: String? = null,
+    /**
+     * `namazu.conductor/enable-session-secret` — the default (pre-launch) checked state of the
+     * dashboard's "Inject my session secret" checkbox when [sessionSecretEnv] is set. Only a default;
+     * the operator can still toggle it per-launch.
+     */
+    val sessionSecretEnabledByDefault: Boolean = false
 ) : JobProfile {
 
     override val id: String
