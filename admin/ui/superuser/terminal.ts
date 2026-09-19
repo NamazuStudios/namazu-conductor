@@ -1,6 +1,7 @@
 import React from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import xtermCss from '@xterm/xterm/css/xterm.css?inline'
 import { resolveWsRoot } from './api'
 
@@ -14,14 +15,15 @@ export function injectXtermStyles() {
   document.head.appendChild(style)
 }
 
-// Bell sound copied alongside this bundle at build time — see admin/src/main/ui/superuser/complete.oga.
-// Thanks to Okiedokie24 for the "ding" sound effect.
+// Sounds copied alongside this bundle at build time — see admin/src/main/ui/superuser/{complete,message}.oga.
+// Thanks to Okiedokie24 for the "ding" bell sound effect.
 // Resolved against the bundle's OWN script URL (captured once, synchronously, while this script is
 // still `document.currentScript`), not the current page URL — we now do full-page navigations across
 // three different /admin/plugin/{route} URLs, none of which are anywhere near where this bundle (and
-// its co-located asset) is actually served from.
+// its co-located assets) is actually served from.
 const BUNDLE_BASE_URL = (document.currentScript as HTMLScriptElement | null)?.src ?? window.location.href
 const BELL_SOUND_PATH = new URL('complete.oga', BUNDLE_BASE_URL).href
+const MESSAGE_SOUND_PATH = new URL('message.oga', BUNDLE_BASE_URL).href
 
 const BELL_VOLUME_STORAGE_KEY = 'conductor-terminal-bell-volume'
 
@@ -41,12 +43,117 @@ const TOAST_OSC_IDENT = 9001
 const MAX_TOAST_HISTORY = 200
 const TOAST_POPUP_DURATION_MS = 6000
 
+// Lets a remote job/container direct the operator to a URL (a generated report, a status page, an
+// OAuth-style consent screen, etc.) over the same in-band pty stream the toast mechanism above uses
+// — the container has no local browser to shell out to the way e.g. `gh`'s OAuth flow does, since it
+// runs on a remote node, not the operator's machine. Per the revised design in
+// https://github.com/NamazuStudios/namazu-conductor/issues/34, this deliberately mirrors iTerm2's
+// existing proprietary OSC 1337 sequence (`OpenURL=` subcommand) rather than inventing a new ident —
+// e.g. `printf '\033]1337;OpenURL=%s\007' "https://example.com"`. A terminal that doesn't recognize a
+// given OSC sequence just silently ignores it, which is exactly why reusing an established one here
+// is safe. Only ever surfaces http(s) URLs (parseAllowedUrl) — anything else is dropped.
+//
+// Attempts `window.open()` immediately (openUrl below) — no confirmation step — but that's not
+// guaranteed to work: browsers only let `window.open()` escape the popup blocker when it's the direct
+// result of a user gesture (a click), and this fires from an async WebSocket message, so most
+// browsers will silently block it (`window.open` just returns `null`, no exception). Every attempt
+// also drops a toast with a real "Open ↗" button either way, since an actual click always satisfies
+// the gesture requirement — that's the reliable fallback, not a confirmation gate.
+const OPEN_URL_OSC_IDENT = 1337
+const OPEN_URL_OSC_PREFIX = 'OpenURL='
+
+// OSC 52 ("Manipulate Selection Data") — the de facto standard clipboard-copy sequence (tmux, vim,
+// many CLIs use it) so a remote process can copy text to the *operator's* clipboard, not the
+// container's. xterm.js has no built-in handler for it (registerOscHandler is only wired up for 4, 8,
+// 10-12, 104, 110-112 in its own InputHandler.ts — 52 is just a comment), so without this it's
+// silently dropped. Wire format: `Ps ; Pc ; Pd` where Pc is a clipboard selector (ignored — there's
+// only ever one, the operator's browser clipboard) and Pd is base64, or `?` for a query (a read-back
+// request, which this — a write-only relay — doesn't support and just ignores).
+// Same gesture caveat as OPEN_URL_OSC_IDENT above: `navigator.clipboard.writeText()` from an async
+// message can get rejected (especially in Firefox) without a user gesture, so this also attempts the
+// write immediately *and* drops a toast with a "Copy" button as the reliable fallback.
+const CLIPBOARD_OSC_IDENT = 52
+
+interface ToastAction {
+  kind: 'open-url' | 'copy'
+  /** The URL to (re-)open, or the text to (re-)copy, depending on `kind`. */
+  value: string
+}
+
 interface ToastEntry {
   id: string
   timestamp: number
   message: string
   sessionKey: string
   sessionLabel: string
+  action?: ToastAction
+}
+
+/** Only http(s) URLs are ever surfaced to the operator — defense in depth, since this channel is
+ * otherwise an open redirect from container-controlled output. */
+function parseAllowedUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
+  } catch {
+    return null
+  }
+}
+
+/** Decodes an OSC 52 payload (base64 of UTF-8 bytes) back to text; `null` if it's not valid base64. */
+function decodeBase64Utf8(base64: string): string | null {
+  try {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return new TextDecoder('utf-8').decode(bytes)
+  } catch {
+    return null
+  }
+}
+
+const URL_PATTERN = /https?:\/\/[^\s<>"']+/g
+
+/**
+ * Renders `text` as plain text with any http(s) URLs turned into real, clickable anchors — used for
+ * every toast message (arbitrary job-authored text may or may not contain a link) and for terminal
+ * output itself (see WebLinksAddon in TerminalSessionManager.open). A real anchor click always
+ * satisfies the browser's user-gesture requirement, unlike a script-issued `window.open()`/clipboard
+ * write from an async message — see OPEN_URL_OSC_IDENT/CLIPBOARD_OSC_IDENT above.
+ */
+function linkifyText(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let key = 0
+  URL_PATTERN.lastIndex = 0
+  while ((match = URL_PATTERN.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    parts.push(h('a', {
+      key: key++,
+      href: match[0],
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      className: 'underline hover:opacity-80',
+    }, match[0]))
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return parts
+}
+
+/** The button rendered alongside a toast's message when it carries a completable action — lets the
+ * operator retry (or simply trigger, if the automatic attempt got blocked) with a real click. */
+function ToastActionButton(props: { action: ToastAction }) {
+  const { action } = props
+  return h('button', {
+    className: 'shrink-0 px-2 py-0.5 rounded border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors',
+    title: action.kind === 'open-url' ? action.value : 'Copy to clipboard',
+    onClick: () => {
+      if (action.kind === 'open-url') window.open(action.value, '_blank', 'noopener,noreferrer')
+      else void navigator.clipboard?.writeText(action.value).catch(() => {})
+    },
+  }, action.kind === 'open-url' ? 'Open ↗' : 'Copy')
 }
 
 /** `Session.ws` may still be the initial placeholder (connect() hasn't run yet, or threw before assigning it). */
@@ -176,24 +283,48 @@ class TerminalSessionManager {
     this.notify()
   }
 
+  /** Removes a single history entry (e.g. the user dismissed just that one) without touching the rest. */
+  removeToastHistoryEntry(id: string) {
+    this.toastHistory = this.toastHistory.filter((t) => t.id !== id)
+    this.notify()
+  }
+
   /** Dismisses a transient popup early (e.g. the user clicked its ✕) without touching history. */
   dismissToastPopup(id: string) {
     this.transientToasts = this.transientToasts.filter((t) => t.id !== id)
     this.notify()
   }
 
-  private pushToast(session: Session, message: string) {
+  /** Attempts to navigate immediately; always drops a toast with an "Open ↗" button too — see
+   * OPEN_URL_OSC_IDENT's doc comment for why the button, not the attempt, is the reliable path. */
+  private openUrl(session: Session, url: string) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    this.pushToast(session, url, { kind: 'open-url', value: url })
+  }
+
+  /** Attempts the clipboard write immediately; always drops a toast with a "Copy" button too — same
+   * reasoning as openUrl above. */
+  private copyToClipboard(session: Session, text: string) {
+    void navigator.clipboard?.writeText(text).catch(() => {})
+    this.pushToast(session, text, { kind: 'copy', value: text })
+  }
+
+  private pushToast(session: Session, message: string, action?: ToastAction) {
     const entry: ToastEntry = {
       id: `toast-${this.toastCounter++}`,
       timestamp: Date.now(),
       message,
       sessionKey: session.key,
       sessionLabel: session.label,
+      action,
     }
     this.toastHistory = [...this.toastHistory, entry].slice(-MAX_TOAST_HISTORY)
     this.transientToasts = [...this.transientToasts, entry]
     this.notify()
     setTimeout(() => this.dismissToastPopup(entry.id), TOAST_POPUP_DURATION_MS)
+    const chime = new Audio(MESSAGE_SOUND_PATH)
+    chime.volume = this.bellVolume
+    void chime.play().catch(() => {})
   }
 
   setActive(key: string) {
@@ -222,6 +353,10 @@ class TerminalSessionManager {
     const term = new Terminal({ convertEol: true, cursorBlink: true, theme: getTerminalTheme() })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
+    // Linkifies URLs appearing in ordinary program output (not just toasts) — clicking one opens it
+    // in a new tab via the addon's default handler, which is a real click, so it's never subject to
+    // the popup-blocker/gesture caveat that OPEN_URL_OSC_IDENT's own auto-open attempt is.
+    term.loadAddon(new WebLinksAddon())
     term.open(container)
 
     const bellAudio = new Audio(BELL_SOUND_PATH)
@@ -242,6 +377,23 @@ class TerminalSessionManager {
     term.parser.registerOscHandler(TOAST_OSC_IDENT, (data) => {
       const message = data.trim()
       if (message) this.pushToast(session, message)
+      return true
+    })
+    term.parser.registerOscHandler(OPEN_URL_OSC_IDENT, (data) => {
+      const payload = data.trim()
+      if (payload.startsWith(OPEN_URL_OSC_PREFIX)) {
+        const url = parseAllowedUrl(payload.slice(OPEN_URL_OSC_PREFIX.length))
+        if (url) this.openUrl(session, url)
+      }
+      return true
+    })
+    term.parser.registerOscHandler(CLIPBOARD_OSC_IDENT, (data) => {
+      const semicolon = data.indexOf(';')
+      if (semicolon < 0) return true
+      const payload = data.slice(semicolon + 1)
+      if (payload === '?' || payload === '') return true // read-back query / clear — nothing to relay
+      const text = decodeBase64Utf8(payload)
+      if (text) this.copyToClipboard(session, text)
       return true
     })
     this.sessions.set(key, session)
@@ -400,7 +552,8 @@ function ToastHistoryMenu() {
       className: 'absolute -top-1.5 -right-1.5 min-w-[1rem] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-4 text-center',
     }, toastHistory.length)),
     open && h('div', {
-      className: 'absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto rounded-lg border bg-popover shadow-lg z-50 text-xs',
+      className: 'absolute right-0 mt-1 max-h-96 overflow-y-auto rounded-lg border bg-popover shadow-lg z-50 text-xs',
+      style: { width: '28rem' },
     },
       h('div', { className: 'flex items-center justify-between px-3 py-2 border-b sticky top-0 bg-popover' },
         h('span', { className: 'font-semibold' }, 'Toast history'),
@@ -415,8 +568,16 @@ function ToastHistoryMenu() {
             [...toastHistory].reverse().map((t) => h('div', { key: t.id, className: 'px-3 py-2 space-y-0.5' },
               h('div', { className: 'flex items-center justify-between gap-2 text-muted-foreground' },
                 h('span', { className: 'font-mono truncate' }, t.sessionLabel),
-                h('span', { className: 'shrink-0' }, new Date(t.timestamp).toLocaleTimeString())),
-              h('div', { className: 'break-words text-foreground' }, t.message))))))
+                h('div', { className: 'flex items-center gap-2 shrink-0' },
+                  h('span', {}, new Date(t.timestamp).toLocaleTimeString()),
+                  h('button', {
+                    className: 'text-muted-foreground hover:text-destructive',
+                    title: 'Dismiss this toast',
+                    onClick: () => terminalSessionManager.removeToastHistoryEntry(t.id),
+                  }, '✕'))),
+              h('div', { className: 'flex items-center justify-between gap-2' },
+                h('div', { className: 'break-words text-foreground' }, linkifyText(t.message)),
+                t.action && h(ToastActionButton, { action: t.action })))))))
 }
 
 /**
@@ -427,7 +588,11 @@ function ToastHistoryMenu() {
 export function ToastPopups() {
   const { transientToasts } = useTerminalSnapshot()
   if (transientToasts.length === 0) return null
-  return h('div', { className: 'fixed top-4 right-4 z-[100] w-80 space-y-2' },
+  // Width is an inline style, not a `w-[60rem]` Tailwind class — arbitrary-value utility classes
+  // only exist in the host's compiled CSS if that exact class string already happens to appear
+  // somewhere in the host's own scanned source (this bundle is fetched at runtime, so it's never
+  // scanned itself); an inline style has no such dependency.
+  return h('div', { className: 'fixed top-4 right-4 z-[100] space-y-2', style: { width: '60rem' } },
     transientToasts.map((t) => h('div', {
       key: t.id,
       className: 'rounded-lg border bg-popover shadow-lg px-3 py-2 text-xs',
@@ -438,7 +603,9 @@ export function ToastPopups() {
           className: 'text-muted-foreground hover:text-foreground',
           onClick: () => terminalSessionManager.dismissToastPopup(t.id),
         }, '✕')),
-      h('div', { className: 'mt-0.5 break-words' }, t.message))))
+      h('div', { className: 'mt-0.5 flex items-center justify-between gap-2' },
+        h('div', { className: 'break-words' }, linkifyText(t.message)),
+        t.action && h(ToastActionButton, { action: t.action })))))
 }
 
 function useTerminalSnapshot() {

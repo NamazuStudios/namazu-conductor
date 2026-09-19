@@ -120,18 +120,64 @@ audible bell) by writing a custom OSC (Operating System Command) escape sequence
 ```
 
 e.g. from a shell: `printf '\e]9001;Build finished\a'`. `<message>` is free text (avoid embedding a
-literal `BEL`/`0x07`, which terminates the sequence, or `ESC`, which starts a new one).
+literal `BEL`/`0x07`, which terminates the sequence, or `ESC`, which starts a new one). Any `http(s)`
+URL appearing anywhere in the message is rendered as a real clickable link.
 
 This travels in-band over the existing binary pty stream — there is no separate WebSocket frame type
 for it, and no server-side involvement — the dashboard's terminal (xterm.js) parses the OSC sequence
 client-side using the same parser that already recognizes the plain `BEL` control character for the
 audible bell. `9001` is an arbitrary, unassigned OSC number chosen to avoid colliding with established
 conventions (OSC 9 iTerm2 growl, OSC 777 konsole/xterm notify, OSC 1337 iTerm2 proprietary). See
-[#37](https://github.com/NamazuStudios/namazu-conductor/issues/37).
+[#37](https://github.com/NamazuStudios/namazu-conductor/issues/37). Each toast plays a short chime
+(independent of, and in addition to, the terminal bell sound) at the same volume/mute setting.
 
 The dashboard keeps a ring buffer of the last 200 toasts (shared across a session's terminal tabs,
-alongside bell volume), shown via a history menu next to the existing bell volume/mute controls, plus
-a transient popup per toast that the operator can dismiss individually or let auto-expire.
+alongside bell volume), shown via a 🍞 history menu next to the existing bell volume/mute controls,
+plus a transient popup per toast that the operator can dismiss individually or let auto-expire. Both
+the transient popup and each entry in the history menu carry their own `✕` — dismissing one doesn't
+touch the rest.
+
+### Open URL (OSC 1337)
+
+A job/container can ask the operator's browser to open a URL — a generated report, a status page, an
+OAuth-style consent screen, etc. — the same way, over the same in-band pty stream:
+
+```
+\x1b]1337;OpenURL=<url>\x07
+```
+
+e.g. from a shell: `printf '\033]1337;OpenURL=%s\007' "https://example.com"`. Unlike the toast's `9001`
+(deliberately an arbitrary, previously-unclaimed number), this reuses iTerm2's existing proprietary
+`1337` sequence and its `OpenURL=` subcommand on purpose — a terminal that doesn't recognize a given
+OSC sequence just silently ignores it, so piggybacking on an already-established one here is safe, and
+avoids inventing a new protocol. See [#34](https://github.com/NamazuStudios/namazu-conductor/issues/34).
+Only `http`/`https` URLs are ever acted on — anything else, including a malformed URL, is silently
+dropped.
+
+The dashboard attempts `window.open()` immediately — there's no confirmation step — but that's not
+guaranteed to succeed: browsers only let `window.open()` escape the popup blocker when it's the direct
+result of a user gesture (a click), and this fires from an async WebSocket message, so it can get
+silently blocked. Either way, it also drops a toast carrying an **Open ↗** button, since a real click
+on that button always works regardless of the popup blocker — that's the reliable path, not the
+automatic attempt.
+
+### Clipboard (OSC 52)
+
+A job/container can copy text to the *operator's* clipboard (not the container's) using the
+de-facto-standard clipboard OSC that `tmux`, `vim`, and many other tools already emit:
+
+```
+\x1b]52;c;<base64>\x07
+```
+
+e.g. from a shell: `printf '\033]52;c;%s\007' "$(printf 'hello' | base64)"`. The clipboard selector
+(`c` above) is ignored — there's only ever one target, the operator's browser clipboard. A `?` payload
+(a read-back query) is ignored too, since this is a write-only relay.
+
+xterm.js has no built-in handler for OSC 52 — it's parsed the same way toasts and Open URL are, as a
+custom handler registered on the terminal instance. Same caveat as Open URL: the dashboard attempts
+`navigator.clipboard.writeText()` immediately, which can get rejected without a user gesture
+(especially in Firefox), so it also drops a toast with a **Copy** button as the reliable fallback.
 
 ## Dashboard status indicator
 

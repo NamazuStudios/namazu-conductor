@@ -41,6 +41,66 @@ export function Accordion(props: {
       h('div', { className: 'border-t px-4 py-3' }, props.children))
 }
 
+let markdownStylesInjected = false
+
+/**
+ * `prose`/`prose-sm` (Tailwind Typography) do nothing unless the *host* dashboard's own Tailwind
+ * build happens to have that plugin enabled — this bundle has no say over the host's build, and it
+ * may well not. Without it, Tailwind's preflight reset (which strips all default heading/list/
+ * paragraph styling specifically so consumers opt back in via `prose`) leaves every element `marked`
+ * produces looking like identical unstyled text — headings, bullets, bold, etc. all render, but
+ * visually indistinguishable. These rules restore basic markdown formatting unconditionally, so
+ * rendering doesn't depend on anything the host's Tailwind config happens to include.
+ */
+function injectMarkdownStyles() {
+  if (markdownStylesInjected) return
+  markdownStylesInjected = true
+  const style = document.createElement('style')
+  style.id = 'conductor-markdown-styles'
+  style.textContent = `
+    .conductor-markdown { max-width: none; }
+    .conductor-markdown > *:first-child { margin-top: 0; }
+    .conductor-markdown > *:last-child { margin-bottom: 0; }
+    .conductor-markdown h1, .conductor-markdown h2, .conductor-markdown h3,
+    .conductor-markdown h4, .conductor-markdown h5, .conductor-markdown h6 {
+      font-weight: 600; line-height: 1.3; margin: 1em 0 0.5em;
+    }
+    .conductor-markdown h1 { font-size: 1.35em; }
+    .conductor-markdown h2 { font-size: 1.2em; }
+    .conductor-markdown h3 { font-size: 1.1em; }
+    .conductor-markdown h4, .conductor-markdown h5, .conductor-markdown h6 { font-size: 1em; }
+    .conductor-markdown p { margin: 0.5em 0; line-height: 1.5; }
+    .conductor-markdown ul, .conductor-markdown ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .conductor-markdown ul { list-style: disc; }
+    .conductor-markdown ol { list-style: decimal; }
+    .conductor-markdown li { margin: 0.25em 0; }
+    .conductor-markdown li > ul, .conductor-markdown li > ol { margin: 0.25em 0; }
+    .conductor-markdown strong { font-weight: 700; }
+    .conductor-markdown em { font-style: italic; }
+    .conductor-markdown a { color: rgb(59 130 246); text-decoration: underline; text-underline-offset: 2px; }
+    .conductor-markdown a:hover { opacity: 0.85; }
+    .conductor-markdown code {
+      font-family: ui-monospace, monospace; font-size: 0.9em; padding: 0.15em 0.35em;
+      border-radius: 0.25em; background: rgba(127, 127, 127, 0.15);
+    }
+    .conductor-markdown pre {
+      margin: 0.5em 0; padding: 0.75em; border-radius: 0.5em;
+      background: rgba(127, 127, 127, 0.12); overflow-x: auto;
+    }
+    .conductor-markdown pre code { background: none; padding: 0; }
+    .conductor-markdown blockquote {
+      margin: 0.5em 0; padding-left: 1em; border-left: 3px solid rgba(127, 127, 127, 0.35); opacity: 0.85;
+    }
+    .conductor-markdown hr { margin: 1em 0; border: none; border-top: 1px solid rgba(127, 127, 127, 0.25); }
+    .conductor-markdown table { border-collapse: collapse; margin: 0.5em 0; }
+    .conductor-markdown th, .conductor-markdown td {
+      border: 1px solid rgba(127, 127, 127, 0.25); padding: 0.35em 0.6em; text-align: left;
+    }
+    .conductor-markdown img { max-width: 100%; }
+  `
+  document.head.appendChild(style)
+}
+
 /**
  * Renders provider/profile-authored Markdown (job descriptions, job-set notes). `breaks: true` turns
  * single newlines into `<br>` — these strings typically come from a Kubernetes annotation or ECS tag
@@ -48,12 +108,13 @@ export function Accordion(props: {
  * `marked` collapses into one run-on paragraph, making the source's line structure disappear entirely.
  */
 export function MarkdownBlock(props: { markdown: string; className?: string }) {
+  React.useEffect(() => { injectMarkdownStyles() }, [])
   const html = React.useMemo(
     () => marked.parse(props.markdown, { async: false, breaks: true, gfm: true }) as string,
     [props.markdown],
   )
   return h('div', {
-    className: `prose prose-sm max-w-none ${props.className ?? ''}`,
+    className: `conductor-markdown ${props.className ?? ''}`,
     dangerouslySetInnerHTML: { __html: html },
   })
 }

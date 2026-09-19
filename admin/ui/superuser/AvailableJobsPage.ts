@@ -16,6 +16,7 @@ interface FlatProfile {
 
 function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: () => void }) {
   const { element, jobSetLabel, profile } = props.item
+  const [detailsExpanded, setDetailsExpanded] = React.useState(false)
   const [advancedExpanded, setAdvancedExpanded] = React.useState(false)
   const [starting, setStarting] = React.useState(false)
   const [startError, setStartError] = React.useState<string | null>(null)
@@ -68,16 +69,22 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
     profile.description && h('div', { className: 'mb-3' },
       h(CollapsibleMarkdown, { markdown: profile.description, label: 'Description' })),
     detailKeys.length > 0 &&
-      h('div', { className: 'grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 mb-3' },
-        detailKeys.flatMap((k) => {
-          const val = profile[k]
-          const display = val == null ? h('span', { className: 'text-muted-foreground' }, '—')
-            : typeof val === 'object' ? JSON.stringify(val) : String(val)
-          return [
-            h('span', { key: `${k}_k`, className: 'text-xs font-medium text-muted-foreground whitespace-nowrap' }, k),
-            h('span', { key: `${k}_v`, className: 'text-xs font-mono break-all' }, display),
-          ]
-        })),
+      h('div', { className: 'mb-3' },
+        h(Accordion, {
+          isExpanded: detailsExpanded,
+          onToggle: () => setDetailsExpanded((v) => !v),
+          header: h('span', { className: 'text-sm font-medium' }, 'Details'),
+        },
+          h('div', { className: 'grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5' },
+            detailKeys.flatMap((k) => {
+              const val = profile[k]
+              const display = val == null ? h('span', { className: 'text-muted-foreground' }, '—')
+                : typeof val === 'object' ? JSON.stringify(val) : String(val)
+              return [
+                h('span', { key: `${k}_k`, className: 'text-xs font-medium text-muted-foreground whitespace-nowrap' }, k),
+                h('span', { key: `${k}_v`, className: 'text-xs font-mono break-all' }, display),
+              ]
+            })))),
     h('div', { className: 'border-t pt-3' },
       h(Accordion, {
         isExpanded: advancedExpanded,
