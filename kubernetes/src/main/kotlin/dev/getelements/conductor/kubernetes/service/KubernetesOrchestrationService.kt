@@ -26,6 +26,7 @@ import dev.getelements.conductor.service.Daemon
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import com.marcnuri.helm.Helm
 import io.fabric8.kubernetes.api.model.Container
 import io.fabric8.kubernetes.api.model.DeletionPropagation
 import io.fabric8.kubernetes.api.model.EnvVar
@@ -53,6 +54,7 @@ import io.fabric8.kubernetes.client.Watch
 import io.fabric8.kubernetes.client.Watcher
 import io.fabric8.kubernetes.client.WatcherException
 import org.slf4j.LoggerFactory
+import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
@@ -91,6 +93,7 @@ class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.JOBSET_DESCRIPTION) jobSetDescription: String,
     @Named(KubernetesAttributes.POLL_INTERVAL) pollInterval: String,
     @Named(KubernetesAttributes.WATCH_ENABLED) watchEnabled: String = "false",
+    @Named(KubernetesAttributes.KUBECONFIG_PATH) private val kubeconfigPath: String,
     private val client: KubernetesClient,
     private val executor: ExecutorService
 ) : OrchestrationService, DaemonOrchestrationService {
@@ -849,36 +852,34 @@ class KubernetesOrchestrationService @Inject constructor(
     }
 
     /**
-     * Runs `helm uninstall <releaseName> --namespace <ns>` as a subprocess -- the only way to
-     * correctly tear down a release this provider never created itself (see [WorkloadKind.HELM]).
-     * Requires the `helm` binary on `PATH` and relies on the same in-cluster kubeconfig
-     * auto-detection the Fabric8 client already uses elsewhere in this class.
+     * Uninstalls a Helm release via the manusa/helm-java JNA bindings to Helm's own Go
+     * implementation -- the only way to correctly tear down a release this provider never created
+     * itself (see [WorkloadKind.HELM]) without requiring a `helm` binary on `PATH`. Uses
+     * [KubernetesAttributes.KUBECONFIG_PATH] when configured, otherwise falls back to helm-java's
+     * own auto-detection (in-cluster service account, then `~/.kube/config`), mirroring
+     * [provideKubernetesClient][dev.getelements.conductor.kubernetes.guice.KubernetesOrchestrationModule.provideKubernetesClient].
+     * Note: unlike the Fabric8 client, helm-java has no equivalent to
+     * [KubernetesAttributes.MASTER_URL] -- that override is not honoured here.
      *
-     * A "release: not found" exit is treated the same permissive way [stop] already treats an
-     * already-gone POD/JOB (log and return rather than throw), so a panel-initiated stop racing an
-     * already-uninstalled release doesn't surface as an error.
+     * `ignoreNotFound()` treats an already-gone release as a successful uninstall, the same
+     * permissive way [stop] already treats an already-gone POD/JOB, so a panel-initiated stop
+     * racing an already-uninstalled release doesn't surface as an error.
      */
     private fun stopHelmRelease(ns: String, releaseName: String) {
-        val process = ProcessBuilder("helm", "uninstall", releaseName, "--namespace", ns)
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText()
-        val exitCode = process.waitFor()
+        val uninstall = Helm.uninstall(releaseName)
+            .withNamespace(ns)
+            .ignoreNotFound()
 
-        if (exitCode != 0) {
-            if (output.contains("release: not found", ignoreCase = true)) {
-                logger.warn(
-                    "stop(): helm release '{}' in namespace '{}' already gone — nothing to uninstall",
-                    releaseName, ns
-                )
-                return
-            }
-            throw JobException(
-                "helm uninstall '$releaseName' --namespace '$ns' failed (exit $exitCode): ${output.trim()}"
-            )
+        if (kubeconfigPath.isNotBlank()) {
+            uninstall.withKubeConfig(Paths.get(kubeconfigPath))
         }
 
-        logger.debug("stop(): helm uninstall '{}' in namespace '{}' succeeded", releaseName, ns)
+        try {
+            val output = uninstall.call()
+            logger.debug("stop(): helm uninstall '{}' in namespace '{}' succeeded: {}", releaseName, ns, output)
+        } catch (e: IllegalStateException) {
+            throw JobException("helm uninstall '$releaseName' --namespace '$ns' failed: ${e.message}", e)
+        }
     }
 
     /**

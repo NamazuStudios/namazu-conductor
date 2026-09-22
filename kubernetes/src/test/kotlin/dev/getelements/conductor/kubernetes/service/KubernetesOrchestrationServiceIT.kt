@@ -137,6 +137,7 @@ class KubernetesOrchestrationServiceIT {
             jobSetDescription = "",
             pollInterval = "3000",
             watchEnabled = env("KUBERNETES_IT_WATCH_ENABLED", "false"),
+            kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
             client = client,
             executor = executor
         )

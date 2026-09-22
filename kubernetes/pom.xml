@@ -118,6 +118,19 @@
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-httpclient-jdk</artifactId>
         </dependency>
+        <!--
+            Helm client (WorkloadKind.HELM's stop()) via JNA bindings to Helm's own Go
+            implementation, avoiding a runtime dependency on a `helm` binary on PATH. The parent POM
+            (com.marcnuri.helm-java:helm-java-parent) activates a Maven profile per OS/arch that pulls
+            in the matching native artifact (e.g. linux-amd64, darwin-arm64) for whichever machine
+            runs `mvn install`; if that differs from the OS/arch the .elm is deployed to, the
+            bundled native library won't load at runtime.
+        -->
+        <dependency>
+            <groupId>com.marcnuri.helm-java</groupId>
+            <artifactId>helm-java</artifactId>
+            <version>0.0.21</version>
+        </dependency>
         <!-- TestNG for integration tests -->
         <dependency>
             <groupId>org.testng</groupId>

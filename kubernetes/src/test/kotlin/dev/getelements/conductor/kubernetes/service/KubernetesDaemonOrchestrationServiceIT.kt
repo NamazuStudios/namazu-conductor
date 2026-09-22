@@ -94,6 +94,7 @@ class KubernetesDaemonOrchestrationServiceIT {
             jobSetDescription = "",
             pollInterval = "3000",
             watchEnabled = "false",
+            kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
             client = client,
             executor = executor
         )
