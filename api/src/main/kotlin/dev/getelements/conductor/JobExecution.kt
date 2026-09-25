@@ -34,6 +34,14 @@ data class JobExecution(
      * [dev.getelements.conductor.service.JobProfile.containers]. Used to select a specific
      * container when calling [dev.getelements.conductor.service.OrchestrationService.streamStdio].
      */
-    val containers : List<ContainerRef> = emptyList()
+    val containers : List<ContainerRef> = emptyList(),
+
+    /**
+     * The effective namespace the running workload was created in, populated by providers that
+     * have a namespace concept (Kubernetes). Providers without one (ECS, EdgeGap) leave this null.
+     * Distinct from any [JobScope] supplied at launch time — this reflects where the workload
+     * actually landed. Exposed to the terminal attach policy layer.
+     */
+    val namespace : String? = null
 
 )

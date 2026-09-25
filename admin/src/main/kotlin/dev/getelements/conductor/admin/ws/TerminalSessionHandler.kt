@@ -2,6 +2,8 @@ package dev.getelements.conductor.admin.ws
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import dev.getelements.conductor.JobStdio
+import dev.getelements.conductor.TerminalAttachContext
+import dev.getelements.conductor.TerminalAttachVote
 import dev.getelements.conductor.admin.ElementLookup
 import dev.getelements.conductor.admin.model.TerminalInitMessage
 import dev.getelements.elements.sdk.model.user.User
@@ -37,6 +39,11 @@ import java.util.concurrent.TimeUnit
  * client-to-server only — a regex match is used instead of a JSON library since this is a single,
  * tightly-scoped message shape we define ourselves, not general-purpose JSON parsing. Binary frames
  * carry raw terminal bytes in both directions (keystrokes in, pty output out) throughout.
+ *
+ * Who may attach is delegated to any deployed
+ * [dev.getelements.conductor.TerminalAttachPolicy] elements (see [authorized]); when none are
+ * deployed, the historical rule applies: only `SUPERUSER` sessions. Authentication itself (the
+ * session secret's validity) is always enforced here first, never delegated.
  *
  * Bell-triggered toast notifications (issue #37) are deliberately *not* a control message here: a
  * container surfaces one by writing a custom OSC escape sequence to its own stdout, which already
@@ -105,27 +112,86 @@ internal object TerminalSessionHandler {
                 return@launch
             }
 
-            if (authSession.user?.level != User.Level.SUPERUSER) {
-                closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "insufficient privilege level")
+            val lookup = ElementLookup.findByJobId(TerminalSessionHandler::class.java, jobId)
+            if (lookup == null) {
+                closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "job not found: $jobId")
                 return@launch
             }
 
-            openStdio(session, jobId, containerId, init.command)
+            if (!authorized(session, authSession, lookup, containerId, init.command)) return@launch
+
+            openStdio(session, lookup, containerId, init.command)
         }
         session.userProperties[AUTH_JOB_PROPERTY] = authJob
     }
 
-    private fun openStdio(session: Session, jobId: String, containerId: String?, command: List<String>?) {
-        val lookup = ElementLookup.findByJobId(TerminalSessionHandler::class.java, jobId)
-        if (lookup == null) {
-            closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "job not found: $jobId")
-            return
+    /**
+     * Consults every deployed [TerminalAttachPolicy] Element for a vote on whether [authSession]
+     * may attach a terminal to [lookup]'s job, enforcing the aggregation rules:
+     *
+     *  - any `DENY` vetoes outright (regardless of who's asking — a superuser is subject to the
+     *    same vote as anyone else);
+     *  - otherwise a single `ALLOW` is enough to proceed;
+     *  - `PASS` votes abstain and are ignored.
+     *
+     * When no policy Element is deployed (or every vote abstains) the historical gate applies:
+     * only `SUPERUSER` sessions may attach. Closes the socket (leaving the caller to bail out) on
+     * denial; returns `true` when the attach may proceed.
+     */
+    private fun authorized(
+        session: Session,
+        authSession: dev.getelements.elements.sdk.model.session.Session,
+        lookup: ElementLookup.JobLookup,
+        containerId: String?,
+        command: List<String>?
+    ): Boolean {
+        var denyReason: String? = null
+        var anyAllow = false
+        ElementLookup.forEachTerminalAttachPolicy(TerminalSessionHandler::class.java) { _, policy ->
+            val vote = try {
+                policy.authorize(
+                    TerminalAttachContext(
+                        session = authSession,
+                        user = authSession.user,
+                        jobId = lookup.execution.id,
+                        containerId = containerId,
+                        command = command,
+                        elementName = lookup.elementName,
+                        execution = lookup.execution,
+                        namespace = lookup.execution.namespace
+                    )
+                )
+            } catch (e: Exception) {
+                logger.warn("TerminalAttachPolicy [{}] threw; treating as PASS", policy::class.java.name, e)
+                TerminalAttachVote.PASS
+            }
+            when (vote) {
+                TerminalAttachVote.DENY -> if (denyReason == null) {
+                    denyReason = "denied by attach policy (${policy::class.java.simpleName})"
+                }
+                TerminalAttachVote.ALLOW -> anyAllow = true
+                TerminalAttachVote.PASS -> {}
+            }
         }
 
+        if (denyReason != null) {
+            closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, denyReason)
+            return false
+        }
+        if (anyAllow) return true
+
+        if (authSession.user?.level != User.Level.SUPERUSER) {
+            closeQuietly(session, CloseReason.CloseCodes.VIOLATED_POLICY, "insufficient privilege level")
+            return false
+        }
+        return true
+    }
+
+    private fun openStdio(session: Session, lookup: ElementLookup.JobLookup, containerId: String?, command: List<String>?) {
         val stdio = try {
             lookup.service.streamStdio(lookup.execution, containerId, command)
         } catch (e: Exception) {
-            logger.warn("Failed to open stdio for job '{}' container '{}'", jobId, containerId, e)
+            logger.warn("Failed to open stdio for job '{}' container '{}'", lookup.execution.id, containerId, e)
             closeQuietly(session, CloseReason.CloseCodes.UNEXPECTED_CONDITION, (e.message ?: "stdio unavailable").take(120))
             return
         }
@@ -147,7 +213,7 @@ internal object TerminalSessionHandler {
         )
         session.userProperties[PING_FUTURE_PROPERTY] = pingFuture
 
-        val reader = Thread({ pumpStdout(session, stdio, writeLock) }, "conductor-terminal-$jobId")
+        val reader = Thread({ pumpStdout(session, stdio, writeLock) }, "conductor-terminal-${lookup.execution.id}")
         reader.isDaemon = true
         reader.start()
     }

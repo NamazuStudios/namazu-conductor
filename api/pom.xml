@@ -63,6 +63,11 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
+      <groupId>dev.getelements.elements</groupId>
+      <artifactId>sdk-model</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
       <groupId>org.jetbrains.kotlin</groupId>
       <artifactId>kotlin-stdlib</artifactId>
     </dependency>

@@ -318,7 +318,8 @@ class KubernetesOrchestrationService @Inject constructor(
                 workloadKind = profile.workloadKind.name.lowercase(),
                 name = runName
             ),
-            containers = profile.containers
+            containers = profile.containers,
+            namespace = namespace
         )
     }
 
@@ -641,7 +642,8 @@ class KubernetesOrchestrationService @Inject constructor(
                         id = encodeId(namespace, WorkloadKind.HELM, releaseName),
                         status = status,
                         details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
-                        containers = containers
+                        containers = containers,
+                        namespace = namespace
                     )
                     return@pod
                 }
@@ -652,7 +654,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = podName),
-                    containers = containers
+                    containers = containers,
+                    namespace = namespace
                 )
             }
 
@@ -680,7 +683,8 @@ class KubernetesOrchestrationService @Inject constructor(
                         id = encodeId(namespace, WorkloadKind.HELM, releaseName),
                         status = mapJobStatus(namespace, jobName, job),
                         details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
-                        containers = containers
+                        containers = containers,
+                        namespace = namespace
                     )
                     return@job
                 }
@@ -693,7 +697,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name),
-                    containers = containers
+                    containers = containers,
+                    namespace = namespace
                 )
             }
 
@@ -810,7 +815,8 @@ class KubernetesOrchestrationService @Inject constructor(
         id = execution.id,
         status = status,
         endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList(),
-        containers = execution.containers
+        containers = execution.containers,
+        namespace = execution.namespace ?: decodeId(execution.id).first
     )
 
     /**
