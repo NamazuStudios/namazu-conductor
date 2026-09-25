@@ -1,5 +1,7 @@
 package dev.getelements.conductor
 
+import dev.getelements.elements.sdk.annotation.ElementServiceExport
+
 /**
  * Serverside hook consulted whenever a client requests a terminal attach to a running job's
  * stdio. Replaces the admin module's historically hardcoded SUPERUSER-only gate with a
@@ -9,14 +11,18 @@ package dev.getelements.conductor
  * A deployed policy Element binds an implementation in its Guice `PrivateModule` and exposes it;
  * the admin module discovers every deployed implementation by scanning the Element registry (the
  * same mechanism it uses to find every [`OrchestrationService`][dev.getelements.conductor.service.OrchestrationService]).
+ * The [ElementServiceExport] here is what makes the *type* visible to that scan — a bare Guice
+ * `expose()` isn't enough for `ServiceLocator.findInstance` to see it.
  *
  * When no policy Element is deployed the admin module falls back to its historical behaviour:
  * only `SUPERUSER` sessions may attach. When at least one is deployed, every implementation is
  * asked for a [TerminalAttachVote] and the attach is allowed iff at least one votes
  * [TerminalAttachVote.ALLOW] and none vote [TerminalAttachVote.DENY]. [TerminalAttachVote.PASS]
  * is an abstention: it is neither a yes nor a veto, and is ignored. A `SUPERUSER` session is
- * subject to the same vote as any other — there is no superuser bypass when a policy is deployed.
+ * subject to the same vote as any other — there is no superuser bypass when a policy is
+ * deployed.
  */
+@ElementServiceExport
 interface TerminalAttachPolicy {
 
     /**

@@ -38,4 +38,13 @@ interface JobProfile {
      */
     val description: String? get() = null
 
+    /**
+     * The namespace this profile's jobs are created in, for providers that have a namespace
+     * concept (Kubernetes). `null` for providers without one — mirrors
+     * [dev.getelements.conductor.JobExecution.namespace]. Surfaced so authorization layers (e.g.
+     * [dev.getelements.conductor.JobAccessPolicy]) can decide on an execute *before* dispatch,
+     * from the profile alone.
+     */
+    val namespace: String? get() = null
+
 }

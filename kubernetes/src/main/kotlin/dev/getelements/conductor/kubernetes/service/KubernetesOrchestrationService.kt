@@ -82,12 +82,20 @@ import java.util.concurrent.Future
  * any) is created in; the `PodTemplate` backing the profile is still resolved from its own
  * namespace. Other [dev.getelements.conductor.JobScope] types are silently ignored.
  *
+ * Discovery scope is controlled by [KubernetesAttributes.NAMESPACE_DISCOVERY]: `configured` (the
+ * default) lists `PodTemplate`s and workloads in [KubernetesAttributes.NAMESPACE] only, while `any`
+ * lists them across every namespace in the cluster — for multi-tenant deployments whose per-tenant
+ * workloads live in per-tenant namespaces. Workload creation is unaffected: every discovered
+ * profile/execution carries its own namespace, and [KubernetesAttributes.NAMESPACE] remains the
+ * fallback.
+ *
  * Configuration is provided by the Elements SDK via the attribute keys declared in
  * [KubernetesAttributes].
  */
 @Singleton
 class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.NAMESPACE) private val namespace: String,
+    @Named(KubernetesAttributes.NAMESPACE_DISCOVERY) namespaceDiscovery: String = "configured",
     @Named(KubernetesAttributes.JOBSET) private val jobSet: String,
     @Named(KubernetesAttributes.JOBSET_NAME) override val jobSetName: String,
     @Named(KubernetesAttributes.JOBSET_DESCRIPTION) jobSetDescription: String,
@@ -104,20 +112,31 @@ class KubernetesOrchestrationService @Inject constructor(
 
     private val isWatchEnabled: Boolean = watchEnabled.toBoolean()
 
+    /** True when [KubernetesAttributes.NAMESPACE_DISCOVERY] is `any` — listing spans all namespaces. */
+    private val isAnyNamespaceDiscovery: Boolean =
+        namespaceDiscovery.trim().equals("any", ignoreCase = true)
+
     override val jobSetDescription: String? = jobSetDescription.ifBlank { null }
 
     /**
-     * Returns one [KubernetesJobProfile] per `PodTemplate` in the configured namespace labelled
-     * `namazu.conductor/job-set=<jobSet>`. Templates without a container, or whose `workload-kind` is
-     * `daemon`, are skipped (see [getAvailableDaemons]).
+     * Returns one [KubernetesJobProfile] per `PodTemplate` labelled
+     * `namazu.conductor/job-set=<jobSet>` in the discovery scope — the configured
+     * [KubernetesAttributes.NAMESPACE], or every namespace when
+     * [KubernetesAttributes.NAMESPACE_DISCOVERY] is `any` (see the class KDoc). Templates without
+     * a container, or whose `workload-kind` is `daemon`, are skipped (see [getAvailableDaemons]).
      */
-    override fun getAvailableProfiles(): List<JobProfile> =
-        client.resources(PodTemplate::class.java)
-            .inNamespace(namespace)
+    override fun getAvailableProfiles(): List<JobProfile> {
+        val templates = if (isAnyNamespaceDiscovery)
+            client.resources(PodTemplate::class.java).inAnyNamespace()
+        else
+            client.resources(PodTemplate::class.java).inNamespace(namespace)
+
+        return templates
             .withLabel(LABEL_JOB_SET, jobSet)
             .list()
             .items
             .mapNotNull { toProfile(it) }
+    }
 
     private fun toProfile(template: PodTemplate): KubernetesJobProfile? {
         val containers = template.template?.spec?.containers ?: emptyList()
@@ -611,15 +630,26 @@ class KubernetesOrchestrationService @Inject constructor(
     override fun listExecutions(): List<JobExecution> {
         val executions = mutableListOf<JobExecution>()
 
+        val pods = if (isAnyNamespaceDiscovery) client.pods().inAnyNamespace() else client.pods().inNamespace(namespace)
+        val batchJobs = if (isAnyNamespaceDiscovery)
+            client.batch().v1().jobs().inAnyNamespace()
+        else
+            client.batch().v1().jobs().inNamespace(namespace)
+
         // Standalone pods: not owned by a batch Job, and not already terminating.
         // Terminating pods (deletionTimestamp set) are excluded so that the list reflects
         // the intended state immediately after stop() is called rather than waiting for the
         // full graceful-termination period (default 30 s) to elapse.
-        client.pods().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
+        pods.withLabel(LABEL_OWNED_BY).list().items
             .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
             .filter { pod -> pod.metadata?.deletionTimestamp == null }
             .forEach pod@{ pod ->
                 val podName = pod.metadata?.name ?: return@pod
+                // Each row reports the namespace the workload actually lives in — under
+                // NAMESPACE_DISCOVERY=any that varies per row; under `configured` it equals the
+                // configured namespace anyway (the fallback only covers a server that omitted
+                // metadata.namespace, which the API server never does for a real list result).
+                val ns = pod.metadata?.namespace ?: namespace
                 val annotations = pod.metadata?.annotations ?: emptyMap()
                 val status = mapPodPhase(pod.status?.phase)
                 val containers = containerRefsFor(pod.spec?.containers ?: emptyList(), annotations)
@@ -630,7 +660,7 @@ class KubernetesOrchestrationService @Inject constructor(
                         logger.warn(
                             "pod '{}' in namespace '{}' declares workload-kind=helm but has no {} " +
                                 "annotation -- skipping, can't be torn down without a release name",
-                            podName, namespace, ANN_HELM_RELEASE
+                            podName, ns, ANN_HELM_RELEASE
                         )
                         return@pod
                     }
@@ -639,30 +669,32 @@ class KubernetesOrchestrationService @Inject constructor(
                     // name either -- resolving that correctly would mean parsing the chart's own naming
                     // scheme, which this provider has no visibility into. Left empty rather than guessed.
                     executions += JobExecution(
-                        id = encodeId(namespace, WorkloadKind.HELM, releaseName),
+                        id = encodeId(ns, WorkloadKind.HELM, releaseName),
                         status = status,
-                        details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
+                        details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = namespace
+                        namespace = ns
                     )
                     return@pod
                 }
 
-                val id = encodeId(namespace, WorkloadKind.POD, podName)
+                val id = encodeId(ns, WorkloadKind.POD, podName)
                 executions += JobExecution(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "pod", name = podName),
+                    details = KubernetesExecutionDetails(namespace = ns, workloadKind = "pod", name = podName),
                     containers = containers,
-                    namespace = namespace
+                    namespace = ns
                 )
             }
 
         // Batch Jobs
-        client.batch().v1().jobs().inNamespace(namespace).withLabel(LABEL_OWNED_BY).list().items
+        batchJobs.withLabel(LABEL_OWNED_BY).list().items
             .forEach job@{ job ->
                 val jobName = job.metadata?.name ?: return@job
+                // Per-row namespace, mirroring the standalone-pod loop above.
+                val ns = job.metadata?.namespace ?: namespace
                 val jobAnnotations = job.spec?.template?.metadata?.annotations ?: emptyMap()
                 val containers = containerRefsFor(
                     job.spec?.template?.spec?.containers ?: emptyList(),
@@ -675,30 +707,30 @@ class KubernetesOrchestrationService @Inject constructor(
                         logger.warn(
                             "job '{}' in namespace '{}' declares workload-kind=helm but has no {} " +
                                 "annotation -- skipping, can't be torn down without a release name",
-                            jobName, namespace, ANN_HELM_RELEASE
+                            jobName, ns, ANN_HELM_RELEASE
                         )
                         return@job
                     }
                     executions += JobExecution(
-                        id = encodeId(namespace, WorkloadKind.HELM, releaseName),
-                        status = mapJobStatus(namespace, jobName, job),
-                        details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "helm", name = releaseName),
+                        id = encodeId(ns, WorkloadKind.HELM, releaseName),
+                        status = mapJobStatus(ns, jobName, job),
+                        details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = namespace
+                        namespace = ns
                     )
                     return@job
                 }
 
                 val name = jobName
-                val id = encodeId(namespace, WorkloadKind.JOB, name)
-                val status = mapJobStatus(namespace, name, job)
+                val id = encodeId(ns, WorkloadKind.JOB, name)
+                val status = mapJobStatus(ns, name, job)
                 executions += JobExecution(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "job", name = name),
+                    details = KubernetesExecutionDetails(namespace = ns, workloadKind = "job", name = name),
                     containers = containers,
-                    namespace = namespace
+                    namespace = ns
                 )
             }
 

@@ -9,6 +9,7 @@ A profile can run as either a long-standing **`Pod`** or a one-off **`batch/v1 J
 | Attribute | Key | Default | Description |
 |---|---|---|---|
 | Namespace | `dev.getelements.conductor.kubernetes.namespace` | `default` | Namespace in which templates are discovered and workloads created |
+| Namespace discovery | `dev.getelements.conductor.kubernetes.namespace.discovery` | `configured` | Controls how **listing** scopes namespaces: `configured` lists only the configured namespace; `any` lists across every namespace in the cluster — the mode a multi-tenant deployment uses when per-tenant workloads live in per-tenant namespaces (e.g. Namazu Cloud instances, whose namespace is named after the instance id). Workload creation is unaffected: every discovered profile/execution carries its own namespace, and the configured namespace remains the fallback. `any` requires cluster-wide `list` RBAC on `pods`, `jobs`, and `podtemplates`. |
 | Jobset | `dev.getelements.conductor.kubernetes.job.set` | `default` | Only templates labelled `namazu.conductor/job-set` matching this value are surfaced as profiles |
 | Job set name | `dev.getelements.conductor.kubernetes.job.set.name` | `default` | Friendly, human-readable name for this job set, shown in the admin dashboard wherever the raw job set value would otherwise be displayed |
 | Job set description | `dev.getelements.conductor.kubernetes.job.set.description` | _(empty)_ | Optional Markdown description of this job set, rendered in the admin dashboard's Available Jobs / Running Jobs pages |
@@ -237,7 +238,7 @@ no longer attachable by the time it reaches `COMPLETED`. Wait for `JobStatus.RUN
 
 ## Defining Jobs with PodTemplates
 
-Conductor discovers templates at runtime by listing `PodTemplate`s in the configured namespace and filtering by the `namazu.conductor/job-set` label. To make a template visible, apply it with the required label.
+Conductor discovers templates at runtime by listing `PodTemplate`s in the discovery scope — the configured namespace, or every namespace when namespace discovery is `any` (see the attribute table above) — and filtering by the `namazu.conductor/job-set` label. To make a template visible, apply it with the required label.
 
 ### Long-standing server exposed via LoadBalancer
 
