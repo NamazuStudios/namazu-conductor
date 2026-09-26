@@ -307,12 +307,25 @@ class KubernetesDaemonOrchestrationServiceIT {
     }
 
     private fun ensureNamespace() {
-        if (client.namespaces().withName(namespace).get() == null) {
-            client.namespaces()
-                .resource(NamespaceBuilder().withNewMetadata().withName(namespace).endMetadata().build())
-                .create()
-            logger.info("Created namespace '{}'", namespace)
+        // Namespace deletion is async: a namespace that still exists may be mid-termination (e.g.
+        // deleted by a previous run on the same cluster), and creating resources into it fails with
+        // a 403 "NamespaceTerminating". Wait for any pending termination to fully complete first.
+        repeat(30) { attempt ->
+            val phase = client.namespaces().withName(namespace).get()?.status?.phase
+            if (phase == "Terminating") {
+                logger.info("Namespace '{}' is Terminating; waiting before recreating (attempt {})", namespace, attempt)
+                Thread.sleep(1000)
+            } else {
+                if (phase == null) {
+                    client.namespaces()
+                        .resource(NamespaceBuilder().withNewMetadata().withName(namespace).endMetadata().build())
+                        .create()
+                    logger.info("Created namespace '{}'", namespace)
+                }
+                return
+            }
         }
+        throw IllegalStateException("Namespace '$namespace' did not finish terminating within 30s")
     }
 
     private fun createDaemonTemplate(name: String, replicas: Int, minReplicas: Int?, maxReplicas: Int?) {

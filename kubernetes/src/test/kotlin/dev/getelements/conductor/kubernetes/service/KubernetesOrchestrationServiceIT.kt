@@ -105,7 +105,6 @@ class KubernetesOrchestrationServiceIT {
     private var httpPath: String = "/"
     private var timeoutMinutes: Long = 5
 
-    private var createdNamespace: Boolean = false
     private val executions = mutableListOf<JobExecution>()
 
     /** Second namespace created by the discovery=any test, deleted in teardown. Null when unused. */
@@ -167,14 +166,15 @@ class KubernetesOrchestrationServiceIT {
         }
 
         if (::client.isInitialized) {
-            if (createdNamespace) {
-                runCatching { client.namespaces().withName(namespace).delete() }
-                    .onFailure { logger.warn("Failed to delete namespace '{}'", namespace, it) }
-            } else {
-                listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate).forEach { name ->
-                    runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
-                        .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
-                }
+            // Never delete the namespace itself here, even if this class created it: the namespace is
+            // shared with KubernetesDaemonOrchestrationServiceIT (same default KUBERNETES_IT_NAMESPACE),
+            // which may run in the same failsafe suite after this class, and deletion is async — a
+            // sibling setUp racing the terminating namespace gets spurious "NamespaceTerminating" 403s.
+            // Deleting only the templates this class created is sufficient; the namespace itself is
+            // harmless to leave behind on an ephemeral CI cluster.
+            listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate).forEach { name ->
+                runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
+                    .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
             }
             altNamespaceCreated?.let { alt ->
                 runCatching { client.namespaces().withName(alt).delete() }
@@ -414,13 +414,25 @@ class KubernetesOrchestrationServiceIT {
     }
 
     private fun ensureNamespace() {
-        if (client.namespaces().withName(namespace).get() == null) {
-            client.namespaces()
-                .resource(NamespaceBuilder().withNewMetadata().withName(namespace).endMetadata().build())
-                .create()
-            createdNamespace = true
-            logger.info("Created namespace '{}'", namespace)
+        // Namespace deletion is async: a namespace that still exists may be mid-termination (e.g.
+        // deleted by a previous run on the same cluster), and creating resources into it fails with
+        // a 403 "NamespaceTerminating". Wait for any pending termination to fully complete first.
+        repeat(30) { attempt ->
+            val phase = client.namespaces().withName(namespace).get()?.status?.phase
+            if (phase == "Terminating") {
+                logger.info("Namespace '{}' is Terminating; waiting before recreating (attempt {})", namespace, attempt)
+                Thread.sleep(1000)
+            } else {
+                if (phase == null) {
+                    client.namespaces()
+                        .resource(NamespaceBuilder().withNewMetadata().withName(namespace).endMetadata().build())
+                        .create()
+                    logger.info("Created namespace '{}'", namespace)
+                }
+                return
+            }
         }
+        throw IllegalStateException("Namespace '$namespace' did not finish terminating within 30s")
     }
 
     private fun createServerTemplate(name: String, serviceType: String) {
