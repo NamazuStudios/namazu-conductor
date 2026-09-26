@@ -5,7 +5,8 @@ import dev.getelements.conductor.service.JobProfile
 
 /**
  * [JobProfile] implementation for Kubernetes. Represents a single `PodTemplate` resource discovered in
- * the configured namespace.
+ * the discovery scope (the configured namespace, or every namespace when namespace discovery is `any`
+ * — see [KubernetesAttributes.NAMESPACE_DISCOVERY]).
  *
  * The [id] is `"$namespace:$name"`. [primaryContainer] is the name of the first container in the
  * template's pod spec and is the target of command, argument, and environment overrides at execution
@@ -17,7 +18,7 @@ import dev.getelements.conductor.service.JobProfile
  * (defaulting to `"NodePort"`).
  */
 data class KubernetesJobProfile(
-    val namespace: String,
+    override val namespace: String,
     val name: String,
     val primaryContainer: String,
     override val containers: List<ContainerRef>,

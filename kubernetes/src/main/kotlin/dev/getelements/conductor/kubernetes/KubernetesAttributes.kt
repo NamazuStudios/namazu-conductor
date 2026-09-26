@@ -17,6 +17,21 @@ object KubernetesAttributes {
     const val NAMESPACE = "dev.getelements.conductor.kubernetes.namespace"
 
     /**
+     * Controls how `PodTemplate` and workload **discovery** scopes namespaces:
+     * `"configured"` (the default) lists only [NAMESPACE], while `"any"` lists across
+     * every namespace in the cluster — the mode a multi-tenant deployment uses when
+     * per-tenant workloads live in per-tenant namespaces (e.g. Namazu Cloud instances,
+     * whose namespace is named after the instance id). Only listing
+     * (`OrchestrationService.getAvailableProfiles` / `OrchestrationService.listExecutions`)
+     * is affected: [NAMESPACE] remains the fallback namespace for workload creation when
+     * a `NamespaceScope` doesn't override it, and every discovered profile/execution still
+     * reports its own namespace. `"any"` requires the client's RBAC to permit cluster-wide
+     * `list` on the involved resource types (`pods`, `jobs`, `podtemplates`).
+     */
+    @ElementDefaultAttribute("configured")
+    const val NAMESPACE_DISCOVERY = "dev.getelements.conductor.kubernetes.namespace.discovery"
+
+    /**
      * The job set name used to filter `PodTemplate`s. Only templates labelled
      * `namazu.conductor/job-set=<value>` matching this attribute are surfaced as profiles.
      * Defaults to `"default"`.

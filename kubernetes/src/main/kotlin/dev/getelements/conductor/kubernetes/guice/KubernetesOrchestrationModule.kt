@@ -1,5 +1,7 @@
 package dev.getelements.conductor.kubernetes.guice
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.google.inject.PrivateModule
 import com.google.inject.Provides
 import com.google.inject.Singleton
@@ -11,6 +13,7 @@ import dev.getelements.conductor.service.OrchestrationService
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
+import io.fabric8.kubernetes.client.utils.KubernetesSerialization
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -52,11 +55,41 @@ class KubernetesOrchestrationModule : PrivateModule() {
             config.masterUrl = masterUrl
         }
 
-        return KubernetesClientBuilder().withConfig(config).build()
+        return KubernetesClientBuilder()
+            .withConfig(config)
+            .withKubernetesSerialization(UnknownFieldTolerantKubernetesSerialization())
+            .build()
     }
 
     @Provides
     @Singleton
     fun provideExecutorService(): ExecutorService = Executors.newCachedThreadPool()
+
+}
+
+/**
+ * [KubernetesSerialization] that ignores JSON fields the client's model classes don't know about.
+ *
+ * The Kubernetes API server legitimately returns fields no client model version knows — newer API
+ * versions add fields, and `managedFields` entries carry server-managed `FieldsV1` content whose
+ * keys are arbitrary (`f:metadata`, `f:template`, ...). Fabric8's [io.fabric8.kubernetes.model.jackson.UnmatchedFieldTypeModule]
+ * normally absorbs such fields into each model's `additionalProperties`, but that absorb path
+ * depends on Jackson any-setter visibility, which does not survive every Element classloader
+ * configuration: in the Namazu Cloud control plane (conductor.kubernetes + several sibling
+ * elements sharing an API classloader, with Jackson also present on the platform classpath) the
+ * FieldsV1 deserializer ends up with no any-setter and Jackson's default
+ * [DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES] turns a routine PodTemplate listing into
+ * `UnrecognizedPropertyException: Unrecognized field "f:metadata"`.
+ *
+ * Ignoring unknown fields is the standard Kubernetes client behavior (kubectl drops them
+ * client-side), and it is robust against any classloader arrangement: `handleUnknownVanilla`
+ * returns silently instead of throwing, for every model class and every field.
+ */
+private class UnknownFieldTolerantKubernetesSerialization : KubernetesSerialization() {
+
+    override fun configureMapper(mapper: ObjectMapper) {
+        super.configureMapper(mapper)
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+    }
 
 }
