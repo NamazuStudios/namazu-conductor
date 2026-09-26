@@ -1,6 +1,8 @@
 package dev.getelements.conductor.admin
 
+import dev.getelements.conductor.JobAccessPolicy
 import dev.getelements.conductor.JobExecution
+import dev.getelements.conductor.TerminalAttachPolicy
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
@@ -77,6 +79,44 @@ internal object ElementLookup {
             if (name == elementName) found = service
         }
         return found
+    }
+
+    /**
+     * Calls [action] once per deployed Element that exposes a [TerminalAttachPolicy], passing the
+     * Element's name and the policy. Mirrors [forEachOrchestrationService]'s registry scan —
+     * elements that don't expose one (including the `SdkServiceNotFoundException` visibility quirk
+     * documented on [ConductorAdminJobsResource]) are silently skipped.
+     */
+    fun forEachTerminalAttachPolicy(callerClass: Class<*>, action: (elementName: String, policy: TerminalAttachPolicy) -> Unit) {
+        val registry = ElementRegistrySupplier.getElementLocal(callerClass).get()
+        registry.stream().toList().forEach { element ->
+            val name = element.elementRecord.definition().name()
+            val policy: TerminalAttachPolicy? = try {
+                element.serviceLocator.findInstance(TerminalAttachPolicy::class.java).map { it.get() }.orElse(null)
+            } catch (e: SdkServiceNotFoundException) {
+                null
+            }
+            if (policy != null) action(name, policy)
+        }
+    }
+
+    /**
+     * Calls [action] once per deployed Element that exposes a [JobAccessPolicy], passing the
+     * Element's name and the policy. Mirrors [forEachTerminalAttachPolicy]'s registry scan —
+     * elements that don't expose one (including the `SdkServiceNotFoundException` visibility
+     * quirk documented on [ConductorAdminJobsResource]) are silently skipped.
+     */
+    fun forEachJobAccessPolicy(callerClass: Class<*>, action: (elementName: String, policy: JobAccessPolicy) -> Unit) {
+        val registry = ElementRegistrySupplier.getElementLocal(callerClass).get()
+        registry.stream().toList().forEach { element ->
+            val name = element.elementRecord.definition().name()
+            val policy: JobAccessPolicy? = try {
+                element.serviceLocator.findInstance(JobAccessPolicy::class.java).map { it.get() }.orElse(null)
+            } catch (e: SdkServiceNotFoundException) {
+                null
+            }
+            if (policy != null) action(name, policy)
+        }
     }
 
     data class JobLookup(val elementName: String, val service: OrchestrationService, val execution: JobExecution)

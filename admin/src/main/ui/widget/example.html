@@ -1,0 +1,118 @@
+<!doctype html>
+<!-- Runnable example for the standalone ConductorTerminal widget bundle. Packaged alongside the
+     bundle in the admin element's UI directory; also openable directly from a local checkout
+     (`admin/ui/`) — the <script src> below resolves relative to this file, so it works either way. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ConductorTerminal widget example</title>
+  <script src="./conductor-terminal.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #0a0a0a; color: #ededed; display: flex; min-height: 100vh; align-items: stretch; }
+    .sidebar { width: 320px; padding: 1rem; border-right: 1px solid #262626; display: flex; flex-direction: column; gap: 1rem; flex-shrink: 0; }
+    .sidebar h1 { font-size: 1rem; margin: 0; }
+    .sidebar label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #a3a3a3; }
+    input, select { width: 100%; box-sizing: border-box; background: #1a1a1a; color: #ededed; border: 1px solid #404040; border-radius: 6px; padding: 0.4rem 0.5rem; font-size: 0.8rem; }
+    button { background: #1a1a1a; color: #ededed; border: 1px solid #404040; border-radius: 6px; padding: 0.4rem 0.75rem; font-size: 0.8rem; cursor: pointer; }
+    button:hover { border-color: #737373; }
+    .statusbar { font-size: 0.75rem; font-family: ui-monospace, monospace; color: #a3a3a3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 9999px; margin-right: 0.4rem; vertical-align: middle; }
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #console { flex: 1; min-height: 0; padding: 0.75rem; }
+    .toasts { position: fixed; top: 0.5rem; right: 0.5rem; z-index: 10; display: flex; flex-direction: column; gap: 0.375rem; max-width: 24rem; }
+    .toast { background: #1a1a1a; border: 1px solid #404040; border-radius: 6px; padding: 0.5rem 0.6rem; font-size: 0.75rem; box-shadow: 0 4px 16px rgb(0 0 0 / 0.4); animation: fadein 150ms ease-out; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h1>ConductorTerminal</h1>
+    <label>Session secret <input id="secret" placeholder="Paste a valid Elements session secret"></label>
+    <label>Job id <input id="jobId" placeholder="e.g. $namespace:$kind:$name"></label>
+    <label>
+      OSC demo
+      <select id="oscDemo">
+        <option value="quiet">— disabled —</option>
+        <option value="9001">Toast (OSC 9001)</option>
+        <option value="1337">Open URL (OSC 1337)</option>
+        <option value="52">Copy (OSC 52)</option>
+        <option value="777">Custom OSC 777 (via onOsc)</option>
+      </select>
+    </label>
+    <button id="connect">Open terminal</button>
+    <div class="statusbar"><span class="dot" id="dot" style="background:#737373"></span><span id="status">idle</span></div>
+  </div>
+  <div class="main">
+    <div id="console"></div>
+  </div>
+  <div class="toasts" id="toasts"></div>
+
+  <script>
+    var term = null
+
+    function toast(message) {
+      var el = document.createElement('div')
+      el.className = 'toast'
+      el.textContent = message
+      document.getElementById('toasts').appendChild(el)
+      setTimeout(function () { el.remove() }, 4000)
+    }
+
+    function setStatus(text, color) {
+      document.getElementById('status').textContent = text
+      document.getElementById('dot').style.background = color
+    }
+
+    document.getElementById('connect').addEventListener('click', function () {
+      if (term) { term.dispose(); term = null }
+
+      var secret = document.getElementById('secret').value.trim()
+      var jobId = document.getElementById('jobId').value.trim()
+      if (!secret || !jobId) { toast('Please provide a session secret and job id'); return }
+
+      setStatus('connecting…', '#eab308')
+
+      term = ConductorTerminal.mount(document.getElementById('console'), {
+        sessionSecret: secret,
+        jobId: jobId,
+        // Example of a custom OSC ident overriding a built-in return path — a host could send this
+        // back to the container over the same stream via term.write('\x1b]777;hello\x07').
+        toasts: false,       // build our own toast UI (below)
+        openUrl: false,      // surface via our own event hook as well
+      })
+
+      term.on('status', function (s) {
+        setStatus(s, s === 'open' ? '#22c55e' : s === 'closed' || s === 'error' ? '#ef4444' : '#eab308')
+      })
+      term.on('toast', function (d) { toast('toast: ' + d.message) })
+      term.on('open-url', function (d) { toast('open-url: ' + d.url) })
+      term.on('copy', function (d) { toast('copy: ' + d.text) })
+      term.on('error', function (m) { setStatus('error: ' + m, '#ef4444') })
+
+      // Demonstrates a handler for an extended OSC ident. In a real attachment a remote process
+      // writes it to stdout: printf '\e]777;payload\a' — here the demo pushes it locally below.
+      // Returning `true` claims the sequence (stops any built-in for that ident).
+      term.onOsc(777, function (data) {
+        toast('OSC 777: ' + data)
+        return true
+      })
+    })
+
+    // These push a raw OSC sequence into the terminal stdin channel, where the attached shell
+    // would normally echo it back to the pty (exercising the widget's OSC handlers end-to-end as it
+    // would arrive from a real remote process writing `printf '\e]9001;…\a'` to its own stdout).
+    document.getElementById('oscDemo').addEventListener('change', function (e) {
+      if (!term) return
+      var selected = e.target.value
+      var payloads = {
+        '9001': '\x1b]9001;Widget OSC demo\x07',
+        '1337': '\x1b]1337;OpenURL=https://example.com\x07',
+        '52': '\x1b]52;c;' + btoa(String.fromCharCode.apply(null, new TextEncoder().encode('widget clipboard test'))) + '\x07',
+        '777': '\x1b]777;hello from custom osc\x07',
+      }
+      if (payloads[selected]) term.write(payloads[selected])
+    })
+  </script>
+</body>
+</html>

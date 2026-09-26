@@ -108,6 +108,9 @@ class KubernetesOrchestrationServiceIT {
     private var createdNamespace: Boolean = false
     private val executions = mutableListOf<JobExecution>()
 
+    /** Second namespace created by the discovery=any test, deleted in teardown. Null when unused. */
+    private var altNamespaceCreated: String? = null
+
     @BeforeClass
     fun setUp() {
         namespace = env("KUBERNETES_IT_NAMESPACE", "conductor-it")
@@ -173,6 +176,10 @@ class KubernetesOrchestrationServiceIT {
                         .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
                 }
             }
+            altNamespaceCreated?.let { alt ->
+                runCatching { client.namespaces().withName(alt).delete() }
+                    .onFailure { logger.warn("Failed to delete alt namespace '{}'", alt, it) }
+            }
         }
 
         if (::executor.isInitialized) executor.shutdownNow()
@@ -185,6 +192,63 @@ class KubernetesOrchestrationServiceIT {
         assertTrue(ids.contains("$namespace:$nodePortTemplate"), "NodePort profile not discovered; found: $ids")
         assertTrue(ids.contains("$namespace:$loadBalancerTemplate"), "LoadBalancer profile not discovered; found: $ids")
         assertTrue(ids.contains("$namespace:$jobTemplate"), "Job profile not discovered; found: $ids")
+    }
+
+    /**
+     * NAMESPACE_DISCOVERY=`any`: profiles and executions span every namespace in the cluster —
+     * the mode a multi-tenant deployment uses when per-tenant workloads live in per-tenant
+     * namespaces. Exercises a second namespace this test creates and owns, and a second service
+     * instance constructed with `namespaceDiscovery = "any"` sharing the same client/executor:
+     * profiles from both namespaces list (each id namespaced, each profile carrying its own
+     * namespace), the discovery=`configured` service still sees only its own, and an execution
+     * launched from the foreign-namespace profile lists back with that namespace.
+     */
+    @Test
+    fun anyNamespaceDiscoveryListsAndExecutesAcrossNamespaces() {
+        val altNamespace = "$namespace-alt-$runSuffix".also { altNamespaceCreated = it }
+        if (client.namespaces().withName(altNamespace).get() == null) {
+            client.namespaces()
+                .resource(NamespaceBuilder().withNewMetadata().withName(altNamespace).endMetadata().build())
+                .create()
+        }
+
+        val altTemplate = "conductor-it-alt-job-$runSuffix"
+        createJobTemplate(altTemplate, altNamespace)
+
+        val anyDiscovery = KubernetesOrchestrationService(
+            namespace = namespace,
+            namespaceDiscovery = "any",
+            jobSet = jobSet,
+            jobSetName = jobSet,
+            jobSetDescription = "",
+            pollInterval = "3000",
+            watchEnabled = "false",
+            kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
+            client = client,
+            executor = executor
+        )
+
+        // Profiles: every namespace's templates are visible under discovery=any, each id namespaced.
+        val ids = anyDiscovery.getAvailableProfiles().map { it.id }.toSet()
+        assertTrue(ids.contains("$namespace:$jobTemplate"), "Configured-namespace profile missing from discovery=any listing: $ids")
+        assertTrue(ids.contains("$altNamespace:$altTemplate"), "Second-namespace profile missing from discovery=any listing: $ids")
+
+        // The discovery=configured service still sees only its own namespace's profiles.
+        val configuredIds = service.getAvailableProfiles().map { it.id }.toSet()
+        assertFalse(configuredIds.contains("$altNamespace:$altTemplate"), "discovery=configured leaked a foreign-namespace profile: $configuredIds")
+
+        // findAvailableProfile resolves across namespaces, and execute() lands in the profile's own namespace.
+        val profile = anyDiscovery.findAvailableProfile("$altNamespace:$altTemplate")
+            ?: throw AssertionError("Profile '$altNamespace:$altTemplate' not found under discovery=any")
+        assertEquals(profile.namespace, altNamespace, "Expected the profile to carry its own namespace")
+
+        val execution = anyDiscovery.execute(JobRequest(profile = profile)).also { executions += it }
+        anyDiscovery.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        // listExecutions() under discovery=any reports the workload with its own namespace.
+        val listed = anyDiscovery.listExecutions().firstOrNull { it.id == execution.id }
+            ?: throw AssertionError("Execution '${execution.id}' missing from discovery=any listing")
+        assertEquals(listed.namespace, altNamespace, "Expected the execution to report its own namespace")
     }
 
     @Test
@@ -387,11 +451,11 @@ class KubernetesOrchestrationServiceIT {
         client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
     }
 
-    private fun createJobTemplate(name: String) {
+    private fun createJobTemplate(name: String, ns: String = namespace) {
         val template = PodTemplateBuilder()
             .withNewMetadata()
                 .withName(name)
-                .withNamespace(namespace)
+                .withNamespace(ns)
                 .addToLabels(LABEL_JOB_SET, jobSet)
                 .addToAnnotations(ANN_WORKLOAD_KIND, "job")
             .endMetadata()
@@ -406,7 +470,7 @@ class KubernetesOrchestrationServiceIT {
                 .endSpec()
             .endTemplate()
             .build()
-        client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
+        client.resources(PodTemplate::class.java).inNamespace(ns).resource(template).create()
     }
 
     private fun createMultiContainerTemplate(name: String) {

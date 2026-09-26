@@ -40,7 +40,7 @@ You can safely override any of these per-deployment — the dashboard UI discove
 
 Returns the current profile list from every deployed `OrchestrationService` provider.
 
-**Authentication:** `Elements-SessionSecret` header with a valid session token. `SUPERUSER` level required — returns `403` for any other level.
+**Authentication:** `Elements-SessionSecret` header with a valid session token. `SUPERUSER` sessions see every profile. Otherwise, a deployed [`JobAccessPolicy`](#authorization-policies) may grant listing visibility, in which case rows are filtered serverside to the namespaces the session may see; with no policy deployed (or none granting visibility) this requires `SUPERUSER` level — returns `403` for any other level.
 
 #### Response
 
@@ -74,7 +74,7 @@ Returns the current profile list from every deployed `OrchestrationService` prov
 
 | HTTP status | Cause |
 |---|---|
-| `403 Forbidden` | Not authenticated, or user is not `SUPERUSER` |
+| `403 Forbidden` | Not authenticated, or not `SUPERUSER` and no [`JobAccessPolicy`](#authorization-policies) grants listing visibility |
 | `503 Service Unavailable` | No `OrchestrationService` providers are deployed |
 
 ## WebSocket API
@@ -99,8 +99,9 @@ itself. The very first WebSocket **text** frame the client sends must be a JSON 
 
 `command` is optional; when omitted, the provider execs its own default (typically a shell). The
 server closes the connection with close code `VIOLATED_POLICY` if this frame doesn't arrive within 10
-seconds of connecting, is malformed, carries an invalid or expired session secret, or belongs to a
-user below `SUPERUSER` level. `UNEXPECTED_CONDITION` is used instead if authorization succeeds but the
+seconds of connecting, is malformed, carries an invalid or expired session secret, or the attach is
+denied by the authorization rules (see [Authorization policies](#authorization-policies)).
+`UNEXPECTED_CONDITION` is used instead if authorization succeeds but the
 provider fails to open stdio for the job/container.
 
 **Steady-state framing**, once authorized:
@@ -192,3 +193,14 @@ Errors are expandable — click the error badge on any provider row to see the f
 ## Multi-provider behaviour
 
 The admin element queries the Elements registry at request time. If multiple Conductor providers are deployed (e.g. both ECS and Kubernetes), each appears as a separate entry in the `providers` array. Providers that fail to return profiles report their error inline without affecting the others.
+
+## Authorization policies
+
+Historically every admin surface (`GET /profiles`, `GET /jobs`, `POST /jobs`, `POST /jobs/stop`, and terminal attach) admitted `SUPERUSER` sessions only. Both surfaces are now delegable to tenant Elements through two sibling SPIs from the `api` module, deployed by binding + exposing an implementation from a Guice `PrivateModule` — the admin module discovers every deployed implementation by scanning the Element registry:
+
+| SPI | Covers | Mechanism |
+|---|---|---|
+| `dev.getelements.conductor.TerminalAttachPolicy` | Terminal attach (WebSocket) | Per-request vote: any `DENY` vetoes outright (superusers included), a single `ALLOW` suffices, `PASS` abstains |
+| `dev.getelements.conductor.JobAccessPolicy` | The REST surface | **Listings** (`GET /profiles`, `GET /jobs`): `visibleNamespaces(session, user)` grants a per-session visibility (union across policies; `All` wins; rows are filtered serverside by `profile.namespace`/`execution.namespace` — rows with a `null` namespace are visible only under `All`). **Execute/stop** (`POST /jobs`, `POST /jobs/stop`): per-request vote with the same aggregation as attach |
+
+When no policy Element is deployed (or every vote abstains), the historical behaviour applies: `SUPERUSER`-only. A tenant Element implementing either policy decides, in arbitrary serverside code, which sessions may see/do what — e.g. Namazu Cloud's element grants its members access scoped to the namespaces named after their own instances. See the SPIs' KDoc in `api/src/main/kotlin/dev/getelements/conductor/` for the full aggregation rules.
