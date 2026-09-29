@@ -101,6 +101,10 @@ export interface ExecuteJobRequestBody {
   environment?: Record<string, string>
   placement?: unknown[]
   tty?: boolean
+  /** Per-launch metadata overrides, merged over the profile's declared `metadata`. Omitted
+   * entirely when the operator added none, so the server applies no overrides rather than an
+   * empty set. A `namazu.conductor`-prefixed key is rejected with 400. */
+  metadata?: Record<string, string>
 }
 
 export async function executeJob(body: ExecuteJobRequestBody) {

@@ -1,5 +1,5 @@
 import React from 'react'
-import { KVEditor, ListEditor } from './ui'
+import { KVEditor, ListEditor, RESERVED_METADATA_PREFIX } from './ui'
 import type { KVPair } from './ui'
 import type { PlacementInput } from './types'
 
@@ -13,6 +13,7 @@ export interface AdvancedOptions {
   args: string[]
   command: string[]
   env: KVPair[]
+  metadata: KVPair[]
   placement: PlacementInput
   tty: boolean
   /** Whether to add the operator's own session secret to `env` at launch time — see
@@ -26,10 +27,32 @@ export function defaultAdvancedOptions(impliedTerminal: boolean, injectSessionSe
     args: [],
     command: impliedTerminal ? TERMINAL_COMMAND_SUGGESTION : [],
     env: [],
+    metadata: [],
     placement: { type: '', region: '', ip: '', lat: '', lon: '' },
     tty: impliedTerminal,
     injectSessionSecret: injectSessionSecretByDefault,
   }
+}
+
+/**
+ * The metadata overrides to actually send, or `undefined` when the operator added none.
+ *
+ * `undefined` (omitted) rather than `{}` matters: an empty object is a no-op merge, but omitting the
+ * field keeps the request body honest that nothing was overridden, matching how `command` and
+ * `placement` already behave.
+ *
+ * A `namazu.conductor`-prefixed key is dropped here rather than sent and rejected. The server would
+ * answer 400 for it, but the field's label says the prefix is reserved, and letting an operator
+ * compose a key that is guaranteed to be refused is a worse experience than not sending it.
+ */
+export function deriveMetadataOverrides(metadata: KVPair[]): Record<string, string> | undefined {
+  const overrides: Record<string, string> = {}
+  metadata.forEach((pair) => {
+    const key = pair.key.trim()
+    if (!key || key.startsWith(RESERVED_METADATA_PREFIX)) return
+    overrides[key] = pair.value
+  })
+  return Object.keys(overrides).length > 0 ? overrides : undefined
 }
 
 /** `undefined` (omitted), not `[]`, when the caller never touched the field — see AvailableJobsPage. */
@@ -106,6 +129,19 @@ export function RunForm(props: {
         onAdd: () => onChange({ ...value, env: [...value.env, { key: '', value: '' }] }),
         onRemove: (i) => onChange({ ...value, env: value.env.filter((_, j) => j !== i) }),
       })),
+
+    h('div', null,
+      h('label', { className: labelClass }, 'Metadata overrides'),
+      h(KVEditor, {
+        items: value.metadata,
+        onChangeKey: (i, v) => onChange({ ...value, metadata: value.metadata.map((p, j) => (j === i ? { ...p, key: v } : p)) }),
+        onChangeValue: (i, v) => onChange({ ...value, metadata: value.metadata.map((p, j) => (j === i ? { ...p, value: v } : p)) }),
+        onAdd: () => onChange({ ...value, metadata: [...value.metadata, { key: '', value: '' }] }),
+        onRemove: (i) => onChange({ ...value, metadata: value.metadata.filter((_, j) => j !== i) }),
+      }),
+      h('p', { className: 'text-xs text-muted-foreground mt-1' },
+        `merged over the profile's declared metadata for this launch; keys starting with ` +
+        `"${RESERVED_METADATA_PREFIX}" are reserved by Conductor and are ignored`)),
 
     h('div', null,
       h('label', { className: labelClass }, 'Placement'),

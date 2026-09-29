@@ -15,7 +15,15 @@ data class ExecuteJobRequest @JsonCreator constructor(
     @JsonProperty("command")     val command: List<String>?,
     @JsonProperty("environment") val environment: Map<String, String>?,
     @JsonProperty("placement")   val placement: List<PlacementDto>?,
-    @JsonProperty("tty")         val tty: Boolean?
+    @JsonProperty("tty")         val tty: Boolean?,
+    /**
+     * Per-launch metadata overrides, merged over the profile's declared `metadata`. Absent or null
+     * means "no overrides" — an empty object is equivalent, since there is nothing to merge.
+     *
+     * A key carrying the reserved `namazu.conductor` prefix is rejected with 400 before dispatch;
+     * see [ConductorAdminJobsResource.execute].
+     */
+    @JsonProperty("metadata")   val metadata: Map<String, String>?
 )
 
 data class PlacementDto @JsonCreator constructor(

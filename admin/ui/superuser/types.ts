@@ -17,6 +17,9 @@ export interface JobExecution {
   endpoints?: JobEndpoint[]
   details?: unknown
   containers?: ContainerRef[]
+  /** Tags/annotations actually present on the workload. Read back from the provider, so it can be a
+   * superset of what was declared. Absent for providers with no metadata channel. */
+  metadata?: Record<string, string>
 }
 
 export interface JobProfile {
@@ -24,6 +27,10 @@ export interface JobProfile {
   containers?: ContainerRef[]
   terminalJob?: boolean
   description?: string
+  /** Free-form presentation metadata declared by the infrastructure — the whole Kubernetes
+   * annotation map or ECS tag map, verbatim, including `namazu.conductor` keys. Conductor assigns
+   * no meaning to any of it. */
+  metadata?: Record<string, string>
   [key: string]: unknown
 }
 

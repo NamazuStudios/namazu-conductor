@@ -1,7 +1,7 @@
 import React from 'react'
 import { executeJob, fetchProfiles, getSessionSecret } from './api'
-import { Accordion, CollapsibleMarkdown, ErrorBoundary, MarkdownBlock, Pagination, StatusIndicator } from './ui'
-import { RunForm, defaultAdvancedOptions, derivePlacementList } from './RunForm'
+import { Accordion, CollapsibleMarkdown, ErrorBoundary, MarkdownBlock, MetadataPills, Pagination, StatusIndicator } from './ui'
+import { RunForm, defaultAdvancedOptions, deriveMetadataOverrides, derivePlacementList } from './RunForm'
 import type { AdvancedOptions } from './RunForm'
 import type { JobProfile, ProviderProfilesResult } from './types'
 
@@ -27,6 +27,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
     : undefined
   const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() =>
     defaultAdvancedOptions(isTerminalJob, Boolean(profile.sessionSecretEnabledByDefault)))
+  const hasProfileMetadata = Object.keys(profile.metadata ?? {}).some((k) => k.trim())
 
   function handleStart() {
     setStarting(true); setStartError(null); setStartedId(null)
@@ -49,13 +50,15 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       environment,
       placement: derivePlacementList(advanced.placement),
       tty: advanced.tty,
+      // undefined when the operator added no overrides — see deriveMetadataOverrides.
+      metadata: deriveMetadataOverrides(advanced.metadata),
     })
       .then((execution) => { setStarting(false); setStartedId(execution.id) })
       .catch((e: Error) => { setStartError(e.message || 'Failed to start job'); setStarting(false) })
   }
 
   const detailKeys = Object.keys(profile).filter((k) =>
-    !['id', 'description', 'terminalJob', 'containers', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
+    !['id', 'description', 'terminalJob', 'containers', 'metadata', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
     h('span', { className: 'font-mono text-sm font-medium' }, profile.id),
@@ -77,6 +80,12 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       `Started ✓ ${startedId} — see Running Jobs & Services.`),
     profile.description && h('div', { className: 'mb-3' },
       h(CollapsibleMarkdown, { markdown: profile.description, label: 'Description' })),
+    // Declared metadata, verbatim. Capped at 4 with a "+N more" affordance rather than a full
+    // key/value table: on Kubernetes this is every annotation on the PodTemplate, which is routinely
+    // a dozen entries and would bury the description and Run button.
+    hasProfileMetadata && h('div', { className: 'mb-3' },
+      h('div', { className: 'text-xs font-medium text-muted-foreground mb-1' }, 'Metadata'),
+      h(MetadataPills, { metadata: profile.metadata, max: 4 })),
     detailKeys.length > 0 &&
       h('div', { className: 'mb-3' },
         h(Accordion, {

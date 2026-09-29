@@ -226,3 +226,53 @@ export function KVEditor(props: {
       h('button', { type: 'button', className: 'text-muted-foreground hover:text-destructive px-1', onClick: () => props.onRemove(i) }, '✕'))),
     h('button', { type: 'button', className: 'text-xs text-primary hover:underline', onClick: props.onAdd }, '+ Add'))
 }
+
+/** `namazu.conductor` keys drive Conductor's own behaviour, so they read as structural rather than
+ * as free-form metadata. Matches the API's `Metadata.RESERVED_PREFIX`. */
+export const RESERVED_METADATA_PREFIX = 'namazu.conductor'
+
+/**
+ * Renders a metadata map as compact `key=value` pills. A value that parses as an http(s) URL
+ * becomes a link — metadata commonly carries a dashboard or ticket URL, and making the operator
+ * click through is the whole point of surfacing it.
+ *
+ * Every value is rendered as a text child, never as raw HTML. `target="_blank"` is paired with
+ * `rel="noopener noreferrer"` so a metadata value can't reach back through `window.opener`.
+ * Only http(s) is linkified: a `javascript:` value would otherwise execute on click, and
+ * metadata comes from infrastructure the operator may not fully control.
+ */
+export function MetadataPills(props: { metadata?: Record<string, string>; max?: number }) {
+  const entries = Object.entries(props.metadata ?? {}).filter(([k]) => k.trim())
+  if (entries.length === 0) return null
+
+  const max = props.max ?? entries.length
+  const shown = entries.slice(0, max)
+  const hidden = entries.length - shown.length
+
+  return h('div', { className: 'flex flex-wrap items-center gap-1' },
+    shown.map(([key, value]) => h('span', {
+      key,
+      className: 'text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono max-w-full',
+      title: `${key} = ${value}`,
+    },
+      h('span', { className: 'opacity-70' }, `${key}=`),
+      isLinkable(value)
+        ? h('a', {
+            href: value,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            className: 'text-primary hover:underline',
+            onClick: (e: React.MouseEvent) => e.stopPropagation(),
+          }, value)
+        : h('span', { className: 'break-all' }, value))),
+    hidden > 0 && h('span', { className: 'text-xs text-muted-foreground' }, `+${hidden} more`))
+}
+
+function isLinkable(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}

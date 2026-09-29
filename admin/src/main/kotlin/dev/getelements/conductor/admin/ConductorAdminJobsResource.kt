@@ -5,8 +5,10 @@ import dev.getelements.conductor.JobAccessContext
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobVisibility
+import dev.getelements.conductor.Metadata
 import dev.getelements.conductor.admin.model.ExecuteJobRequest
 import dev.getelements.conductor.admin.model.StopJobRequest
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
@@ -141,6 +143,7 @@ class ConductorAdminJobsResource @Inject constructor(
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Job submitted. Returns a JobExecution with id, status, and any initial endpoints.")
+    @ApiResponse(responseCode = "400", description = "The request's metadata carries a reserved namazu.conductor-prefixed key.")
     @ApiResponse(responseCode = "403", description = "Not authenticated, vetoed by a JobAccessPolicy, or insufficient privilege level.")
     @ApiResponse(responseCode = "404", description = "Element or profile not found.")
     @ApiResponse(responseCode = "500", description = "The provider accepted the request but execution failed.")
@@ -172,18 +175,40 @@ class ConductorAdminJobsResource @Inject constructor(
         val effectiveCommand = request.command
             ?: (if (effectiveTty) TERMINAL_COMMAND_SUGGESTION else emptyList())
 
+        val metadataOverrides = request.metadata ?: emptyMap()
+
+        // Reject reserved keys here rather than letting the provider's JobException fall into the
+        // generic 500 below. A reserved key is a malformed request, not a provider fault, and the
+        // caller needs to know which key was wrong to fix it. Checked before dispatch so nothing is
+        // created on the way to a rejection -- Metadata.merge() throws again provider-side, but
+        // that's a backstop, not the primary defence.
+        try {
+            Metadata.validate(metadataOverrides)
+        } catch (e: ReservedMetadataKeyException) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to e.message))
+                .build()
+        }
+
         val jobRequest = JobRequest(
             profile     = profile,
             args        = request.args ?: emptyList(),
             command     = effectiveCommand,
             environment = request.environment ?: emptyMap(),
             placement   = request.placement?.map { it.toPlacement() } ?: emptyList(),
-            tty         = effectiveTty
+            tty         = effectiveTty,
+            metadata    = metadataOverrides
         )
 
         return try {
             val execution = service.execute(jobRequest)
             Response.ok(execution).build()
+        } catch (e: ReservedMetadataKeyException) {
+            // A provider that didn't pre-validate still reports the same condition; keep the status
+            // code honest rather than letting it degrade into a 500.
+            Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to (e.message ?: "Reserved metadata key")))
+                .build()
         } catch (e: Exception) {
             logger.warn("Job execution failed for profile {} on element {}", request.profileId, request.element, e)
             Response.status(Response.Status.INTERNAL_SERVER_ERROR)

@@ -1,6 +1,6 @@
 import React from 'react'
 import { fetchJobs, stopJob } from './api'
-import { Accordion, DetailGrid, MarkdownBlock } from './ui'
+import { Accordion, DetailGrid, MarkdownBlock, MetadataPills } from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
 
@@ -61,6 +61,7 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
   }
 
   const containers = ex.containers ?? []
+  const metadataEntries = Object.entries(ex.metadata ?? {}).filter(([k]) => k.trim())
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
     h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
@@ -76,6 +77,12 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   return h(Accordion, { isExpanded: props.isExpanded, onToggle: props.onToggle, header },
     stopError && h('p', { className: 'text-xs text-destructive mb-2' }, stopError),
+    // What the workload actually carries, not what was requested — see JobExecution.metadata in the
+    // api module. Only rendered when non-empty, since most executions declare nothing.
+    metadataEntries.length > 0 &&
+      h('div', { className: 'mb-3' },
+        h('div', { className: 'text-xs font-medium text-muted-foreground mb-1' }, 'Metadata'),
+        h(MetadataPills, { metadata: ex.metadata })),
     containers.length > 0 &&
       h('div', { className: 'space-y-1.5 mb-3' },
         h('div', { className: 'text-xs font-medium text-muted-foreground' }, 'Containers'),
