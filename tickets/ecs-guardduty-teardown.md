@@ -62,9 +62,13 @@ stack, runs the Fargate/EC2-spot/daemon/metadata tests against it, scrubs, and t
   surfaced what the disabled era had been masking: the least-privilege IAM user in
   `integration-test.yaml` predated the metadata feature, and every tagging path (the metadata
   tests, and tag-on-create on `RunTask`/`CreateService`) failed with `AccessDenied` on
-  `ecs:TagResource` — five of nine tests. Added to the cluster-conditioned
-  `EcsClusterScopedActions` statement (the failed resources were all task/service ARNs in the
-  cluster; still fits the inline policy's 2,048-byte quota).
+  `ecs:TagResource` — five of nine tests on the first run. The grant went into the unconditioned
+  wildcard statement alongside `ecs:ListTagsForResource` rather than the cluster-conditioned one:
+  AWS does not document `ecs:cluster` as supported for the tag APIs, and the second run proved the
+  difference is real — with the cluster-conditioned grant, task `TagResource` passed but service
+  `TagResource` was still denied (the condition doesn't evaluate on service tag calls). The
+  wildcard grant is low-risk in practice: this user can only ever create workloads in the stack's
+  own cluster.
 - **The EdgeGap retry's first exercise 403'd on the retry itself.** Attempt 2's `execute()` failed
   with an EdgeGap API 403: EdgeGap throttles concurrent deployments per account, and the failed
   attempt's deployment was still live until teardown. The retry analyzer now stops all created
