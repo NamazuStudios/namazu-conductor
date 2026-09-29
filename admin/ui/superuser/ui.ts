@@ -232,6 +232,123 @@ export function KVEditor(props: {
 export const RESERVED_METADATA_PREFIX = 'namazu.conductor'
 
 /**
+ * The `namazu.conductor` key suffix that drives Conductor's behaviour, or `null` for a key that
+ * isn't Conductor's. Handles both the Kubernetes (`namazu.conductor/…`) and ECS
+ * (`namazu.conductor:…`) separator forms — profiles and executions report keys verbatim in their
+ * provider-native form, so the UI has to understand both.
+ */
+export function conductorKeySuffix(key: string): string | null {
+  if (key.startsWith(`${RESERVED_METADATA_PREFIX}/`)) return key.slice(RESERVED_METADATA_PREFIX.length + 1)
+  if (key.startsWith(`${RESERVED_METADATA_PREFIX}:`)) return key.slice(RESERVED_METADATA_PREFIX.length + 1)
+  return null
+}
+
+/** Mirrors the API module's `Metadata.BEHAVIORAL_KEY_SUFFIXES` — see `Metadata.kt` for the
+ * per-key provenance. The UI can't import the API's copy (no Kotlin in the bundle), so the two
+ * lists must be kept in step by hand. */
+const BEHAVIORAL_METADATA_SUFFIXES = new Set([
+  'workload-kind', 'expose-ports', 'service-type', 'terminal-job', 'helm-release',
+  'ttl-seconds-after-finished', 'backoff-limit', 'active-deadline-seconds',
+  'completions', 'parallelism', 'session-secret-env', 'enable-session-secret',
+  'replicas', 'min-replicas', 'max-replicas', 'target-cpu-utilization-percentage',
+  'default-container-exec',
+  'workloadkind', 'jobset', 'job-set', 'launchtype', 'assignpublicip',
+  'desiredcount', 'mincount', 'maxcount',
+])
+
+/** True when [key] is a behavioural Conductor key — one the server rejects as an override. */
+export function isBehavioralMetadataKey(key: string): boolean {
+  const suffix = conductorKeySuffix(key)
+  return suffix !== null && BEHAVIORAL_METADATA_SUFFIXES.has(suffix.toLowerCase())
+}
+
+/**
+ * True when the metadata map carries the cosmetic `namazu.conductor` boolean flag [suffix] set to
+ * `true` (case-insensitive on both the key suffix and the value; anything else means "not set").
+ */
+export function metadataFlag(metadata: Record<string, string> | undefined, suffix: string): boolean {
+  return Object.entries(metadata ?? {}).some(([key, value]) =>
+    conductorKeySuffix(key)?.toLowerCase() === suffix.toLowerCase() && value.trim().toLowerCase() === 'true')
+}
+
+/** Every `namazu.conductor/link.{title}` entry in the map, as `{title, url}` pairs. Non-http(s)
+ * values are dropped — they get linkified nowhere else, and a `javascript:` href is exactly what
+ * the linkifier must never emit. */
+export function parseLinkMetadata(metadata: Record<string, string> | undefined): { title: string; url: string }[] {
+  return Object.entries(metadata ?? {}).flatMap(([key, value]) => {
+    const suffix = conductorKeySuffix(key)
+    if (!suffix || !suffix.toLowerCase().startsWith('link.')) return []
+    const title = suffix.slice('link.'.length).trim()
+    if (!title || !isLinkable(value)) return []
+    return [{ title, url: value.trim() }]
+  })
+}
+
+/** The favicon for a link's origin, falling back to a generic 🔗 when it can't load. An `<img>`
+ * load isn't CORS-restricted, so the origin's `/favicon.ico` either renders or errors — no fetch,
+ * no response inspection. Falls back for non-http(s) URLs too. */
+export function Favicon(props: { url: string }) {
+  const [failed, setFailed] = React.useState(false)
+  let origin: string | null = null
+  try {
+    const parsed = new URL(props.url)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') origin = parsed.origin
+  } catch { /* not a parseable URL */ }
+  if (!origin || failed) return h('span', null, '🔗')
+  return h('img', {
+    src: `${origin}/favicon.ico`,
+    alt: '',
+    'aria-hidden': 'true',
+    className: 'w-3.5 h-3.5 inline-block shrink-0',
+    onError: () => setFailed(true),
+  })
+}
+
+/** Renders the map's `link.{title}` entries as clickable pills — operator-curated deep links
+ * (a preview page, a dashboard, docs), with the link's favicon where one exists. Clicks stop
+ * propagation because these render inside `Accordion` headers, where a click toggles. */
+export function LinkPills(props: { metadata?: Record<string, string> }) {
+  const links = parseLinkMetadata(props.metadata)
+  if (links.length === 0) return null
+  return h('div', { className: 'flex flex-wrap items-center gap-1' },
+    links.map((link) => h('a', {
+      key: link.title,
+      href: link.url,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 transition-colors',
+      onClick: (e: React.MouseEvent) => e.stopPropagation(),
+      title: link.url,
+    }, h(Favicon, { url: link.url }), link.title)))
+}
+
+const SHOW_HIDDEN_STORAGE_KEY = 'conductor.show-hidden'
+
+/** The "show hidden" toggle, persisted to `localStorage` so an operator who opts into seeing
+ * hidden rows stays opted in across reloads. Degrades to session-only when storage is unavailable
+ * (private browsing, sandboxed iframe). */
+export function useShowHidden(): [boolean, (v: boolean) => void] {
+  const [showHidden, setShowHidden] = React.useState(() => {
+    try { return window.localStorage.getItem(SHOW_HIDDEN_STORAGE_KEY) === 'true' } catch { return false }
+  })
+  const set = React.useCallback((v: boolean) => {
+    setShowHidden(v)
+    try { window.localStorage.setItem(SHOW_HIDDEN_STORAGE_KEY, String(v)) } catch { /* see above */ }
+  }, [])
+  return [showHidden, set]
+}
+
+export function ShowHiddenCheckbox(props: { showHidden: boolean; onChange: (v: boolean) => void }) {
+  return h('label', { className: 'flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer' },
+    h('input', {
+      type: 'checkbox',
+      checked: props.showHidden,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => props.onChange(e.target.checked),
+    }),
+    'Show hidden')
+}
+
+/**
  * Renders a metadata map as compact `key=value` pills. A value that parses as an http(s) URL
  * becomes a link — metadata commonly carries a dashboard or ticket URL, and making the operator
  * click through is the whole point of surfacing it.

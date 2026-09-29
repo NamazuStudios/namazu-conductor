@@ -148,10 +148,11 @@ all**. Conductor reports the template's complete top-level annotation map as `Jo
 logic; that is deliberate, so a consumer reading the raw map sees the complete picture instead of a
 curated subset.
 
-Conductor assigns no meaning to any annotation. It does not know that `team=platform` routes a job to
-a dashboard, only that the annotation is there. Interpreting it is the consumer's job — which is the
-point: a job needs to carry a build number, a ticket reference, or a dashboard URL that Conductor has
-no business understanding.
+Conductor assigns no meaning to any *unreserved* annotation. It does not know that `team=platform`
+routes a job to a dashboard, only that the annotation is there. Interpreting it is the consumer's
+job — which is the point: a job needs to carry a build number, a ticket reference, or a dashboard
+URL that Conductor has no business understanding. The one exception is the small cosmetic
+vocabulary the admin dashboard interprets (below).
 
 Only the **top-level** `metadata.annotations` block is treated as declared metadata. Annotations on
 the inner `spec.template.metadata` block are part of the pod template proper and are not reported.
@@ -160,13 +161,23 @@ the inner `spec.template.metadata` block are part of the pod template proper and
   `DaemonRequest.metadata`. Overrides win over the declared value; an annotation the caller doesn't
   mention keeps its declared value; an annotation the template never had can be added. The merged set
   is written onto the created `Pod`, `Job`, or `Deployment` pod template.
-- A caller **cannot** override a `namazu.conductor`-prefixed key. Those annotations drive Conductor's
-  own behaviour — the workload kind, the exposed ports, the job fields — so overriding one would
-  leave the workload configured one way and managed another. Doing so throws
-  `ReservedMetadataKeyException` before anything is created.
+- A caller **cannot** override a *behavioural* `namazu.conductor` key. Those annotations drive
+  Conductor's own behaviour — the workload kind, the exposed ports, the job fields — so overriding
+  one would leave the workload configured one way and managed another. Doing so throws
+  `ReservedMetadataKeyException` before anything is created. Cosmetic reserved keys are free to
+  override; see the admin UI notes in the root README.
 - `namazu.conductor/default-container-exec.*` annotations are synthesised by Conductor onto the pod at
   dispatch time rather than declared by the template, so they are excluded from both the declared and
   the reported set.
+
+Cosmetic annotations the **admin dashboard** interprets (all optional, both forms equivalent on
+ECS-style `:` separators):
+
+| Annotation | Meaning |
+|---|---|
+| `namazu.conductor/hidden: "true"` | profile/execution row hidden unless "Show hidden" is checked |
+| `namazu.conductor/agent: "true"` | 🤖 badge; marks a terminal job that is an agent |
+| `namazu.conductor/link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback; repeat per title |
 
 `JobExecution.metadata` / `DaemonExecution.metadata` are read back off the live workload rather than
 echoed from the request. The reported set is therefore legitimately a **superset** of the declared

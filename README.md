@@ -90,8 +90,8 @@ Every profile, request, and execution carries a `Map<String, String> metadata`. 
 hold things Conductor has no business understanding — a build number, a ticket reference, an owner, a
 link to the dashboard the job feeds.
 
-**Conductor assigns no meaning to any key.** There is no schema and no well-known vocabulary; a
-consumer that cares about a key decides what it means.
+**Conductor assigns no meaning to *unreserved* keys.** There is no schema; a consumer that cares
+about a key decides what it means.
 
 | Half | Where it comes from |
 |---|---|
@@ -99,14 +99,30 @@ consumer that cares about a key decides what it means.
 | Overrides | `JobRequest.metadata` / `DaemonRequest.metadata`, merged over the declared set; an override wins, an unmentioned key is preserved, a new key is added |
 | Reported | `JobExecution.metadata` / `DaemonExecution.metadata`, read back off the live workload, so it can legitimately be a superset of the declared set |
 
-`namazu.conductor`-prefixed keys are reserved for Conductor's own behaviour and cannot be
-overridden; doing so throws `ReservedMetadataKeyException` before anything is created. Declaring them
-is fine — a `namazu.conductor/workload-kind` annotation appears in `metadata` as well as in the typed
-field, deliberately, so a consumer reading the map sees the whole picture.
+`namazu.conductor`-prefixed keys are reserved for Conductor's own semantics, but reserved does not
+mean untouchable. The prefix holds two kinds of key:
+
+- **Behavioural** — workload-kind/jobSet selection, scoping, tuning (the union of every key a
+  provider interprets). Overriding one throws `ReservedMetadataKeyException` before anything is
+  created. Declaring them is fine — a `namazu.conductor/workload-kind` annotation appears in
+  `metadata` as well as in the typed field, deliberately, so a consumer reading the map sees the
+  whole picture.
+- **Cosmetic** — UI hints the admin dashboard interprets, free to override per run (both the
+  `namazu.conductor/…` and `namazu.conductor:…` separator forms):
+
+  | Key | Meaning |
+  |---|---|
+  | `namazu.conductor/hidden` | `true` → row hidden in the admin UI unless "Show hidden" is checked |
+  | `namazu.conductor/agent` | `true` → 🤖 badge; marks a terminal job that is an agent |
+  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback); repeat per title |
+
+  Unknown `namazu.conductor` keys are overridable at the caller's own risk — a future release may
+  make one behavioural.
 
 There is no deletion semantics: overrides can change a key's value but cannot remove one. EdgeGap has
 no key/value deployment channel and always reports an empty map. See
-[`tickets/profile-metadata.md`](tickets/profile-metadata.md).
+[`tickets/profile-metadata.md`](tickets/profile-metadata.md) and
+[`tickets/ui-hint-annotations.md`](tickets/ui-hint-annotations.md).
 
 ## Building
 

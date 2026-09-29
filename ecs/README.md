@@ -68,10 +68,11 @@ all**. Conductor reports the family's complete tag map as `JobProfile.metadata` 
 `namazu.conductor:jobSet` tag therefore appears there as well as in the discovery logic; that is
 deliberate, so a consumer reading the raw map sees the complete picture instead of a curated subset.
 
-Conductor assigns no meaning to any tag. It does not know that `team=platform` routes a job to a
-dashboard, only that the tag is there. Interpreting it is the consumer's job — which is the point:
-a job needs to carry things like a build number, a ticket reference, or a dashboard URL that
-Conductor has no business understanding.
+Conductor assigns no meaning to any *unreserved* tag. It does not know that `team=platform` routes
+a job to a dashboard, only that the tag is there. Interpreting it is the consumer's job — which is
+the point: a job needs to carry things like a build number, a ticket reference, or a dashboard URL
+that Conductor has no business understanding. The one exception is the small cosmetic vocabulary
+the admin dashboard interprets (below).
 
 Tags are **not** inherited by the task or service Conductor creates. `execute()` tags the `runTask`
 explicitly with the merged set, and `deploy()` tags the ECS Service explicitly:
@@ -79,13 +80,23 @@ explicitly with the merged set, and `deploy()` tags the ECS Service explicitly:
 - A caller can override any tag on a per-launch basis via `JobRequest.metadata` /
   `DaemonRequest.metadata`. Overrides win over the declared value; a tag the caller doesn't mention
   keeps its declared value; a tag the family never had can be added.
-- A caller **cannot** override a `namazu.conductor`-prefixed key. Those tags drive Conductor's own
-  behaviour — the job set, the launch type, the daemon's desired count — so overriding one would
-  leave the workload configured one way and managed another. Doing so throws
-  `ReservedMetadataKeyException` before any task or service is created.
+- A caller **cannot** override a *behavioural* `namazu.conductor` key. Those tags drive Conductor's
+  own behaviour — the job set, the launch type, the daemon's desired count — so overriding one
+  would leave the workload configured one way and managed another. Doing so throws
+  `ReservedMetadataKeyException` before any task or service is created. Cosmetic reserved keys are
+  free to override; see the admin UI notes in the root README.
 - `deploy()` does not set `propagateTags`. The daemon's tags describe the *service*; whether the
   tasks that service runs should inherit them is a separate decision this provider does not make
   on your behalf.
+
+Cosmetic tags the **admin dashboard** interprets (all optional, both forms equivalent on
+Kubernetes-style `/` separators):
+
+| Tag | Meaning |
+|---|---|
+| `namazu.conductor:hidden: "true"` | profile/execution row hidden unless "Show hidden" is checked |
+| `namazu.conductor:agent: "true"` | 🤖 badge; marks a terminal job that is an agent |
+| `namazu.conductor:link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback; repeat per title |
 
 `JobExecution.metadata` / `DaemonExecution.metadata` report the tags read back from the task or
 service ARN, so they show what actually landed rather than what was requested.

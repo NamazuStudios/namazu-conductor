@@ -1,6 +1,9 @@
 import React from 'react'
 import { fetchJobs, stopJob } from './api'
-import { Accordion, DetailGrid, MarkdownBlock, MetadataPills } from './ui'
+import {
+  Accordion, DetailGrid, LinkPills, MarkdownBlock, MetadataPills, ShowHiddenCheckbox,
+  metadataFlag, useShowHidden,
+} from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
 
@@ -62,10 +65,13 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   const containers = ex.containers ?? []
   const metadataEntries = Object.entries(ex.metadata ?? {}).filter(([k]) => k.trim())
+  const isAgent = metadataFlag(ex.metadata, 'agent')
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
+    isAgent && h('span', { title: 'Agent job', className: 'text-base shrink-0' }, '🤖'),
     h('span', { className: 'font-mono text-xs break-all flex-1 min-w-0' }, ex.id),
     h('span', { className: `text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${statusColorClasses(ex.status)}` }, ex.status),
+    h(LinkPills, { metadata: ex.metadata }),
     ex.endpoints && ex.endpoints.length > 0 &&
       h('span', { className: 'font-mono text-xs text-muted-foreground shrink-0' },
         ex.endpoints.map((ep) => `${ep.host}:${ep.port}/${ep.protocol}`).join(', ')),
@@ -103,6 +109,7 @@ export function RunningJobsSection() {
   })
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
   const [sectionExpanded, setSectionExpanded] = React.useState(true)
+  const [showHidden, setShowHidden] = useShowHidden()
 
   const load = React.useCallback(() => {
     fetchJobs()
@@ -119,6 +126,11 @@ export function RunningJobsSection() {
   const allExecutions = data.providers.flatMap((p) =>
     (p.executions ?? []).map((execution) => ({ element: p.element, jobSetLabel: p.jobSetName ?? p.element, execution })))
 
+  const visible = showHidden
+    ? allExecutions
+    : allExecutions.filter((item) => !metadataFlag(item.execution.metadata, 'hidden'))
+  const hiddenCount = allExecutions.length - visible.length
+
   const providerNotes = data.providers.filter((p) => p.jobSetDescription)
 
   const refreshIcon: React.ReactNode = data.loading
@@ -134,7 +146,10 @@ export function RunningJobsSection() {
   }
 
   const header = h('div', { className: 'flex items-center justify-between gap-3' },
-    h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
+    h('div', { className: 'flex items-center gap-4' },
+      h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
+      hiddenCount > 0 && h('span', { className: 'text-xs text-muted-foreground' }, `${hiddenCount} hidden`),
+      h(ShowHiddenCheckbox, { showHidden, onChange: setShowHidden })),
     h('button', {
       onClick: (e: React.MouseEvent) => { e.stopPropagation(); load() },
       disabled: data.loading,
@@ -149,11 +164,11 @@ export function RunningJobsSection() {
     },
       h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
       h(MarkdownBlock, { markdown: p.jobSetDescription as string, className: 'text-sm' }))),
-    !data.loading && allExecutions.length === 0 &&
+    !data.loading && visible.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
-    allExecutions.length > 0 &&
+    visible.length > 0 &&
       h('div', { className: 'space-y-2' },
-        allExecutions.map((item) => h('div', { key: `${item.element}:${item.execution.id}` },
+        visible.map((item) => h('div', { key: `${item.element}:${item.execution.id}` },
           h('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.jobSetLabel),
           h(RunningJobRow, {
             execution: item.execution,
