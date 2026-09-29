@@ -139,8 +139,41 @@ metadata:
     namazu.conductor/default-container-exec.app: "/bin/bash -l"
 ```
 
-## Endpoints, Services & Placement
+## Metadata
 
+Beyond the `namazu.conductor/` annotations above, a `PodTemplate` may carry **any annotation at
+all**. Conductor reports the template's complete top-level annotation map as `JobProfile.metadata` /
+`Daemon.metadata` — verbatim, under the full annotation keys, with nothing stripped or filtered out. A
+`namazu.conductor/workload-kind` annotation therefore appears there as well as in the discovery
+logic; that is deliberate, so a consumer reading the raw map sees the complete picture instead of a
+curated subset.
+
+Conductor assigns no meaning to any annotation. It does not know that `team=platform` routes a job to
+a dashboard, only that the annotation is there. Interpreting it is the consumer's job — which is the
+point: a job needs to carry a build number, a ticket reference, or a dashboard URL that Conductor has
+no business understanding.
+
+Only the **top-level** `metadata.annotations` block is treated as declared metadata. Annotations on
+the inner `spec.template.metadata` block are part of the pod template proper and are not reported.
+
+- A caller can override any annotation on a per-launch basis via `JobRequest.metadata` /
+  `DaemonRequest.metadata`. Overrides win over the declared value; an annotation the caller doesn't
+  mention keeps its declared value; an annotation the template never had can be added. The merged set
+  is written onto the created `Pod`, `Job`, or `Deployment` pod template.
+- A caller **cannot** override a `namazu.conductor`-prefixed key. Those annotations drive Conductor's
+  own behaviour — the workload kind, the exposed ports, the job fields — so overriding one would
+  leave the workload configured one way and managed another. Doing so throws
+  `ReservedMetadataKeyException` before anything is created.
+- `namazu.conductor/default-container-exec.*` annotations are synthesised by Conductor onto the pod at
+  dispatch time rather than declared by the template, so they are excluded from both the declared and
+  the reported set.
+
+`JobExecution.metadata` / `DaemonExecution.metadata` are read back off the live workload rather than
+echoed from the request. The reported set is therefore legitimately a **superset** of the declared
+one: a template whose inner `spec.template` block carries annotations of its own will show them too.
+Reporting what actually landed is more useful than forcing equality with what was asked for.
+
+## Endpoints, Services & Placement
 When a template declares `expose-ports`, `execute()` creates the workload and a `Service` of the requested type. The Service is labelled `namazu.conductor/owned-by=<workload-name>`, which lets `stop()` delete both the workload and its Service without persisting any state. When no ports are exposed, endpoints are resolved directly from the pod IP and its container ports (or empty for a port-less one-off Job).
 
 When a Service is created (both `execute()` and `deploy()`), the primary container is given two env vars so it can identify its own Service without hardcoding it: `NAMAZU_CONDUCTOR_SERVICE_NAME` (the Service's name, same as the workload name) and `NAMAZU_CONDUCTOR_SERVICE_PORTS` (the raw `expose-ports` value, e.g. `"7777/udp,8080/tcp"`). Neither is set when `expose-ports` is absent.
