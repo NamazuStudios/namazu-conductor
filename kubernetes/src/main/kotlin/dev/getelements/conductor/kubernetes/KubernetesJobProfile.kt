@@ -51,7 +51,14 @@ data class KubernetesJobProfile(
      * dashboard's "Inject my session secret" checkbox when [sessionSecretEnv] is set. Only a default;
      * the operator can still toggle it per-launch.
      */
-    val sessionSecretEnabledByDefault: Boolean = false
+    val sessionSecretEnabledByDefault: Boolean = false,
+    /**
+     * The `PodTemplate`'s **entire** top-level annotation map, verbatim and unfiltered — the
+     * `namazu.conductor/...` keys Conductor interprets as typed fields above, and every other key
+     * the infrastructure set, all under their full annotation keys. Conductor assigns no meaning to
+     * any of them; see [dev.getelements.conductor.Metadata].
+     */
+    override val metadata: Map<String, String> = emptyMap()
 ) : JobProfile {
 
     override val id: String
