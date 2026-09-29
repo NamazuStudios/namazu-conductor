@@ -76,3 +76,41 @@ as agent or not, with different links — is a real need.
 - Admin UI: `tsc --noEmit` clean; bundle rebuilt. UI logic (flag parsing, link extraction,
   favicon fallback) is plain functions where practical, but there is no component-test harness in
   this repo to exercise them — they are verified by the ITs upstream of the UI and by inspection.
+
+## Amendment: container-scoped qualifiers (`hidden.{container}`, `agent.{container}`)
+
+The `hidden` and `agent` flags gained a dot-qualified container form, following the
+`default-container-exec.{container}` precedent — on ECS the same `:` separator form applies:
+
+- `namazu.conductor/hidden.{container}` = `true` → just that container's attach row is hidden in
+  the running-job's expanded view (the Show-hidden toggle reveals it, same opt-in as hidden jobs;
+  hiding the last visible attach row collapses the empty Containers section).
+- `namazu.conductor/agent.{container}` = `true` → 🤖 badge on that container's attach row.
+  Badge only — it does not reorder the attach list.
+
+Qualifiers are **independent of the job-level flags** (`hidden` does not need repeating per
+container), and **display-only** — no provider filters containers from `JobProfile.containers` /
+`JobExecution.containers`; the flags are read from the raw metadata maps the UI already has, so
+again zero provider changes. `isBehavioral` is untouched: qualified suffixes aren't blocklisted,
+so both forms stay cosmetic and overridable per run.
+
+**Terminal deliberately stays pod-level.** A container-scoped terminal flag was considered and
+rejected: unlike `hidden`/`agent`, a tty target is *launch behaviour* — the provider sets
+`tty`+`stdin` on the primary container at dispatch (`applyTty`), so honouring a per-container
+variant would change what Conductor creates, making it behavioural rather than cosmetic. The need
+is already served display-side: the attach UI offers every container, and
+`default-container-exec.{container}` customizes each row's default command. If per-container tty
+targeting is ever wanted, it's a behavioural provider feature with its own ticket.
+
+**New-tab convention.** Every link the dashboard renders from metadata — pill values and
+`link.{title}` pills and links inside Markdown descriptions — opens in a new tab
+(`target="_blank"` + `rel="noopener noreferrer"`, which keeps the opened page from reaching back
+through `window.opener`), and pills mark it with a ↗ glyph. Markdown links get the same treatment
+via a `marked` renderer override that also re-normalizes http(s) hrefs through `new URL`
+(percent-encoding quotes, safe for a double-quoted attribute) and defers non-http(s) hrefs to
+marked's default renderer, which neutralizes `javascript:` itself.
+
+The kubernetes job metadata IT additionally pins the dot-qualified key
+(`namazu.conductor/hidden.sidecar`) through the whole pipeline — declared, landed on the Job's pod
+template, and read back — guarding the dot form against prefix-exclusion regressions (anything
+that would swallow it the way `default-container-exec.*` is excluded).

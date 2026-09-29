@@ -104,8 +104,13 @@ Kubernetes-style `/` separators):
 | Tag | Meaning |
 |---|---|
 | `namazu.conductor:hidden: "true"` | profile/execution row hidden unless "Show hidden" is checked |
+| `namazu.conductor:hidden.{container}: "true"` | just that container's attach row hidden (same toggle reveals it; ECS tasks are single-container, so this is equivalent to `hidden`) |
 | `namazu.conductor:agent: "true"` | 🤖 badge; marks a terminal job that is an agent |
-| `namazu.conductor:link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback; repeat per title |
+| `namazu.conductor:agent.{container}: "true"` | 🤖 badge on that container's attach row (equivalent to `agent` — single container) |
+| `namazu.conductor:link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab; repeat per title |
+
+Container qualifiers are independent of the job-level flags and display-only — no provider filters
+containers, and `terminal-job` stays pod-level.
 
 `JobExecution.metadata` / `DaemonExecution.metadata` report the tags read back from the task or
 service ARN, so they show what actually landed rather than what was requested.

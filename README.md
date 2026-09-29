@@ -113,8 +113,12 @@ mean untouchable. The prefix holds two kinds of key:
   | Key | Meaning |
   |---|---|
   | `namazu.conductor/hidden` | `true` → row hidden in the admin UI unless "Show hidden" is checked |
+  | `namazu.conductor/hidden.{container}` | `true` → just that container's attach row hidden (same toggle reveals it) |
   | `namazu.conductor/agent` | `true` → 🤖 badge; marks a terminal job that is an agent |
-  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback); repeat per title |
+  | `namazu.conductor/agent.{container}` | `true` → 🤖 badge on that container's attach row |
+  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab); repeat per title |
+
+  Container qualifiers are independent of the job-level flags. They are display-only: no provider filters containers, and `terminal-job` stays pod-level. All external links the dashboard renders from metadata — pills and Markdown descriptions alike — carry `target="_blank"`/`rel="noopener noreferrer"`.
 
   Unknown `namazu.conductor` keys are overridable at the caller's own risk — a future release may
   make one behavioural.

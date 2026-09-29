@@ -86,6 +86,13 @@ class KubernetesOrchestrationServiceIT {
 
         /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
         private const val METADATA_HIDDEN_KEY = "namazu.conductor/hidden"
+
+        /**
+         * The container-scoped form of [METADATA_HIDDEN_KEY] — a dot qualifier naming the container.
+         * Pinned here to guard the dot form against prefix-exclusion regressions (e.g. anything that
+         * would swallow it the way `default-container-exec.*` is excluded).
+         */
+        private const val METADATA_CONTAINER_HIDDEN_KEY = "namazu.conductor/hidden.sidecar"
     }
 
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationServiceIT::class.java)
@@ -303,7 +310,7 @@ class KubernetesOrchestrationServiceIT {
             profile = profile,
             metadata = mapOf(
                 METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt",
-                METADATA_HIDDEN_KEY to "true"
+                METADATA_HIDDEN_KEY to "true", METADATA_CONTAINER_HIDDEN_KEY to "true"
             )
         )).also { executions += it }
         service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
@@ -314,8 +321,10 @@ class KubernetesOrchestrationServiceIT {
         assertEquals(execution.metadata[METADATA_NOTE_KEY], "second attempt", "New key was not added")
         assertEquals(execution.metadata[ANN_WORKLOAD_KIND], "job", "Unmentioned declared key was not preserved")
 
-        // A cosmetic reserved key override is accepted, lands on the workload, and reads back.
+        // A cosmetic reserved key override is accepted, lands on the workload, and reads back --
+        // including the container-scoped dot-qualified form.
         assertEquals(execution.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
+        assertEquals(execution.metadata[METADATA_CONTAINER_HIDDEN_KEY], "true", "Container-scoped cosmetic override was not accepted")
 
         // Actually on the cluster, not just in the returned object.
         val (_, _, jobName) = decodeExecutionId(execution.id)
@@ -324,6 +333,7 @@ class KubernetesOrchestrationServiceIT {
         assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the Job's pod template")
         assertEquals(onCluster[METADATA_NOTE_KEY], "second attempt", "New key did not land on the Job's pod template")
         assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the Job's pod template")
+        assertEquals(onCluster[METADATA_CONTAINER_HIDDEN_KEY], "true", "Container-scoped cosmetic override did not land on the Job's pod template")
 
         // And still reported after a round-trip through listExecutions().
         val listed = service.listExecutions().firstOrNull { it.id == execution.id }

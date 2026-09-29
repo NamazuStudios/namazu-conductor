@@ -48,10 +48,12 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
   | Key | Meaning |
   |---|---|
   | `namazu.conductor/hidden` | `true` → row hidden in the admin UI unless "Show hidden" is checked |
+  | `namazu.conductor/hidden.{container}` | `true` → just that container's attach row hidden (same toggle reveals it) |
   | `namazu.conductor/agent` | `true` → 🤖 badge; marks a terminal job that is an agent |
-  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback); repeat per title |
+  | `namazu.conductor/agent.{container}` | `true` → 🤖 badge on that container's attach row |
+  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab); repeat per title |
 
-  Unknown `namazu.conductor` keys are overridable at the caller's own risk — a future release may make one behavioural. Executions report what's read back off the live workload, so the set is legitimately a superset of the declared one. See `tickets/profile-metadata.md` and `tickets/ui-hint-annotations.md`.
+  Container qualifiers are independent of the job-level flags — `hidden` does not need repeating per container. They are display-only: no provider filters containers, and `terminal-job` stays pod-level (tty+stdin target the primary container at launch; a container-scoped tty-target flag would be behavioural, not cosmetic — deliberately not part of this vocabulary). All external links the dashboard renders from metadata — pills and Markdown descriptions alike — carry `target="_blank"`/`rel="noopener noreferrer"`.  Unknown `namazu.conductor` keys are overridable at the caller's own risk — a future release may make one behavioural. Executions report what's read back off the live workload, so the set is legitimately a superset of the declared one. See `tickets/profile-metadata.md` and `tickets/ui-hint-annotations.md`.
 
 ## Provider Implementation Pattern
 
