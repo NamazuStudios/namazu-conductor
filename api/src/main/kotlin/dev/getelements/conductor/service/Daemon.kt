@@ -16,6 +16,21 @@ interface Daemon {
     val id: String;
 
     /**
+     * An optional friendly display name for this daemon, shown by generic consumers (the admin
+     * dashboard) in place of the raw [id]. Mirrors
+     * [dev.getelements.conductor.service.JobProfile.name]; `null` if the provider has no name
+     * source or none was given — callers should fall back to [id].
+     */
+    val name: String? get() = null
+
+    /**
+     * An optional human-readable description of this daemon, in Markdown. Mirrors
+     * [dev.getelements.conductor.service.JobProfile.description]; `null` if the provider doesn't
+     * support or wasn't given one.
+     */
+    val description: String? get() = null
+
+    /**
      * Free-form, provider-agnostic presentation metadata declared alongside this daemon by the
      * underlying infrastructure. Mirrors
      * [dev.getelements.conductor.service.JobProfile.metadata] exactly, including the full-key,

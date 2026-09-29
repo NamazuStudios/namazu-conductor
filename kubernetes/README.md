@@ -91,6 +91,18 @@ metadata:
     namazu.conductor/terminal-job: "true"
 ```
 
+### `namazu.conductor/display-name` (annotation)
+
+An optional friendly display name the admin dashboard shows in place of the raw
+`namespace:template` id. Absent → the raw id is shown. See also
+[`namazu.conductor/description`](#namazuconductordescription-annotation) below it.
+
+```yaml
+metadata:
+  annotations:
+    namazu.conductor/display-name: "Smoke Test"
+```
+
 ### `namazu.conductor/description` (annotation)
 
 An optional human-readable description, rendered as Markdown on the admin dashboard's "Available Jobs

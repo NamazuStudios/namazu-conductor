@@ -33,6 +33,15 @@ The `job.set.name`/`job.set.description` attributes don't affect discovery — t
 cosmetic, giving the admin dashboard a friendly label and Markdown blurb for this job set instead
 of showing the raw `jobset` value.
 
+### `namazu.conductor:displayName`
+
+An optional friendly display name the admin dashboard shows in place of the raw task-definition
+family id. Absent → the raw id is shown.
+
+```
+namazu.conductor:displayName = Smoke Test
+```
+
 ### `namazu.conductor:launchType`
 
 Controls the ECS launch type used when running the task.

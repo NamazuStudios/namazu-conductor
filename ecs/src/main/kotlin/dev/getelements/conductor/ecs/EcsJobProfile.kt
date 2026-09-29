@@ -27,6 +27,11 @@ data class EcsJobProfile(
     val networkMode: NetworkMode,
     val assignPublicIp: AssignPublicIp,
     /**
+     * The `namazu.conductor:displayName` tag — the friendly name the admin dashboard shows in place
+     * of the raw [id]. `null` when the tag is absent; callers fall back to [id].
+     */
+    override val name: String? = null,
+    /**
      * The task definition family's **entire** tag map, verbatim and unfiltered — the
      * `namazu.conductor:...` tags this provider interprets as typed fields, and every other tag set
      * on the family, all under their full tag keys. Conductor assigns no meaning to any of them;

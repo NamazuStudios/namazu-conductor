@@ -1,15 +1,10 @@
 # Ticket: Friendly names for job profiles, daemons, and executions
 
-**Status:** deferred
-**Components:** `api`, `kubernetes`, `ecs`, `edgegap`, `multiplay`, `admin`
-**Branch note:** research only — no code yet. This ticket exists to preserve the
-findings so the investigation doesn't have to be redone when the work is picked up.
-
-**Amendment:** the `multiplay` provider module was removed from the repository
-after this ticket was written, so its three findings below are historical only —
-the `MultiplayJobProfile.name` promotion is no longer a "near-free win", and
-`multiplay` no longer appears in the provider matrices. The `kubernetes`, `ecs`,
-and `edgegap` findings stand as written.
+**Status:** Phase 1 implemented
+**Components:** `api`, `kubernetes`, `ecs`, `edgegap`, `admin`
+**Branch note:** Phase 1 has landed — the findings below are preserved as the record of *why* it
+has the shape it does. Phase 2 remains deferred and provider-gated. The `multiplay` provider was
+removed after this ticket was written; its findings are historical only.
 
 ## Summary
 

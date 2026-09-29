@@ -67,11 +67,11 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   }
 
   const detailKeys = Object.keys(profile).filter((k) =>
-    !['id', 'description', 'terminalJob', 'containers', 'metadata', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
+    !['id', 'name', 'description', 'terminalJob', 'containers', 'metadata', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
     isAgent && h('span', { title: 'Agent job', className: 'text-base' }, '🤖'),
-    h('span', { className: 'font-mono text-sm font-medium' }, profile.id),
+    h('span', { className: 'font-mono text-sm font-medium' }, profile.name?.trim() || profile.id),
     h('span', {
       className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary',
       title: jobSetLabel !== element ? `Element: ${element}` : undefined,
