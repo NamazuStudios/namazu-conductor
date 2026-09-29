@@ -459,6 +459,10 @@ Resources:
               - ecs:DescribeTasks
               - ecs:StopTask
               - ecs:DescribeContainerInstances
+              # resolveContainerInstanceHost() lists a container instance's tasks to map a
+              # service/task back to the instance running it; same container-instance resource
+              # shape as DescribeContainerInstances above.
+              - ecs:ListTasks
               - ecs:CreateService
               - ecs:UpdateService
               - ecs:DeleteService
