@@ -1,7 +1,10 @@
 import React from 'react'
 import { executeJob, fetchProfiles, getSessionSecret } from './api'
-import { Accordion, CollapsibleMarkdown, ErrorBoundary, MarkdownBlock, Pagination, StatusIndicator } from './ui'
-import { RunForm, defaultAdvancedOptions, derivePlacementList } from './RunForm'
+import {
+  Accordion, CollapsibleMarkdown, ErrorBoundary, LinkPills, MarkdownBlock, MetadataPills,
+  Pagination, ShowHiddenCheckbox, StatusIndicator, metadataFlag, useShowHidden,
+} from './ui'
+import { RunForm, defaultAdvancedOptions, deriveMetadataOverrides, derivePlacementList } from './RunForm'
 import type { AdvancedOptions } from './RunForm'
 import type { JobProfile, ProviderProfilesResult } from './types'
 
@@ -22,11 +25,18 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   const [startError, setStartError] = React.useState<string | null>(null)
   const [startedId, setStartedId] = React.useState<string | null>(null)
   const isTerminalJob = Boolean(profile.terminalJob)
+  // Cosmetic namazu.conductor flags — see the vocabulary in AGENTS.md. `agent` gets the 🤖 badge
+  // (a terminal job that is an agent, not an ordinary terminal job); `hidden` rows render only
+  // under "Show hidden", and badge themselves when they do so the operator knows why they were
+  // formerly invisible.
+  const isAgent = metadataFlag(profile.metadata, 'agent')
+  const isHiddenProfile = metadataFlag(profile.metadata, 'hidden')
   const sessionSecretEnvVar = typeof profile.sessionSecretEnv === 'string' && profile.sessionSecretEnv.trim()
     ? profile.sessionSecretEnv.trim()
     : undefined
   const [advanced, setAdvanced] = React.useState<AdvancedOptions>(() =>
     defaultAdvancedOptions(isTerminalJob, Boolean(profile.sessionSecretEnabledByDefault)))
+  const hasProfileMetadata = Object.keys(profile.metadata ?? {}).some((k) => k.trim())
 
   function handleStart() {
     setStarting(true); setStartError(null); setStartedId(null)
@@ -49,21 +59,29 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       environment,
       placement: derivePlacementList(advanced.placement),
       tty: advanced.tty,
+      // undefined when the operator added no overrides — see deriveMetadataOverrides.
+      metadata: deriveMetadataOverrides(advanced.metadata),
     })
       .then((execution) => { setStarting(false); setStartedId(execution.id) })
       .catch((e: Error) => { setStartError(e.message || 'Failed to start job'); setStarting(false) })
   }
 
   const detailKeys = Object.keys(profile).filter((k) =>
-    !['id', 'description', 'terminalJob', 'containers', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
+    !['id', 'description', 'terminalJob', 'containers', 'metadata', 'sessionSecretEnv', 'sessionSecretEnabledByDefault'].includes(k))
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
+    isAgent && h('span', { title: 'Agent job', className: 'text-base' }, '🤖'),
     h('span', { className: 'font-mono text-sm font-medium' }, profile.id),
     h('span', {
       className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary',
       title: jobSetLabel !== element ? `Element: ${element}` : undefined,
     }, jobSetLabel),
     isTerminalJob && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground' }, 'terminal job'),
+    isHiddenProfile && h('span', {
+      className: 'text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground italic',
+      title: 'Declared hidden by the profile; only visible while "Show hidden" is checked',
+    }, 'hidden'),
+    h(LinkPills, { metadata: profile.metadata }),
     h('span', { className: 'flex-1' }),
     h('button', {
       disabled: starting,
@@ -77,6 +95,12 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       `Started ✓ ${startedId} — see Running Jobs & Services.`),
     profile.description && h('div', { className: 'mb-3' },
       h(CollapsibleMarkdown, { markdown: profile.description, label: 'Description' })),
+    // Declared metadata, verbatim. Capped at 4 with a "+N more" affordance rather than a full
+    // key/value table: on Kubernetes this is every annotation on the PodTemplate, which is routinely
+    // a dozen entries and would bury the description and Run button.
+    hasProfileMetadata && h('div', { className: 'mb-3' },
+      h('div', { className: 'text-xs font-medium text-muted-foreground mb-1' }, 'Metadata'),
+      h(MetadataPills, { metadata: profile.metadata, max: 4 })),
     detailKeys.length > 0 &&
       h('div', { className: 'mb-3' },
         h(Accordion, {
@@ -109,6 +133,7 @@ export function AvailableJobsPage() {
   })
   const [page, setPage] = React.useState(0)
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
+  const [showHidden, setShowHidden] = useShowHidden()
 
   React.useEffect(() => {
     fetchProfiles()
@@ -119,17 +144,27 @@ export function AvailableJobsPage() {
   const flat: FlatProfile[] = data.providers.flatMap((p) =>
     (p.profiles ?? []).map((profile) => ({ element: p.element, jobSetLabel: p.jobSetName ?? p.element, profile })))
 
+  // Hidden profiles are filtered out of the list entirely unless the operator opted in; the count
+  // is surfaced so a filtered row is discoverable rather than merely absent.
+  const visible = showHidden ? flat : flat.filter((item) => !metadataFlag(item.profile.metadata, 'hidden'))
+  const hiddenCount = flat.length - visible.length
+
   const providerErrors = data.providers.filter((p) => p.error)
 
   const providerNotes = data.providers.filter((p) => p.jobSetDescription)
 
-  const pageCount = Math.max(1, Math.ceil(flat.length / PAGE_SIZE))
-  const pageItems = flat.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageItems = visible.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
 
   return h('div', { className: 'p-6 space-y-6' },
     h('div', { className: 'flex items-center justify-between' },
       h('h1', { className: 'text-2xl font-bold' }, 'Available Jobs & Services'),
-      h(StatusIndicator, { loading: data.loading, status: data.status, error: data.error })),
+      h('div', { className: 'flex items-center gap-4' },
+        hiddenCount > 0 && h('span', { className: 'text-xs text-muted-foreground' },
+          `${hiddenCount} hidden`),
+        h(ShowHiddenCheckbox, { showHidden, onChange: setShowHidden }),
+        h(StatusIndicator, { loading: data.loading, status: data.status, error: data.error }))),
     !data.loading && data.status === 'error' && flat.length === 0 &&
       h('div', { className: 'rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive' },
         data.error || 'Failed to load profiles.'),
@@ -143,9 +178,9 @@ export function AvailableJobsPage() {
     },
       h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
       h(MarkdownBlock, { markdown: p.jobSetDescription as string, className: 'text-sm' }))),
-    !data.loading && flat.length === 0 && providerErrors.length === 0 &&
+    !data.loading && visible.length === 0 && providerErrors.length === 0 &&
       h('p', { className: 'text-sm text-muted-foreground' }, 'No job profiles available.'),
-    flat.length > 0 &&
+    visible.length > 0 &&
       h('div', { className: 'space-y-2' },
         pageItems.map((item) => h(ErrorBoundary, { key: `${item.element}:${item.profile.id}` },
           h(ProfileRow, {
@@ -153,5 +188,5 @@ export function AvailableJobsPage() {
             isExpanded: expandedId === item.profile.id,
             onToggle: () => setExpandedId((v) => (v === item.profile.id ? null : item.profile.id)),
           })))),
-    h(Pagination, { page, pageCount, onChange: setPage }))
+    h(Pagination, { page: safePage, pageCount, onChange: setPage }))
 }

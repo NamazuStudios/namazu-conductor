@@ -13,9 +13,11 @@ import dev.getelements.conductor.JobPlacement
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.JobStdio
+import dev.getelements.conductor.Metadata
 import dev.getelements.conductor.NamespaceScope
 import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
 import dev.getelements.conductor.kubernetes.KubernetesDaemon
@@ -175,7 +177,8 @@ class KubernetesOrchestrationService @Inject constructor(
             terminalJob = terminalJob,
             description = annotations[ANN_DESCRIPTION],
             sessionSecretEnv = annotations[ANN_SESSION_SECRET_ENV]?.trim()?.ifBlank { null },
-            sessionSecretEnabledByDefault = annotations[ANN_ENABLE_SESSION_SECRET]?.trim()?.toBoolean() ?: false
+            sessionSecretEnabledByDefault = annotations[ANN_ENABLE_SESSION_SECRET]?.trim()?.toBoolean() ?: false,
+            metadata = declaredMetadataOf(annotations)
         )
     }
 
@@ -210,7 +213,8 @@ class KubernetesOrchestrationService @Inject constructor(
             replicas = parseIntAnnotation(templateName, annotations, ANN_REPLICAS) ?: 1,
             minReplicas = parseIntAnnotation(templateName, annotations, ANN_MIN_REPLICAS),
             maxReplicas = parseIntAnnotation(templateName, annotations, ANN_MAX_REPLICAS),
-            targetCpuUtilizationPercentage = parseIntAnnotation(templateName, annotations, ANN_TARGET_CPU_UTILIZATION_PERCENTAGE)
+            targetCpuUtilizationPercentage = parseIntAnnotation(templateName, annotations, ANN_TARGET_CPU_UTILIZATION_PERCENTAGE),
+            metadata = declaredMetadataOf(annotations)
         )
     }
 
@@ -220,6 +224,30 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: WorkloadKind.POD
 
     /**
+     * The `PodTemplate` annotations to report as a profile's or daemon's *declared* [Metadata].
+     *
+     * Effectively the whole annotation map, copied verbatim: the `namazu.conductor/...` keys this
+     * provider surfaces as typed fields are reported here under their full keys too, and no
+     * `kubectl.kubernetes.io/last-applied-configuration`-style housekeeping is filtered out, because
+     * deciding what a key "really" means is the consumer's call, not this provider's. Conductor's own
+     * judgement is only applied to keys it *synthesises* onto the workload at dispatch time, which
+     * are therefore not declarations and must not appear to be one.
+     */
+    private fun declaredMetadataOf(annotations: Map<String, String>): Map<String, String> =
+        annotations.filterKeys { !it.startsWith(ANN_DEFAULT_CONTAINER_EXEC_PREFIX) }
+
+    /**
+     * The annotations a *running workload* actually carries, reported as [JobExecution.metadata] /
+     * [DaemonExecution.metadata]. Read back from the live resource rather than echoed from the
+     * request, so a template whose inner `spec.template` block carries annotations of its own reports
+     * them too — the set is a superset of the declared one, and reporting what landed is the useful
+     * answer. Conductor's synthesised exec annotations are subtracted for symmetry with
+     * [declaredMetadataOf].
+     */
+    private fun reportedMetadataOf(annotations: Map<String, String>?): Map<String, String> =
+        declaredMetadataOf(annotations ?: emptyMap())
+
+    /**
      * Creates a `Pod` or `Job` for the given [JobRequest] and returns a [JobExecution] with status
      * [JobStatus.PENDING]. The workload's name is derived from the profile name plus a short unique
      * suffix and is carried in the [JobExecution.id] as `"$namespace:$kind:$name"`. When the profile
@@ -227,6 +255,8 @@ class KubernetesOrchestrationService @Inject constructor(
      *
      * @throws JobException if [JobRequest.profile] is not a [KubernetesJobProfile] or the underlying
      *   `PodTemplate` can no longer be found.
+     * @throws ReservedMetadataKeyException if [JobRequest.metadata] overrides a
+     *   `namazu.conductor`-prefixed key. Thrown before any resource is created.
      */
     override fun execute(request: JobRequest): JobExecution {
         val profile = request.profile as? KubernetesJobProfile
@@ -255,6 +285,15 @@ class KubernetesOrchestrationService @Inject constructor(
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
         val execAnnotations = execAnnotationsFor(profile.containers)
+        // Throws on a reserved prefix before anything is created. Ordering matters: this runs ahead of
+        // every create() call so a rejected key can't leave a half-dispatched workload behind.
+        //
+        // Merged from the profile rather than re-derived from the template: profile.metadata is
+        // already the PodTemplate's top-level annotation map, and reading it from the one place that
+        // established it is what keeps the declared set from drifting between listing and dispatch.
+        // (It is deliberately *not* read off podTemplateSpec.metadata — that's the inner
+        // `spec.template` block, a different and much smaller set of annotations.)
+        val metadata = Metadata.merge(profile.metadata, request.metadata)
 
         val ownerRef = when (profile.workloadKind) {
             WorkloadKind.POD -> {
@@ -265,6 +304,7 @@ class KubernetesOrchestrationService @Inject constructor(
                             .withNamespace(namespace)
                             .addToLabels(templateLabels)
                             .addToLabels(LABEL_OWNED_BY, runName)
+                            .addToAnnotations(metadata)
                             .addToAnnotations(execAnnotations)
                             .build()
                     )
@@ -284,6 +324,7 @@ class KubernetesOrchestrationService @Inject constructor(
                 val podMeta = ObjectMetaBuilder()
                     .addToLabels(templateLabels)
                     .addToLabels(LABEL_OWNED_BY, runName)
+                    .addToAnnotations(metadata)
                     .addToAnnotations(execAnnotations)
                     .build()
                 val job = JobBuilder()
@@ -338,7 +379,8 @@ class KubernetesOrchestrationService @Inject constructor(
                 name = runName
             ),
             containers = profile.containers,
-            namespace = namespace
+            namespace = namespace,
+            metadata = metadata
         )
     }
 
@@ -352,6 +394,8 @@ class KubernetesOrchestrationService @Inject constructor(
      *
      * @throws JobException if [DaemonRequest.profile] is not a [KubernetesDaemon] or the underlying
      *   `PodTemplate` can no longer be found.
+     * @throws ReservedMetadataKeyException if [DaemonRequest.metadata] overrides a
+     *   `namazu.conductor`-prefixed key. Thrown before any resource is created.
      */
     override fun deploy(request: DaemonRequest): DaemonExecution {
         val profile = request.profile as? KubernetesDaemon
@@ -378,10 +422,12 @@ class KubernetesOrchestrationService @Inject constructor(
         val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
+        val metadata = Metadata.merge(profile.metadata, request.metadata)
 
         val podMeta = ObjectMetaBuilder()
             .addToLabels(templateLabels)
             .addToLabels(LABEL_OWNED_BY, runName)
+            .addToAnnotations(metadata)
             .build()
 
         val deployment = DeploymentBuilder()
@@ -432,7 +478,8 @@ class KubernetesOrchestrationService @Inject constructor(
             runningCount = 0,
             minCount = profile.minReplicas,
             maxCount = profile.maxReplicas,
-            details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "daemon", name = runName)
+            details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "daemon", name = runName),
+            metadata = reportedMetadataOf(created.spec?.template?.metadata?.annotations)
         )
     }
 
@@ -507,7 +554,8 @@ class KubernetesOrchestrationService @Inject constructor(
             minCount = hpa?.spec?.minReplicas,
             maxCount = hpa?.spec?.maxReplicas,
             endpoints = endpoints,
-            details = execution.details
+            details = execution.details,
+            metadata = reportedMetadataOf(deployment.spec?.template?.metadata?.annotations)
         )
     }
 
@@ -673,7 +721,8 @@ class KubernetesOrchestrationService @Inject constructor(
                         status = status,
                         details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = ns
+                        namespace = ns,
+                        metadata = reportedMetadataOf(annotations)
                     )
                     return@pod
                 }
@@ -685,7 +734,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = ns, workloadKind = "pod", name = podName),
                     containers = containers,
-                    namespace = ns
+                    namespace = ns,
+                    metadata = reportedMetadataOf(annotations)
                 )
             }
 
@@ -716,7 +766,8 @@ class KubernetesOrchestrationService @Inject constructor(
                         status = mapJobStatus(ns, jobName, job),
                         details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = ns
+                        namespace = ns,
+                        metadata = reportedMetadataOf(jobAnnotations)
                     )
                     return@job
                 }
@@ -730,7 +781,8 @@ class KubernetesOrchestrationService @Inject constructor(
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = ns, workloadKind = "job", name = name),
                     containers = containers,
-                    namespace = ns
+                    namespace = ns,
+                    metadata = reportedMetadataOf(jobAnnotations)
                 )
             }
 
@@ -848,7 +900,8 @@ class KubernetesOrchestrationService @Inject constructor(
         status = status,
         endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList(),
         containers = execution.containers,
-        namespace = execution.namespace ?: decodeId(execution.id).first
+        namespace = execution.namespace ?: decodeId(execution.id).first,
+        metadata = execution.metadata
     )
 
     /**

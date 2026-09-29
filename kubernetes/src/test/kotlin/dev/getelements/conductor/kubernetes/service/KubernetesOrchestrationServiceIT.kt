@@ -3,6 +3,7 @@ package dev.getelements.conductor.kubernetes.service
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
@@ -78,6 +79,13 @@ class KubernetesOrchestrationServiceIT {
     companion object {
         private const val MULTI_CONTAINER_PRIMARY = "primary"
         private const val MULTI_CONTAINER_SECONDARY = "secondary"
+
+        /** Non-`namazu.conductor` annotation keys, standing in for arbitrary infrastructure metadata. */
+        private const val METADATA_OWNER_KEY = "docs.example.com/owner"
+        private const val METADATA_NOTE_KEY = "run.example.com/note"
+
+        /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
+        private const val METADATA_HIDDEN_KEY = "namazu.conductor/hidden"
     }
 
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationServiceIT::class.java)
@@ -251,9 +259,81 @@ class KubernetesOrchestrationServiceIT {
         assertEquals(listed.namespace, altNamespace, "Expected the execution to report its own namespace")
     }
 
+    /**
+     * Metadata is declared verbatim, overridden by the caller, and read back off the live workload.
+     *
+     * Three things worth pinning down, because each is a decision rather than an implementation
+     * detail: a profile reports the *whole* annotation map including the `namazu.conductor` keys
+     * Conductor also surfaces as typed fields; a caller's overrides merge over the declared set
+     * rather than replacing it; and the reported set is read off the cluster rather than echoed
+     * from the request, so it reflects what actually landed.
+     */
+    @Test
+    fun metadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
+        val template = "conductor-it-metadata-$runSuffix"
+        createMetadataTemplate(template)
+
+        val profile = service.findAvailableProfile("$namespace:$template")
+            ?: throw AssertionError("Profile '$namespace:$template' not found")
+
+        // Declared verbatim: a plain infrastructure annotation, and a namazu.conductor key that
+        // Conductor also surfaces as a typed field -- reported here too, under its full key.
+        assertEquals(
+            profile.metadata[METADATA_OWNER_KEY], "platform-team",
+            "Expected a non-Conductor annotation to be reported verbatim in the profile's metadata"
+        )
+        assertEquals(
+            profile.metadata[ANN_WORKLOAD_KIND], "job",
+            "Expected the namazu.conductor/workload-kind key to be reported verbatim, not stripped"
+        )
+
+        // A behavioural reserved key (workload-kind picks what Conductor creates) is rejected, and
+        // rejected before anything is created -- a caller error must not leave a half-dispatched
+        // workload behind. Cosmetic reserved keys, by contrast, are free to override.
+        val jobsBefore = client.batch().v1().jobs().inNamespace(namespace).list().items.size
+        assertThrows(ReservedMetadataKeyException::class.java) {
+            service.execute(JobRequest(profile = profile, metadata = mapOf(ANN_WORKLOAD_KIND to "pod")))
+        }
+        assertEquals(
+            client.batch().v1().jobs().inNamespace(namespace).list().items.size, jobsBefore,
+            "A rejected metadata override must not have created a Job"
+        )
+
+        val execution = service.execute(JobRequest(
+            profile = profile,
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt",
+                METADATA_HIDDEN_KEY to "true"
+            )
+        )).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        // An override wins over the declared value, a key the profile never declared is added, and
+        // a key the caller said nothing about is left exactly as declared.
+        assertEquals(execution.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
+        assertEquals(execution.metadata[METADATA_NOTE_KEY], "second attempt", "New key was not added")
+        assertEquals(execution.metadata[ANN_WORKLOAD_KIND], "job", "Unmentioned declared key was not preserved")
+
+        // A cosmetic reserved key override is accepted, lands on the workload, and reads back.
+        assertEquals(execution.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
+
+        // Actually on the cluster, not just in the returned object.
+        val (_, _, jobName) = decodeExecutionId(execution.id)
+        val onCluster = client.batch().v1().jobs().inNamespace(namespace).withName(jobName).get()
+            ?.spec?.template?.metadata?.annotations.orEmpty()
+        assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the Job's pod template")
+        assertEquals(onCluster[METADATA_NOTE_KEY], "second attempt", "New key did not land on the Job's pod template")
+        assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the Job's pod template")
+
+        // And still reported after a round-trip through listExecutions().
+        val listed = service.listExecutions().firstOrNull { it.id == execution.id }
+            ?: throw AssertionError("Execution '${execution.id}' missing from listing")
+        assertEquals(listed.metadata[METADATA_OWNER_KEY], "sre-oncall", "listExecutions() lost the override")
+        assertEquals(listed.metadata[METADATA_NOTE_KEY], "second attempt", "listExecutions() lost the new key")
+    }
+
     @Test
     fun nodePortServiceServesHttp() = runServerProfile(nodePortTemplate)
-
     @Test
     fun loadBalancerServiceServesHttp() = runServerProfile(loadBalancerTemplate)
 
@@ -483,6 +563,30 @@ class KubernetesOrchestrationServiceIT {
             .endTemplate()
             .build()
         client.resources(PodTemplate::class.java).inNamespace(ns).resource(template).create()
+    }
+
+    /** A one-off job template carrying arbitrary non-Conductor annotations, for the metadata test. */
+    private fun createMetadataTemplate(name: String) {
+        val template = PodTemplateBuilder()
+            .withNewMetadata()
+                .withName(name)
+                .withNamespace(namespace)
+                .addToLabels(LABEL_JOB_SET, jobSet)
+                .addToAnnotations(ANN_WORKLOAD_KIND, "job")
+                .addToAnnotations(METADATA_OWNER_KEY, "platform-team")
+            .endMetadata()
+            .withNewTemplate()
+                .withNewSpec()
+                    .withRestartPolicy("Never")
+                    .addNewContainer()
+                        .withName("worker")
+                        .withImage(jobImage)
+                        .withCommand(jobCommand)
+                    .endContainer()
+                .endSpec()
+            .endTemplate()
+            .build()
+        client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
     }
 
     private fun createMultiContainerTemplate(name: String) {

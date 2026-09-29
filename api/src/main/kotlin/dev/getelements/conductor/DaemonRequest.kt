@@ -42,6 +42,16 @@ data class DaemonRequest (
      * underlying [dev.getelements.conductor.service.DaemonOrchestrationService] implementation does
      * not support scoping.
      */
-    val scope : List<JobScope> = emptyList()
+    val scope : List<JobScope> = emptyList(),
+
+    /**
+     * Caller-supplied metadata overrides, merged over the
+     * [dev.getelements.conductor.service.Daemon.metadata] the daemon was declared with. Mirrors
+     * [dev.getelements.conductor.JobRequest.metadata], including the reserved-prefix restriction.
+     *
+     * @throws dev.getelements.conductor.exception.ReservedMetadataKeyException if any key carries
+     * the reserved `namazu.conductor` prefix, which Conductor reserves for its own semantics.
+     */
+    val metadata : Map<String, String> = emptyMap()
 
 )

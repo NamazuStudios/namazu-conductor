@@ -47,4 +47,18 @@ interface JobProfile {
      */
     val namespace: String? get() = null
 
+    /**
+     * Free-form, provider-agnostic presentation metadata declared alongside this profile by the
+     * underlying infrastructure — the whole `PodTemplate` annotation map on Kubernetes, the whole
+     * task-definition tag map on ECS. Keys are reported **verbatim and in full**: no prefix
+     * stripping, no filtering, no deduplication, so a `namazu.conductor/<key>` key that Conductor
+     * also surfaces as a typed field (like [description]) appears here too, under its full key.
+     *
+     * Conductor assigns no meaning to any key. See [dev.getelements.conductor.Metadata] for the
+     * reserved-prefix rule and the run-time override path.
+     *
+     * Defaults to empty for providers with no metadata channel (e.g. EdgeGap).
+     */
+    val metadata: Map<String, String> get() = emptyMap()
+
 }

@@ -12,17 +12,20 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.JobStdio
+import dev.getelements.conductor.Metadata
 import dev.getelements.conductor.ecs.EcsAttributes
 import dev.getelements.conductor.ecs.EcsDaemon
 import dev.getelements.conductor.ecs.EcsDaemonExecutionDetails
 import dev.getelements.conductor.ecs.EcsExecutionDetails
 import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.service.Daemon
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import org.slf4j.LoggerFactory
 import software.amazon.awssdk.services.applicationautoscaling.ApplicationAutoScalingClient
 import software.amazon.awssdk.services.applicationautoscaling.model.ScalableDimension
 import software.amazon.awssdk.services.applicationautoscaling.model.ServiceNamespace
@@ -42,6 +45,7 @@ import software.amazon.awssdk.services.ecs.model.Task
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionFamilyStatus
 import software.amazon.awssdk.services.ecs.model.TaskDefinitionField
 import software.amazon.awssdk.services.ecs.model.TaskOverride
+import software.amazon.awssdk.services.ecs.model.Tag
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
@@ -90,6 +94,8 @@ class EcsOrchestrationService @Inject constructor(
     private val applicationAutoScalingClient: ApplicationAutoScalingClient,
     private val executor: ExecutorService
 ) : OrchestrationService, DaemonOrchestrationService {
+
+    private val logger = LoggerFactory.getLogger(EcsOrchestrationService::class.java)
 
     private val stdioBridgePortNum: Int = stdioBridgePort.toIntOrNull() ?: DEFAULT_STDIO_BRIDGE_PORT
 
@@ -142,7 +148,8 @@ class EcsOrchestrationService @Inject constructor(
                     containerName = containerName,
                     launchType = launchType,
                     networkMode = networkMode,
-                    assignPublicIp = assignPublicIp
+                    assignPublicIp = assignPublicIp,
+                    metadata = declaredMetadataOf(tags)
                 )
             }
 
@@ -209,7 +216,8 @@ class EcsOrchestrationService @Inject constructor(
                     assignPublicIp = assignPublicIp,
                     desiredCount = desiredCount,
                     minCount = minCount,
-                    maxCount = maxCount
+                    maxCount = maxCount,
+                    metadata = declaredMetadataOf(tags)
                 )
             }
 
@@ -238,6 +246,8 @@ class EcsOrchestrationService @Inject constructor(
      *   target fails (most commonly because the account's
      *   `AWSServiceRoleForApplicationAutoScaling_ECSService` service-linked role doesn't exist yet
      *   and the caller lacks `iam:CreateServiceLinkedRole`).
+     * @throws ReservedMetadataKeyException if [DaemonRequest.metadata] overrides a
+     *   `namazu.conductor`-prefixed tag key. Thrown before the service is created.
      */
     override fun deploy(request: DaemonRequest): DaemonExecution {
         val profile = request.profile as? EcsDaemon
@@ -246,6 +256,11 @@ class EcsOrchestrationService @Inject constructor(
         val targetCluster = request.scope.filterIsInstance<ClusterScope>().firstOrNull()?.cluster ?: cluster
         val serviceName = "${profile.family}-${UUID.randomUUID().toString().take(8)}"
 
+        // Throws on a reserved prefix before createService, so a rejected key can't leave a running
+        // service behind that the caller was never told about.
+        val metadata = Metadata.merge(profile.metadata, request.metadata)
+        val tags = metadata.toEcsTags()
+
         val createResponse = ecsClient.createService {
             it.cluster(targetCluster)
             it.serviceName(serviceName)
@@ -253,6 +268,11 @@ class EcsOrchestrationService @Inject constructor(
             it.desiredCount(profile.desiredCount)
             it.launchType(profile.launchType)
             if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig(profile.assignPublicIp))
+            // Tagged on the service itself, and deliberately *not* via propagateTags: propagation
+            // would additionally stamp these onto every task the service launches, which is a
+            // different (and unrequested) set of resources. The tasks a service runs are ECS's
+            // business; what the daemon declares is a property of the service.
+            if (tags.isNotEmpty()) it.tags(tags)
         }
 
         val service = createResponse.service()
@@ -286,7 +306,8 @@ class EcsOrchestrationService @Inject constructor(
                 cluster = targetCluster,
                 serviceName = serviceName,
                 taskDefinitionArn = service.taskDefinition() ?: profile.family
-            )
+            ),
+            metadata = tagsOf(serviceArn, metadata)
         )
     }
 
@@ -374,7 +395,8 @@ class EcsOrchestrationService @Inject constructor(
             minCount = scalableTarget?.minCapacity(),
             maxCount = scalableTarget?.maxCapacity(),
             endpoints = emptyList(),
-            details = execution.details
+            details = execution.details,
+            metadata = tagsOf(execution.id, execution.metadata)
         )
     }
 
@@ -489,6 +511,8 @@ class EcsOrchestrationService @Inject constructor(
      *
      * @throws JobException if [JobRequest.profile] is not an [EcsJobProfile], or if ECS does not
      *   return a task ARN in its response.
+     * @throws ReservedMetadataKeyException if [JobRequest.metadata] overrides a
+     *   `namazu.conductor`-prefixed tag key. Thrown before the task is run.
      */
     override fun execute(request: JobRequest): JobExecution {
         if (request.tty) {
@@ -516,11 +540,21 @@ class EcsOrchestrationService @Inject constructor(
 
         val targetCluster = request.scope.filterIsInstance<ClusterScope>().firstOrNull()?.cluster ?: cluster
 
+        // Throws on a reserved prefix before runTask, so a rejected key can't leave an orphan task
+        // running with no way to account for it.
+        val metadata = Metadata.merge(profile.metadata, request.metadata)
+        val tags = metadata.toEcsTags()
+
         val taskResponse = ecsClient.runTask {
             it.cluster(targetCluster)
             it.taskDefinition(profile.family)
             it.launchType(profile.launchType)
             if (profile.networkMode == NetworkMode.AWSVPC) it.networkConfiguration(buildNetworkConfig(profile.assignPublicIp))
+            // Tagged explicitly on the task rather than via propagateTags: propagateTags copies a
+            // *service's* tags to the tasks it launches, which is the wrong mechanism for a one-shot
+            // runTask (there is no service) and would silently pull in whatever else the family's
+            // tags happen to be.
+            if (tags.isNotEmpty()) it.tags(tags)
             it.overrides(
                 TaskOverride.builder()
                     .containerOverrides(containerOverride)
@@ -531,8 +565,10 @@ class EcsOrchestrationService @Inject constructor(
         val task = taskResponse.tasks().firstOrNull()
             ?: throw JobException("ECS returned no task for family '${profile.family}' on cluster '$targetCluster'")
 
+        val taskArn = task.taskArn()
+
         return JobExecution(
-            id = task.taskArn(),
+            id = taskArn,
             status = JobStatus.PENDING,
             details = EcsExecutionDetails(
                 cluster = targetCluster,
@@ -541,7 +577,8 @@ class EcsOrchestrationService @Inject constructor(
                 lastStatus = task.lastStatus(),
                 stdioToken = stdioToken
             ),
-            containers = profile.containers
+            containers = profile.containers,
+            metadata = tagsOf(taskArn, metadata)
         )
     }
 
@@ -564,6 +601,7 @@ class EcsOrchestrationService @Inject constructor(
                         it.cluster(cluster)
                         it.tasks(arns)
                     }.tasks().forEach { task ->
+                        val profile = profilesByFamily[family]
                         executions += JobExecution(
                             id = task.taskArn(),
                             status = mapStatus(task),
@@ -574,7 +612,12 @@ class EcsOrchestrationService @Inject constructor(
                                 launchType = task.launchTypeAsString(),
                                 lastStatus = task.lastStatus()
                             ),
-                            containers = profilesByFamily[family]?.containers ?: emptyList()
+                            containers = profile?.containers ?: emptyList(),
+                            // A task launched by this provider carries the merged tags under its own
+                            // ARN; one that ECS started by other means (a scaling event landing here
+                            // first, say) carries whatever tags that path gave it. Reading the task's
+                            // tags rather than the family's is what makes those two distinguishable.
+                            metadata = tagsOf(task.taskArn(), profile?.metadata ?: emptyMap())
                         )
                     }
                 }
@@ -758,6 +801,45 @@ class EcsOrchestrationService @Inject constructor(
 
         return instance.publicIpAddress() ?: instance.privateIpAddress()
     }
+
+    /**
+     * A task definition family's tags as a profile's or daemon's *declared* [Metadata]: the whole
+     * map, copied verbatim. The `namazu.conductor:...` tags this provider reads as typed fields are
+     * reported here under their full keys too, and no tag is filtered out, because deciding what a
+     * tag "really" means is the consumer's call, not this provider's.
+     */
+    private fun declaredMetadataOf(tags: List<Tag>): Map<String, String> =
+        tags.associate { it.key() to (it.value() ?: "") }
+
+    /**
+     * Renders merged metadata as ECS [Tag]s for a `runTask`/`createService` call.
+     */
+    private fun Map<String, String>.toEcsTags(): List<Tag> =
+        map { (key, value) -> Tag.builder().key(key).value(value).build() }
+
+    /**
+     * The tags actually present on the ECS resource identified by [resourceArn], reported as
+     * [JobExecution.metadata] / [DaemonExecution.metadata].
+     *
+     * Falls back to [fallback] — the set we know we asked for — when the tags cannot be read, which
+     * it currently can only mean the caller hasn't granted `ecs:ListTagsForResource`. Degrading to
+     * what was requested keeps a missing IAM permission from turning every listing into a hard
+     * failure, and the warning says so explicitly rather than passing bad data off as a fact. A
+     * permission gap is a configuration problem to surface, not a reason to break status polling.
+     */
+    private fun tagsOf(resourceArn: String, fallback: Map<String, String>): Map<String, String> =
+        runCatching {
+            ecsClient.listTagsForResource { it.resourceArn(resourceArn) }
+                .tags()
+                .let { declaredMetadataOf(it) }
+        }.getOrElse { e ->
+            logger.warn(
+                "Could not read tags for '{}' ({}); reporting the requested metadata instead. " +
+                    "Grant ecs:ListTagsForResource to read it back accurately.",
+                resourceArn, e.message
+            )
+            fallback
+        }
 
     companion object {
 

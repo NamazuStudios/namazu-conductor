@@ -26,7 +26,13 @@ data class KubernetesDaemon(
     val replicas: Int = 1,
     val minReplicas: Int? = null,
     val maxReplicas: Int? = null,
-    val targetCpuUtilizationPercentage: Int? = null
+    val targetCpuUtilizationPercentage: Int? = null,
+    /**
+     * The `PodTemplate`'s **entire** top-level annotation map, verbatim and unfiltered, exactly as
+     * for [KubernetesJobProfile.metadata]. Conductor assigns no meaning to any of them; see
+     * [dev.getelements.conductor.Metadata].
+     */
+    override val metadata: Map<String, String> = emptyMap()
 ) : Daemon {
 
     override val id: String

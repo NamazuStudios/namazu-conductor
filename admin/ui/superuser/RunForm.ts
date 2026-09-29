@@ -1,5 +1,5 @@
 import React from 'react'
-import { KVEditor, ListEditor } from './ui'
+import { KVEditor, ListEditor, isBehavioralMetadataKey, RESERVED_METADATA_PREFIX } from './ui'
 import type { KVPair } from './ui'
 import type { PlacementInput } from './types'
 
@@ -13,6 +13,7 @@ export interface AdvancedOptions {
   args: string[]
   command: string[]
   env: KVPair[]
+  metadata: KVPair[]
   placement: PlacementInput
   tty: boolean
   /** Whether to add the operator's own session secret to `env` at launch time — see
@@ -26,10 +27,34 @@ export function defaultAdvancedOptions(impliedTerminal: boolean, injectSessionSe
     args: [],
     command: impliedTerminal ? TERMINAL_COMMAND_SUGGESTION : [],
     env: [],
+    metadata: [],
     placement: { type: '', region: '', ip: '', lat: '', lon: '' },
     tty: impliedTerminal,
     injectSessionSecret: injectSessionSecretByDefault,
   }
+}
+
+/**
+ * The metadata overrides to actually send, or `undefined` when the operator added none.
+ *
+ * `undefined` (omitted) rather than `{}` matters: an empty object is a no-op merge, but omitting the
+ * field keeps the request body honest that nothing was overridden, matching how `command` and
+ * `placement` already behave.
+ *
+ * A behavioural `namazu.conductor` key (workload-kind, jobSet, replicas, …) is dropped here rather
+ * than sent and rejected: the server would answer 400 for it, and letting an operator compose a
+ * key that is guaranteed to be refused is a worse experience than not sending it. Cosmetic
+ * reserved keys (`hidden`, `agent`, `link.*`, …) are *not* dropped — per-run overrides of those
+ * are exactly the point of the vocabulary.
+ */
+export function deriveMetadataOverrides(metadata: KVPair[]): Record<string, string> | undefined {
+  const overrides: Record<string, string> = {}
+  metadata.forEach((pair) => {
+    const key = pair.key.trim()
+    if (!key || isBehavioralMetadataKey(key)) return
+    overrides[key] = pair.value
+  })
+  return Object.keys(overrides).length > 0 ? overrides : undefined
 }
 
 /** `undefined` (omitted), not `[]`, when the caller never touched the field — see AvailableJobsPage. */
@@ -106,6 +131,21 @@ export function RunForm(props: {
         onAdd: () => onChange({ ...value, env: [...value.env, { key: '', value: '' }] }),
         onRemove: (i) => onChange({ ...value, env: value.env.filter((_, j) => j !== i) }),
       })),
+
+    h('div', null,
+      h('label', { className: labelClass }, 'Metadata overrides'),
+      h(KVEditor, {
+        items: value.metadata,
+        onChangeKey: (i, v) => onChange({ ...value, metadata: value.metadata.map((p, j) => (j === i ? { ...p, key: v } : p)) }),
+        onChangeValue: (i, v) => onChange({ ...value, metadata: value.metadata.map((p, j) => (j === i ? { ...p, value: v } : p)) }),
+        onAdd: () => onChange({ ...value, metadata: [...value.metadata, { key: '', value: '' }] }),
+        onRemove: (i) => onChange({ ...value, metadata: value.metadata.filter((_, j) => j !== i) }),
+      }),
+      h('p', { className: 'text-xs text-muted-foreground mt-1' },
+        `merged over the profile's declared metadata for this launch. Cosmetic ` +
+        `"${RESERVED_METADATA_PREFIX}" keys (hidden, agent, link.*, …) may be overridden; ` +
+        `keys that drive Conductor's behaviour (workload-kind, jobSet, replicas, …) are ` +
+        `rejected with a 400`)),
 
     h('div', null,
       h('label', { className: labelClass }, 'Placement'),

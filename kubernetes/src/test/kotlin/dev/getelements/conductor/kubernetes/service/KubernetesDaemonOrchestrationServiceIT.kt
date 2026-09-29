@@ -4,6 +4,7 @@ import dev.getelements.conductor.DaemonExecution
 import dev.getelements.conductor.DaemonRequest
 import dev.getelements.conductor.DaemonStatus
 import dev.getelements.conductor.exception.JobException
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MAX_REPLICAS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MIN_REPLICAS
@@ -49,6 +50,15 @@ import java.util.concurrent.Executors
  * namespace/jobset/connectivity configuration; see that class's KDoc for the full list.
  */
 class KubernetesDaemonOrchestrationServiceIT {
+
+    companion object {
+        /** Non-`namazu.conductor` annotation keys, standing in for arbitrary infrastructure metadata. */
+        private const val METADATA_OWNER_KEY = "docs.example.com/owner"
+        private const val METADATA_NOTE_KEY = "run.example.com/note"
+
+        /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
+        private const val METADATA_HIDDEN_KEY = "namazu.conductor/hidden"
+    }
 
     private val logger = LoggerFactory.getLogger(KubernetesDaemonOrchestrationServiceIT::class.java)
 
@@ -146,6 +156,62 @@ class KubernetesDaemonOrchestrationServiceIT {
             jobProfileIds.contains("$namespace:$fixedTemplate"),
             "Daemon template leaked into getAvailableProfiles(): $jobProfileIds"
         )
+    }
+
+    /**
+     * Daemon metadata mirrors job metadata: the `PodTemplate`'s whole annotation map is declared
+     * verbatim, a caller's overrides merge over it, and the `Deployment`'s pod template is both the
+     * write target and the read-back source -- so a later [KubernetesOrchestrationService.getStatus]
+     * reports what actually landed rather than what was requested.
+     */
+    @Test
+    fun metadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
+        val profile = service.findAvailableDaemon("$namespace:$fixedTemplate")
+            ?: throw AssertionError("Daemon profile '$namespace:$fixedTemplate' not found")
+
+        assertEquals(
+            profile.metadata[METADATA_OWNER_KEY], "platform-team",
+            "Expected a non-Conductor annotation to be declared verbatim"
+        )
+        assertEquals(
+            profile.metadata[ANN_REPLICAS], "2",
+            "Expected the namazu.conductor/replicas key to be declared verbatim, not stripped"
+        )
+
+        val deploymentsBefore = client.apps().deployments().inNamespace(namespace).list().items.size
+        assertThrows(ReservedMetadataKeyException::class.java) {
+            service.deploy(DaemonRequest(profile = profile, metadata = mapOf(ANN_REPLICAS to "9")))
+        }
+        assertEquals(
+            client.apps().deployments().inNamespace(namespace).list().items.size, deploymentsBefore,
+            "A rejected metadata override must not have created a Deployment"
+        )
+
+        val execution = service.deploy(DaemonRequest(
+            profile = profile,
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned",
+                METADATA_HIDDEN_KEY to "true"
+            )
+        )).also { executions += it }
+        val running = awaitStatus(execution, DaemonStatus.RUNNING)
+
+        assertEquals(running.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
+        assertEquals(running.metadata[METADATA_NOTE_KEY], "pinned", "New key was not added")
+        assertEquals(running.metadata[ANN_REPLICAS], "2", "Unmentioned declared key was not preserved")
+        assertEquals(running.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
+
+        val (_, _, name) = decodeIdForTest(running.id)
+        val onCluster = client.apps().deployments().inNamespace(namespace).withName(name).get()
+            ?.spec?.template?.metadata?.annotations.orEmpty()
+        assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the Deployment")
+        assertEquals(onCluster[METADATA_NOTE_KEY], "pinned", "New key did not land on the Deployment")
+        assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the Deployment")
+
+        // getStatus() re-reads from the cluster rather than echoing the daemon we were handed.
+        val refreshed = service.getStatus(running)
+        assertEquals(refreshed.metadata[METADATA_OWNER_KEY], "sre-oncall", "getStatus() lost the metadata")
+        assertEquals(refreshed.metadata[METADATA_NOTE_KEY], "pinned", "getStatus() lost the new key")
     }
 
     @Test
@@ -350,6 +416,7 @@ class KubernetesDaemonOrchestrationServiceIT {
                 .addToAnnotations(ANN_REPLICAS, replicas.toString())
                 .apply { if (minReplicas != null) addToAnnotations(ANN_MIN_REPLICAS, minReplicas.toString()) }
                 .apply { if (maxReplicas != null) addToAnnotations(ANN_MAX_REPLICAS, maxReplicas.toString()) }
+                .addToAnnotations(METADATA_OWNER_KEY, "platform-team")
             .endMetadata()
             .withNewTemplate()
                 .withNewSpec()

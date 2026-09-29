@@ -42,6 +42,15 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
 - **`JobExecution`** — returned from `execute()`; tracks job by ID and `JobStatus`
 - **`DaemonOrchestrationService`** — the interface for persistent, always-running workloads with a desired replica count (`RUNNING` is the steady state; there is no completion). A provider implements `OrchestrationService`, `DaemonOrchestrationService`, or both — neither requires the other. Implemented by `ecs` (ECS Service + Application Auto Scaling) and `kubernetes` (`Deployment` + optional `HorizontalPodAutoscaler`); not applicable to EdgeGap.
 - **`Daemon`** / **`DaemonRequest`** / **`DaemonExecution`** — mirror `JobProfile` / `JobRequest` / `JobExecution` for the daemon model; `DaemonExecution` additionally carries `desiredCount`/`runningCount`/`minCount`/`maxCount`
+- **`metadata`** — a `Map<String, String>` on `JobProfile`/`Daemon` (declared), `JobRequest`/`DaemonRequest` (per-launch overrides), and `JobExecution`/`DaemonExecution` (what actually landed). Conductor assigns no meaning to *unreserved* keys — there is no schema, and a `namazu.conductor`-prefixed key that Conductor also surfaces as a typed field still appears in the raw map under its full key. The declared half is the provider's whole native key/value map, verbatim and unfiltered (Kubernetes: the `PodTemplate`'s *top-level* annotations; ECS: all task-definition tags), so consumers get the complete picture rather than a curated subset. `Metadata.merge(declared, overrides)` is the single implementation of the override rule — use it in new providers rather than reimplementing the merge. Overlay only: there is no deletion semantics. The reserved `namazu.conductor` prefix holds two kinds of key: **behavioural** keys (workload-kind/jobSet selection, scoping, tuning — the union of every key a provider interprets; see `Metadata.isBehavioral`) are refused as overrides with `ReservedMetadataKeyException` (a `JobException`, *not* an `IllegalArgumentException` — the platform treats the latter as an internal error, and this is a caller error) before anything is created; **cosmetic** keys are UI hints the admin dashboard interprets and are free to override. The built-in cosmetic vocabulary (both `/` and `:` separator forms):
+
+  | Key | Meaning |
+  |---|---|
+  | `namazu.conductor/hidden` | `true` → row hidden in the admin UI unless "Show hidden" is checked |
+  | `namazu.conductor/agent` | `true` → 🤖 badge; marks a terminal job that is an agent |
+  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback); repeat per title |
+
+  Unknown `namazu.conductor` keys are overridable at the caller's own risk — a future release may make one behavioural. Executions report what's read back off the live workload, so the set is legitimately a superset of the declared one. See `tickets/profile-metadata.md` and `tickets/ui-hint-annotations.md`.
 
 ## Provider Implementation Pattern
 
@@ -317,6 +326,23 @@ mvn install -Pbuild-ui
 `superuser/` serves components shown to administrators only. `user/` serves components in user-facing dashboards.
 
 ## Tests
+
+**Do not build locally. Have CI do it.** A full `mvn install` exhausts system RAM on a workstation,
+so a local build is not merely redundant — it actively breaks the machine and can leave partial
+`target/` output behind. Push the branch and let the workflow be the verdict.
+
+The cost of relying on CI is one CI cycle of latency; the cost of building locally is an unusable
+workstation. There is no case where the local build is worth it.
+
+Two further reasons CI is the right answer even ignoring RAM: it is the only run that can be trusted
+to match what ships, and the integration suites need real provisioned infrastructure (an EKS
+cluster, a CloudFormation stack, live EdgeGap allocations) that a workstation only approximates — so
+a local pass can be green for the wrong reason and a local failure can be environmental rather than a
+real defect. Note that the ECS suite currently passes vacuously: every test in it is
+`@Test(enabled = false)`, so a green ECS check is not evidence of anything.
+
+If you need to confirm a specific narrow thing cheaply — a single module's compilation, a TypeScript
+typecheck in `admin/ui`, a YAML parse — do just that one thing, not a reactor build.
 
 `ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `admin`, and `debug` have no tests.
 
