@@ -8,7 +8,7 @@ package dev.getelements.conductor
 enum class PlacementType {
 
     /**
-     * Placement by named region code. Supported by Hathora and Multiplay. The exact region string
+     * Placement by named region code. Supported by Kubernetes. The exact region string
      * values are specific to the orchestrator implementation.
      */
     REGION,
@@ -35,8 +35,8 @@ interface JobPlacement{
 }
 
 /**
- * Specifies placement by a named region code. Supported by orchestrators such as Hathora and
- * Multiplay. The meaning of [id] is platform-specific.
+ * Specifies placement by a named region code. Supported by Kubernetes, which maps it onto a
+ * `topology.kubernetes.io/zone` node selector. The meaning of [id] is platform-specific.
  */
 data class RegionPlacement(val id : String) : JobPlacement {
 

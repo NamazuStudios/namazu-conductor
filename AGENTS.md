@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://namazustudios.com/docs). It abstracts provider-specific APIs (EdgeGap, AWS ECS, Kubernetes, Multiplay) behind a common `OrchestrationService` interface.
+Namazu Conductor is a multi-module Maven project providing a unified container orchestration API for the [Namazu Elements SDK](https://namazustudios.com/docs). It abstracts provider-specific APIs (EdgeGap, AWS ECS, Kubernetes) behind a common `OrchestrationService` interface.
 
 ## Build & Run
 
@@ -30,7 +30,6 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
 | `edgegap` | EdgeGap REST API v1 implementation | Complete |
 | `ecs` | AWS ECS implementation (AWS SDK v2; Fargate and EC2 launch types) | Complete |
 | `kubernetes` | Kubernetes implementation (Fabric8 client; `PodTemplate` → profile, `Pod`/`Job`/`Deployment` workloads) | Complete |
-| `multiplay` | Unity Multiplay implementation (fleet allocations via the Unity Services API) | Complete, untested — no IT coverage yet |
 | `admin` | Superuser REST API (`/jobs`) and dashboard panel for listing/launching/stopping jobs across every deployed provider Element | Complete |
 | `debug` | Local runner — boots MongoDB replica set then starts Elements runtime | Complete |
 
@@ -46,7 +45,7 @@ Prefix branch names with `feature/` or `bugfix/` (e.g. `feature/watch-based-comp
 
 ## Provider Implementation Pattern
 
-When implementing a new provider (e.g., Multiplay, Fargate):
+When implementing a new provider (e.g. Fargate):
 
 1. Implement `OrchestrationService` in `<provider>/src/main/kotlin/.../service/`
 2. Create a companion `JobProfile` data class (e.g., `EdgeGapJobProfile`) with an `id` derived from provider-native identifiers
@@ -78,7 +77,7 @@ labels and annotations on the `PodTemplate`:
   `JOBSET_NAME`/`JOBSET_DESCRIPTION` (kubernetes and ecs only) are purely cosmetic companions — a
   friendly name and optional Markdown blurb the admin dashboard shows in place of the raw job set
   value, exposed via `OrchestrationService.jobSetName`/`jobSetDescription` (default `null` for
-  providers with no job-set concept, e.g. edgegap/multiplay).
+  providers with no job-set concept, e.g. edgegap).
   **Caveat:** running multiple job-set-scoped `kubernetes`/`ecs` deployments side-by-side is the
   intended usage but isn't safe yet, at two separate layers:
   1. A single deployment's `packages` list can't actually contain two entries pointing at the same
@@ -319,7 +318,7 @@ mvn install -Pbuild-ui
 
 ## Tests
 
-`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `multiplay`, `admin`, and `debug` have no tests.
+`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `admin`, and `debug` have no tests.
 
 `StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
 

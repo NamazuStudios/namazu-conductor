@@ -140,7 +140,7 @@ jobs:
       # Integration tests are intentionally skipped here (-DskipITs) — see the "Verify release
       # commit already passed integration tests" step above for why that's safe.
       - name: Build and Publish Release
-        run: mvn -B --no-transfer-progress -Pcentral-publish clean deploy -pl '!:multiplay' -DskipITs
+        run: mvn -B --no-transfer-progress -Pcentral-publish clean deploy -DskipITs
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}

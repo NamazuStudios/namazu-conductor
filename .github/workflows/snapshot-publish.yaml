@@ -87,7 +87,7 @@ jobs:
       # Correctness is already proven by the kubernetes-it/edgegap-it/ecs-it jobs above, so skip
       # re-running integration tests here — this job just builds and publishes the artifacts.
       - name: Build and Publish Snapshot
-        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -pl '!:multiplay' -DskipITs
+        run: mvn -B --no-transfer-progress -Pgithub-publish clean deploy -DskipITs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
