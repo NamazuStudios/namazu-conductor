@@ -308,16 +308,60 @@ export function containerMetadataFlag(
   return metadataFlag(metadata, `${flag}.${containerName}`)
 }
 
-/** Every `namazu.conductor/link.{title}` entry in the map, as `{title, url}` pairs. Non-http(s)
+/** One `namazu.conductor/link.{Identifier}` entry in the map, joined with its optional
+ * companions: `link-display.{Identifier}` (the pill's text; falls back to the Identifier itself)
+ * and `link-protocol.{Identifier}` (what the URL serves, e.g. `WebDAV` — a UI hint, not part of
+ * the href). Identifier matching is case-insensitive on the verb and on the Identifier, consistent
+ * with the flag matchers above; the fallback title preserves the Identifier's casing as written.
+ * Values are rendered verbatim. */
+export interface LinkMetadata {
+  id: string
+  title: string
+  url: string
+  protocol: string | null
+}
+
+/**
+ * Every `namazu.conductor/link.{Identifier}` entry in the map, as [LinkMetadata]. Non-http(s)
  * values are dropped — they get linkified nowhere else, and a `javascript:` href is exactly what
- * the linkifier must never emit. */
-export function parseLinkMetadata(metadata: Record<string, string> | undefined): { title: string; url: string }[] {
-  return Object.entries(metadata ?? {}).flatMap(([key, value]) => {
+ * the linkifier must never emit. Companion `link-display.*`/`link-protocol.*` keys with no
+ * matching base `link.*` key are ignored. Order follows the map's first-seen base `link.*` keys.
+ */
+export function parseLinkMetadata(metadata: Record<string, string> | undefined): LinkMetadata[] {
+  const companions = new Map<string, { title?: string; protocol?: string }>()
+  const links: LinkMetadata[] = []
+  Object.entries(metadata ?? {}).forEach(([key, value]) => {
     const suffix = conductorKeySuffix(key)
-    if (!suffix || !suffix.toLowerCase().startsWith('link.')) return []
-    const title = suffix.slice('link.'.length).trim()
-    if (!title || !isLinkable(value)) return []
-    return [{ title, url: value.trim() }]
+    if (!suffix) return
+    const dot = suffix.toLowerCase().indexOf('.')
+    if (dot < 0) return
+    const verb = suffix.slice(0, dot)
+    const identifier = suffix.slice(dot + 1).trim()
+    if (!identifier) return
+    const companionKey = identifier.toLowerCase()
+    if (verb === 'link') {
+      if (!isLinkable(value)) return
+      const existing = links.find((link) => link.id.toLowerCase() === companionKey)
+      if (existing) {
+        existing.url = value.trim()
+        return
+      }
+      links.push({ id: identifier, title: identifier, url: value.trim(), protocol: null })
+      return
+    }
+    if (verb !== 'link-display' && verb !== 'link-protocol') return
+    const companion = companions.get(companionKey) ?? {}
+    if (verb === 'link-display') companion.title = value.trim()
+    else companion.protocol = value.trim()
+    companions.set(companionKey, companion)
+  })
+  return links.map((link) => {
+    const companion = companions.get(link.id.toLowerCase()) ?? {}
+    return {
+      ...link,
+      title: companion.title?.length ? companion.title : link.title,
+      protocol: companion.protocol?.length ? companion.protocol : null,
+    }
   })
 }
 
@@ -341,22 +385,28 @@ export function Favicon(props: { url: string }) {
   })
 }
 
-/** Renders the map's `link.{title}` entries as clickable pills — operator-curated deep links
- * (a preview page, a dashboard, docs), with the link's favicon where one exists. Clicks stop
- * propagation because these render inside `Accordion` headers, where a click toggles. */
+/** Renders the map's `link.{Identifier}` entries as clickable pills — operator-curated deep links
+ * (a preview page, a dashboard, docs), with the link's favicon where one exists. A companion
+ * `link-display.{Identifier}` overrides the pill's text, and a `link-protocol.{Identifier}` renders
+ * as a small badge on the pill (e.g. `WebDAV`) — a hint about what the URL serves, display-only.
+ * Clicks stop propagation because these render inside `Accordion` headers, where a click toggles. */
 export function LinkPills(props: { metadata?: Record<string, string> }) {
   const links = parseLinkMetadata(props.metadata)
   if (links.length === 0) return null
   return h('div', { className: 'flex flex-wrap items-center gap-1' },
     links.map((link) => h('a', {
-      key: link.title,
+      key: link.id,
       href: link.url,
       target: '_blank',
       rel: 'noopener noreferrer',
       className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 transition-colors',
       onClick: (e: React.MouseEvent) => e.stopPropagation(),
       title: link.url,
-    }, h(Favicon, { url: link.url }), link.title, h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))))
+    },
+      h(Favicon, { url: link.url }),
+      link.title,
+      link.protocol && h('span', { className: 'font-mono text-[10px] opacity-70' }, `⟨${link.protocol}⟩`),
+      h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))))
 }
 
 const SHOW_HIDDEN_STORAGE_KEY = 'conductor.show-hidden'

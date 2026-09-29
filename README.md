@@ -116,7 +116,11 @@ mean untouchable. The prefix holds two kinds of key:
   | `namazu.conductor/hidden.{container}` | `true` → just that container's attach row hidden (same toggle reveals it) |
   | `namazu.conductor/agent` | `true` → 🤖 badge; marks a terminal job that is an agent |
   | `namazu.conductor/agent.{container}` | `true` → 🤖 badge on that container's attach row |
-  | `namazu.conductor/link.{title}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab); repeat per title |
+  | `namazu.conductor/link.{Identifier}` | static http(s) URL rendered as a clickable pill (favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab); repeat per Identifier |
+  | `namazu.conductor/link-display.{Identifier}` | optional pill text for the link with that Identifier; falls back to the Identifier itself when absent |
+  | `namazu.conductor/link-protocol.{Identifier}` | optional protocol tag for the link with that Identifier (e.g. `WebDAV`), rendered as a small badge on the pill — a display-only hint about what the URL serves, never part of the href |
+
+  Links are grouped by **Identifier**: the `{Identifier}` qualifier on `link.*` is the link's identity, and the companion `link-display.*`/`link-protocol.*` keys join to it by the same Identifier (matched case-insensitively). Companion keys with no matching `link.{Identifier}` are ignored.
 
   Container qualifiers are independent of the job-level flags. They are display-only: no provider filters containers, and `terminal-job` stays pod-level. All external links the dashboard renders from metadata — pills and Markdown descriptions alike — carry `target="_blank"`/`rel="noopener noreferrer"`.
 

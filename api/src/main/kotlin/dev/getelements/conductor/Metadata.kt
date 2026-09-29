@@ -36,7 +36,8 @@ import dev.getelements.conductor.exception.ReservedMetadataKeyException
  *    profile remains fine: a template is trusted to set Conductor's own keys, since that is
  *    exactly what it is for.
  *
- *  - **Cosmetic** (`hidden`, `agent`, `link.{title}`, `description`, `display-name`, and anything
+ *  - **Cosmetic** (`hidden`, `agent`, `link.{Identifier}`, `link-display.{Identifier}`,
+ *    `link-protocol.{Identifier}`, `description`, `display-name`, and anything
  *    else not in the behavioural set): hints consumed by the admin UI and free to override per
  *    run — a caller may launch the same template visibly, hidden, or as an agent, or attach
  *    different links. Keys *not yet* assigned meaning by any Conductor release are also
@@ -86,7 +87,7 @@ object Metadata {
      * True when [key] is a behavioural Conductor key — a [isReserved] key whose suffix (after the
      * `/` or `:` separator, compared case-insensitively) is one of the keys Conductor gives
      * behaviour to; see [BEHAVIORAL_KEY_SUFFIXES]. Cosmetic reserved keys (`hidden`, `agent`,
-     * `link.{title}`, `description`, `display-name`, …) and unknown reserved keys are not
+     * `link.{Identifier}`, `description`, `display-name`, …) and unknown reserved keys are not
      * behavioural and are free to override.
      */
     fun isBehavioral(key: String): Boolean =

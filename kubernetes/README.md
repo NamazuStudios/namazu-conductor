@@ -191,7 +191,11 @@ ECS-style `:` separators):
 | `namazu.conductor/hidden.{container}: "true"` | just that container's attach row hidden (same toggle reveals it) |
 | `namazu.conductor/agent: "true"` | 🤖 badge; marks a terminal job that is an agent |
 | `namazu.conductor/agent.{container}: "true"` | 🤖 badge on that container's attach row |
-| `namazu.conductor/link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab; repeat per title |
+| `namazu.conductor/link.{Identifier}: "https://…"` | clickable pill (favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab); the pill's text falls back to the Identifier itself; repeat per Identifier |
+| `namazu.conductor/link-display.{Identifier}: "Example Link"` | optional pill text for the link with that Identifier |
+| `namazu.conductor/link-protocol.{Identifier}: "WebDAV"` | optional protocol tag, rendered as a small badge on that link's pill — a display-only hint about what the URL serves, never part of the href |
+
+Links are grouped by **Identifier**: the `{Identifier}` qualifier on `link.*` is the link's identity, and the companion `link-display.*`/`link-protocol.*` annotations join to it by the same Identifier (matched case-insensitively). Companion annotations with no matching `link.{Identifier}` are ignored.
 
 Container qualifiers are independent of the job-level flags and display-only — no provider filters
 containers, and `terminal-job` stays pod-level (tty+stdin target the primary container at launch).
