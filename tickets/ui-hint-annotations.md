@@ -1,4 +1,4 @@
-# Ticket: UI-hint annotations (`hidden`, `agent`, `link.{title}`) and the cosmetic-key override relaxation
+# Ticket: UI-hint annotations (`hidden`, `agent`, `link.{Identifier}`) and the cosmetic-key override relaxation
 
 **Status:** implemented
 **Components:** `api`, `admin` (REST + UI)
@@ -17,7 +17,7 @@ cosmetic ones become overridable.
 |---|---|---|---|
 | `namazu.conductor/hidden` | `namazu.conductor/hidden` | `namazu.conductor:hidden` | `true` → row hidden unless "Show hidden" is checked |
 | `namazu.conductor/agent` | `namazu.conductor/agent` | `namazu.conductor:agent` | `true` → 🤖 badge; a terminal job that is an agent |
-| `namazu.conductor/link.{title}` | `namazu.conductor/link.Preview` | `namazu.conductor:link.Preview` | static http(s) URL as a clickable pill; repeat per title |
+| `namazu.conductor/link.{Identifier}` | `namazu.conductor/link.Preview` | `namazu.conductor:link.Preview` | static http(s) URL as a clickable pill; repeat per Identifier |
 
 - **UI-interpreted, not typed.** No new API fields: the admin UI reads the keys from the raw
   `metadata` maps profiles/executions already report, so **no provider changes were needed** —
@@ -28,7 +28,7 @@ cosmetic ones become overridable.
   `admin/ui/superuser/ui.ts`, mirroring `Metadata.isBehavioral`).
 - **Booleans are strict.** Only a value of `true` (case-insensitive) sets a flag; any other value
   means "not set". No tristate parsing surprises for a `FALSE` annotation.
-- **Static links only.** `link.{title}` values are rendered exactly as declared — no per-run
+- **Static links only.** `link.{Identifier}` values are rendered exactly as declared — no per-run
   placeholder substitution against the execution's endpoints. Per-run links are still achievable
   by overriding the `link.*` key at launch, which the relaxation below now permits. If templating
   is wanted later, it needs rules for multi-container/multi-port workloads first.
@@ -103,7 +103,7 @@ is already served display-side: the attach UI offers every container, and
 targeting is ever wanted, it's a behavioural provider feature with its own ticket.
 
 **New-tab convention.** Every link the dashboard renders from metadata — pill values and
-`link.{title}` pills and links inside Markdown descriptions — opens in a new tab
+`link.{Identifier}` pills and links inside Markdown descriptions — opens in a new tab
 (`target="_blank"` + `rel="noopener noreferrer"`, which keeps the opened page from reaching back
 through `window.opener`), and pills mark it with a ↗ glyph. Markdown links get the same treatment
 via a `marked` renderer override that also re-normalizes http(s) hrefs through `new URL`
@@ -114,3 +114,33 @@ The kubernetes job metadata IT additionally pins the dot-qualified key
 (`namazu.conductor/hidden.sidecar`) through the whole pipeline — declared, landed on the Job's pod
 template, and read back — guarding the dot form against prefix-exclusion regressions (anything
 that would swallow it the way `default-container-exec.*` is excluded).
+
+## Amendment: link identifiers, display text, and protocol tags (`link-display.*`, `link-protocol.*`)
+
+The `link.{title}` form's title qualifier doubled as both the link's identity and its pill text,
+which conflated two things a link usually wants separate: the identifier used to group companion
+keys, and the words shown on the pill. The qualifier is now the **Identifier**, and two companion
+keys join to it (both separator forms as always):
+
+| Key | Example | Meaning |
+|---|---|---|
+| `namazu.conductor/link.{Identifier}` | `namazu.conductor/link.SomeLink=https://example.com` | the link itself — required for any of the companions to take effect |
+| `namazu.conductor/link-display.{Identifier}` | `namazu.conductor/link-display.SomeLink=Link Display Text` | the pill's text; falls back to the Identifier itself when absent |
+| `namazu.conductor/link-protocol.{Identifier}` | `namazu.conductor/link-protocol.SomeLink=WebDAV` | what the URL serves (a protocol or similar), rendered as a small monospace badge on the pill |
+
+- **Identifier, not title.** `{Identifier}` is the link's identity; `link-display.{Identifier}`
+  overrides only what's shown. Existing `link.{title}` declarations keep working unchanged — with
+  no companion keys present, the pill reads exactly as before (the Identifier *is* the title).
+- **Matching is case-insensitive** on both the verb (`link`/`link-display`/`link-protocol`) and the
+  Identifier, consistent with the boolean flag matchers; the fallback title preserves the
+  Identifier's casing as written on the base `link.*` key.
+- **Orphan companions are ignored.** A `link-display.*` or `link-protocol.*` key with no matching
+  `link.{Identifier}` renders nothing — the base key is the link; companions only decorate it.
+- **Protocol is display-only.** It never touches the href (no URL rewriting), it is not a scheme
+  restriction, and it does not affect the http(s)-only linkification rule: a `link.*` value must
+  still parse as http(s) or it is dropped, whatever the protocol tag claims.
+- **Cosmetic and overridable**, like the rest of the vocabulary — the override relaxation above
+  applies verbatim, so a per-run launch can attach different links, rename pills, or tag protocols.
+- **UI only.** Zero provider or REST changes: the keys ride the existing verbatim `metadata` maps.
+  `parseLinkMetadata` (`admin/ui/superuser/ui.ts`) does the grouping; `LinkPills` renders the
+  display text and the protocol badge.

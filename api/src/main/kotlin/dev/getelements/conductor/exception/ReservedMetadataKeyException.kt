@@ -8,7 +8,7 @@ import dev.getelements.conductor.Metadata
  * Conductor creates and how it manages it (e.g. `namazu.conductor/workload-kind`,
  * `namazu.conductor:jobSet`); see [Metadata.isBehavioral]. Thrown from
  * [Metadata.validate]/[Metadata.merge] before any workload is created. Cosmetic reserved keys
- * (`hidden`, `agent`, `link.{title}`, …) are overridable and never rejected.
+ * (`hidden`, `agent`, `link.{Identifier}`, …) are overridable and never rejected.
  *
  * A caller mistake rather than a provider fault, so it is a [JobException] like every other
  * contract violation in this module — callers already catching `JobException` around `execute()`
