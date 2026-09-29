@@ -21,8 +21,8 @@ import dev.getelements.elements.sdk.annotation.ElementServiceExport
  *  - **Listings** (`GET /profiles`, `GET /jobs`) consult [visibleNamespaces] once per request and
  *    filter every returned row down to what the session may see. Rows are matched by their
  *    namespace ([JobProfile.namespace] for profiles, [JobExecution.namespace] for executions);
- *    rows whose namespace is `null` (providers with no namespace concept — ECS, EdgeGap,
- *    Multiplay) are visible only under [JobVisibility.All]. Visibility is aggregated as a union:
+ *    rows whose namespace is `null` (providers with no namespace concept — ECS, EdgeGap) are
+ *    visible only under [JobVisibility.All]. Visibility is aggregated as a union:
  *    if any policy returns [JobVisibility.All] the session sees everything, otherwise the union of
  *    every policy's [JobVisibility.Namespaces] sets applies. A policy returning [JobVisibility.None]
  *    (or throwing) contributes nothing — the abstention. A [JobVisibility.Namespaces] grant — even

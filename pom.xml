@@ -188,7 +188,6 @@
     <module>edgegap</module>
     <module>ecs</module>
     <module>kubernetes</module>
-    <module>multiplay</module>
     <module>admin</module>
     <module>debug</module>
   </modules>
