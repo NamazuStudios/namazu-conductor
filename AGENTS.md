@@ -355,18 +355,24 @@ typecheck in `admin/ui`, a YAML parse — do just that one thing, not a reactor 
 
 `StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
 
-`EcsOrchestrationServiceIT` is likewise currently disabled (`@Test(enabled = false)` on every test method — disabling all of them also skips `@BeforeClass`/`@AfterClass`, so no CloudFormation stack gets created at all). Root cause: AWS GuardDuty's EC2 Runtime Monitoring auto-injects a security group into the test VPC that CloudFormation can't clean up, leaving the stack's `Vpc` resource stuck `DELETE_IN_PROGRESS` and blocking the next run's stack creation with a name collision. See https://github.com/NamazuStudios/namazu-conductor/issues/35 for the fix and re-enable it once that lands.
+`EcsOrchestrationServiceIT` runs a full Fargate + EC2-spot + daemon suite against a real
+CloudFormation stack. It was disabled for a while (issue #35) over GuardDuty's auto-injected
+security group wedging stack deletion; the teardown fix has landed (see the failure-mode note
+below) and the suite is re-enabled.
 
-`EcsOrchestrationServiceIT`'s CloudFormation stack is created fresh and torn down every run by default. For faster local iteration on the `ecs` module, `ecs/cloudformation/start-integration-test-stack.sh` / `stop-integration-test-stack.sh` let you start it once for a work session and reuse it across repeated `CFN_KEEP_STACK=true mvn verify -pl ecs` runs — see `ecs/README.md`'s "Faster local iteration" section (leaving it running costs ~$10-20/month, so stop it when done).
+`EcsOrchestrationServiceIT`'s CloudFormation stack is created fresh and torn down every run by default. For faster local iteration on the `ecs` module, `ecs/cloudformation/start-integration-test-stack.sh` / `stop-integration-test-stack.sh` let you start it once for a work session and reuse it across repeated `CFN_KEEP_STACK=true mvn verify -pl ecs` runs — see `ecs/README.md`'s "Faster local iteration" section (leaving it running costs ~$10-20/month, so stop it when done). The manual `ECS Test Harness` workflow (`.github/workflows/ecs-harness.yaml`, `workflow_dispatch` with a start/stop choice) is the CI-side equivalent, running the same scripts with environment credentials; a nightly scheduled stop self-cleans a forgotten harness (a work session spanning that stop just re-runs start). It shares the `conductor-ecs-it` concurrency group with the IT workflow, so harness actions and test runs never overlap on the same stack.
 
 **Known failure mode — stuck `conductor-integration-test` stack deletion:** AWS GuardDuty's EC2
 Runtime Monitoring auto-injects a `GuardDutyManagedSecurityGroup-*` into the test VPC whenever an
 EC2-launch-type task runs. CloudFormation doesn't own that security group and can't delete it, and
 a VPC can't be deleted while any non-default security group remains in it — so the stack's `Vpc`
 resource can sit in `DELETE_IN_PROGRESS` indefinitely, and the *next* run's stack creation then
-fails outright on a name collision with the still-deleting stack. Tracked in
-[#35](https://github.com/NamazuStudios/namazu-conductor/issues/35) for a permanent fix (teardown
-should delete this security group itself before triggering the stack deletion).
+fails outright on a name collision with the still-deleting stack. This was the cause of the suite's
+2026 disabling (issue #35); the fix is now in place at every teardown path — the test's own
+teardown (`EcsOrchestrationServiceIT.scrubVpcDependencies`, which waits for the SG's ENIs to detach
+before deleting), `ecs/cloudformation/stop-integration-test-stack.sh`, and the manual
+`ECS Test Harness` workflow's stop job. The manual-intervention steps below are retained for any
+teardown path that predates the fix.
 
 If a CI run (or local `mvn verify -pl ecs`) sits with no forward progress for several minutes past
 when its own CFN stack lifecycle would normally complete (~8-12 minutes total), check for this

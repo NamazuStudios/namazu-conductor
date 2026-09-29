@@ -318,6 +318,27 @@ costs roughly $10-20/month** (one always-on t3.small spot EC2 instance — kept 
 Auto Scaling Group — plus its public IPv4 fee; everything else in the stack, including the Fargate
 tasks, has no idle cost). Don't forget to stop it when you're done.
 
+The manual **ECS Test Harness** GitHub Actions workflow
+(`.github/workflows/ecs-harness.yaml`) is the CI-side equivalent of the two scripts above: a
+`workflow_dispatch` with a start/stop choice stands the shared stack up or tears it down using the
+workflow's environment credentials (`AWS_PROFILE` left empty), and a nightly scheduled stop
+self-cleans a forgotten harness (a work session spanning that stop just re-runs start). It shares
+the `conductor-ecs-it` concurrency group with the IT workflow, so harness actions and test runs
+never overlap on the same stack.
+
+### Teardown and the GuardDuty security group
+
+Every teardown path — the test's own `@AfterClass` (`scrubVpcDependencies`), the stop script, and
+the harness workflow's stop job — deletes any *unmanaged* security group (not `default`, not owned
+by the stack) from the stack's VPC **before** triggering the CloudFormation deletion, waiting first
+for the group's attached ENIs to detach. This exists because AWS GuardDuty's EC2 Runtime Monitoring
+auto-injects a `GuardDutyManagedSecurityGroup-*` into the VPC whenever an EC2-launch-type task runs;
+CloudFormation doesn't own it and can't delete it, and a VPC can't be deleted while a non-default
+security group remains — leaving the stack's `Vpc` resource stuck `DELETE_IN_PROGRESS` and the next
+run's stack creation failing on a name collision
+([#35](https://github.com/NamazuStudios/namazu-conductor/issues/35), which disabled the whole suite
+for a while in 2026 until this scrub landed).
+
 ### StdioBridgeClientIT (disabled)
 
 A second integration test, `StdioBridgeClientIT`, validates the WebSocket client `streamStdio` uses

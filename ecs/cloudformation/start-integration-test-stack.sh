@@ -13,7 +13,8 @@
 #
 # Environment variables:
 #   AWS_REGION              - AWS region (default: us-east-1)
-#   AWS_PROFILE             - AWS CLI profile (default: namazu-internal)
+#   AWS_PROFILE             - AWS CLI profile (default: namazu-internal; unset/empty to rely on
+#                             environment credentials, e.g. in CI)
 #   CFN_STACK_NAME          - stack name (default: conductor-integration-test)
 #   CFN_DEPLOYER_STACK_NAME - deployer stack to resolve the ECR registry from
 #                             (default: conductor-integration-test-deployer)
@@ -23,16 +24,21 @@
 set -euo pipefail
 
 AWS_REGION=${AWS_REGION:-us-east-1}
-AWS_PROFILE=${AWS_PROFILE:-namazu-internal}
+AWS_PROFILE=${AWS_PROFILE-namazu-internal}
 CFN_STACK_NAME=${CFN_STACK_NAME:-conductor-integration-test}
 CFN_DEPLOYER_STACK_NAME=${CFN_DEPLOYER_STACK_NAME:-conductor-integration-test-deployer}
 CFN_IMAGE_NAME=${CFN_IMAGE_NAME:-conductor-integration-test:latest}
+
+profile_args=()
+if [ -n "${AWS_PROFILE}" ]; then
+  profile_args=(--profile "${AWS_PROFILE}")
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_FILE="${SCRIPT_DIR}/../src/test/resources/integration-test.yaml"
 
 function cloudformation() {
-  aws --region "${AWS_REGION}" --profile "${AWS_PROFILE}" cloudformation "$@"
+  aws --region "${AWS_REGION}" ${profile_args[@]+"${profile_args[@]}"} cloudformation "$@"
 }
 
 ECR_REPO_URI=$(cloudformation describe-stacks --stack-name "${CFN_DEPLOYER_STACK_NAME}" \
