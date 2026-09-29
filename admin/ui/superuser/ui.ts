@@ -5,6 +5,29 @@ import type { JobExecution } from './types'
 const h = React.createElement
 
 /**
+ * Metadata-driven links are external by nature — a preview page, a dashboard — so every link the
+ * bundle renders opens in a new tab, and the pills mark it with ↗. Markdown descriptions get the
+ * same treatment through this renderer override: http(s) links render with
+ * `target="_blank"`/`rel="noopener noreferrer"` (the `rel` keeps the opened page from reaching back
+ * through `window.opener`), and anything that isn't http(s) defers to marked's default renderer,
+ * which neutralizes `javascript:` hrefs itself. Re-normalizing the href through `new URL` also
+ * percent-encodes quote characters, so it's safe to embed in a double-quoted attribute.
+ */
+marked.use({
+  renderer: {
+    link(href: string, _title: string | null | undefined, text: string): string | false {
+      try {
+        const url = new URL(href)
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+        return `<a href="${url.href}" target="_blank" rel="noopener noreferrer">${text}</a>`
+      } catch {
+        return false
+      }
+    },
+  },
+})
+
+/**
  * Catches a render error in its subtree and shows an inline message instead of blanking the whole
  * page — e.g. one malformed profile's Markdown description shouldn't take down the entire list.
  */
@@ -271,6 +294,20 @@ export function metadataFlag(metadata: Record<string, string> | undefined, suffi
     conductorKeySuffix(key)?.toLowerCase() === suffix.toLowerCase() && value.trim().toLowerCase() === 'true')
 }
 
+/**
+ * The container-scoped form of [metadataFlag]: true when the map carries `flag.{container}` = true.
+ * The container name is a suffix qualifier on the key (`namazu.conductor/hidden.sidecar`), not a
+ * value, so the match is `flag` + `.` + the container's name. Case-insensitive throughout; see the
+ * vocabulary table in AGENTS.md.
+ */
+export function containerMetadataFlag(
+  metadata: Record<string, string> | undefined,
+  flag: string,
+  containerName: string,
+): boolean {
+  return metadataFlag(metadata, `${flag}.${containerName}`)
+}
+
 /** Every `namazu.conductor/link.{title}` entry in the map, as `{title, url}` pairs. Non-http(s)
  * values are dropped — they get linkified nowhere else, and a `javascript:` href is exactly what
  * the linkifier must never emit. */
@@ -319,7 +356,7 @@ export function LinkPills(props: { metadata?: Record<string, string> }) {
       className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 transition-colors',
       onClick: (e: React.MouseEvent) => e.stopPropagation(),
       title: link.url,
-    }, h(Favicon, { url: link.url }), link.title)))
+    }, h(Favicon, { url: link.url }), link.title, h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))))
 }
 
 const SHOW_HIDDEN_STORAGE_KEY = 'conductor.show-hidden'
@@ -380,7 +417,7 @@ export function MetadataPills(props: { metadata?: Record<string, string>; max?: 
             rel: 'noopener noreferrer',
             className: 'text-primary hover:underline',
             onClick: (e: React.MouseEvent) => e.stopPropagation(),
-          }, value)
+          }, value, h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))
         : h('span', { className: 'break-all' }, value))),
     hidden > 0 && h('span', { className: 'text-xs text-muted-foreground' }, `+${hidden} more`))
 }

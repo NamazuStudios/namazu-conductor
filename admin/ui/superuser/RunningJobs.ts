@@ -1,8 +1,8 @@
 import React from 'react'
 import { fetchJobs, stopJob } from './api'
 import {
-  Accordion, DetailGrid, LinkPills, MarkdownBlock, MetadataPills, ShowHiddenCheckbox,
-  metadataFlag, useShowHidden,
+  Accordion, containerMetadataFlag, DetailGrid, LinkPills, MarkdownBlock, MetadataPills,
+  ShowHiddenCheckbox, metadataFlag, useShowHidden,
 } from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
@@ -22,7 +22,7 @@ function statusColorClasses(status: string): string {
  * whitespace-split of whatever's typed otherwise, which is an intentional simplification for this
  * advanced/power-user path (not full shell quoting/parsing).
  */
-function ContainerAttachRow(props: { element: string; jobId: string; running: boolean; container: { id: string; name: string; primary: boolean; defaultCommand?: string[] }; label: string }) {
+function ContainerAttachRow(props: { element: string; jobId: string; running: boolean; container: { id: string; name: string; primary: boolean; defaultCommand?: string[] }; label: string; isAgent?: boolean }) {
   const { container: c } = props
   const [command, setCommand] = React.useState(() => (c.defaultCommand ?? []).join(' '))
 
@@ -32,6 +32,7 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
   }
 
   return h('div', { className: 'flex items-center gap-2 text-xs' },
+    props.isAgent && h('span', { title: 'Agent container', className: 'text-base shrink-0' }, '🤖'),
     h('span', { className: 'font-mono flex-1' }, c.name, c.primary && h('span', { className: 'ml-1.5 text-muted-foreground' }, '(primary)')),
     h('input', {
       value: command,
@@ -49,7 +50,7 @@ function ContainerAttachRow(props: { element: string; jobId: string; running: bo
     }, '🚀 Launch Terminal'))
 }
 
-function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; isExpanded: boolean; onToggle: () => void }) {
+function RunningJobRow(props: { execution: JobExecution; element: string; onRefresh: () => void; isExpanded: boolean; onToggle: () => void; showHidden: boolean }) {
   const ex = props.execution
   const [isStopping, setStopping] = React.useState(false)
   const [stopError, setStopError] = React.useState<string | null>(null)
@@ -63,8 +64,16 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
       .finally(() => setStopping(false))
   }
 
-  const containers = ex.containers ?? []
   const metadataEntries = Object.entries(ex.metadata ?? {}).filter(([k]) => k.trim())
+
+  // Container-scoped cosmetic flags — namazu.conductor/hidden.{container} and
+  // namazu.conductor/agent.{container} (see AGENTS.md). Hidden attach rows vanish unless the
+  // operator opted into Show hidden — the same toggle as hidden jobs, so one opt-in reveals both.
+  const containers = (ex.containers ?? []).filter((c) =>
+    props.showHidden || !containerMetadataFlag(ex.metadata, 'hidden', c.name))
+  const containerAgents = new Set((ex.containers ?? [])
+    .filter((c) => containerMetadataFlag(ex.metadata, 'agent', c.name))
+    .map((c) => c.name))
   const isAgent = metadataFlag(ex.metadata, 'agent')
 
   const header = h('div', { className: 'flex items-center gap-3 flex-wrap' },
@@ -99,6 +108,7 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
           running: ex.status === 'RUNNING',
           container: c,
           label: containers.length > 1 ? `${ex.id}/${c.name}` : ex.id,
+          isAgent: containerAgents.has(c.name),
         }))),
     Boolean(ex.details) && h(DetailGrid, { obj: ex.details }))
 }
@@ -176,5 +186,6 @@ export function RunningJobsSection() {
             onRefresh: load,
             isExpanded: expandedIds.has(item.execution.id),
             onToggle: () => toggle(item.execution.id),
+            showHidden,
           })))))
 }

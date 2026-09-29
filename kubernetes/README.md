@@ -188,8 +188,13 @@ ECS-style `:` separators):
 | Annotation | Meaning |
 |---|---|
 | `namazu.conductor/hidden: "true"` | profile/execution row hidden unless "Show hidden" is checked |
+| `namazu.conductor/hidden.{container}: "true"` | just that container's attach row hidden (same toggle reveals it) |
 | `namazu.conductor/agent: "true"` | 🤖 badge; marks a terminal job that is an agent |
-| `namazu.conductor/link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback; repeat per title |
+| `namazu.conductor/agent.{container}: "true"` | 🤖 badge on that container's attach row |
+| `namazu.conductor/link.{title}: "https://…"` | clickable pill labelled `{title}`, favicon with 🔗 fallback, ↗ external-link mark, opens in a new tab; repeat per title |
+
+Container qualifiers are independent of the job-level flags and display-only — no provider filters
+containers, and `terminal-job` stays pod-level (tty+stdin target the primary container at launch).
 
 `JobExecution.metadata` / `DaemonExecution.metadata` are read back off the live workload rather than
 echoed from the request. The reported set is therefore legitimately a **superset** of the declared
