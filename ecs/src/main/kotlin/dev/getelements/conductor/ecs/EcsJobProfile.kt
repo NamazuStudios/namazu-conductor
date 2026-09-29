@@ -25,7 +25,14 @@ data class EcsJobProfile(
     val containerName: String,
     val launchType: LaunchType,
     val networkMode: NetworkMode,
-    val assignPublicIp: AssignPublicIp
+    val assignPublicIp: AssignPublicIp,
+    /**
+     * The task definition family's **entire** tag map, verbatim and unfiltered — the
+     * `namazu.conductor:...` tags this provider interprets as typed fields, and every other tag set
+     * on the family, all under their full tag keys. Conductor assigns no meaning to any of them;
+     * see [dev.getelements.conductor.Metadata].
+     */
+    override val metadata: Map<String, String> = emptyMap()
 ) : JobProfile {
     override val id: String
         get() = family

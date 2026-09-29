@@ -28,7 +28,13 @@ data class EcsDaemon(
     val assignPublicIp: AssignPublicIp,
     val desiredCount: Int = 1,
     val minCount: Int? = null,
-    val maxCount: Int? = null
+    val maxCount: Int? = null,
+    /**
+     * The task definition family's **entire** tag map, verbatim and unfiltered, exactly as for
+     * [EcsJobProfile.metadata]. Conductor assigns no meaning to any of them; see
+     * [dev.getelements.conductor.Metadata].
+     */
+    override val metadata: Map<String, String> = emptyMap()
 ) : Daemon {
     override val id: String
         get() = family

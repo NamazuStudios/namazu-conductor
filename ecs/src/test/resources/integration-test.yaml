@@ -209,6 +209,10 @@ Resources:
           Value: FARGATE
         - Key: namazu.conductor:assignPublicIp
           Value: ENABLED
+        # Non-Conductor tag, standing in for arbitrary infrastructure metadata. Reported verbatim
+        # as EcsJobProfile.metadata so the metadata test can assert the whole tag map survives.
+        - Key: docs.example.com/owner
+          Value: platform-team
 
   DaemonLogGroup:
     Type: AWS::Logs::LogGroup
@@ -252,6 +256,9 @@ Resources:
           Value: ENABLED
         - Key: namazu.conductor:desiredCount
           Value: '1'
+        # Non-Conductor tag, standing in for arbitrary infrastructure metadata (see TaskDefinition).
+        - Key: docs.example.com/owner
+          Value: platform-team
 
 # ---------------------------------------------------------------------------
 # EC2 spot-backed capacity
@@ -426,6 +433,14 @@ Resources:
             Action:
               - ecs:ListTaskDefinitionFamilies
               - ecs:DescribeTaskDefinition
+              # Reads back the tags Conductor puts on a task/service so JobExecution/DaemonExecution
+              # can report the metadata that actually landed rather than what was requested. Kept
+              # unconditioned because AWS does not document ecs:cluster as supported for this
+              # action, and a condition ECS ignores silently degrades every read-back to the
+              # requested-set fallback -- which would make the metadata tests pass without ever
+              # proving read-back works. Read-only, so the wildcard grant is low-risk; operators
+              # running their own stack can scope it to their cluster ARN if they prefer.
+              - ecs:ListTagsForResource
               - ec2:DescribeNetworkInterfaces
               - ec2:DescribeInstances
               - ecr:GetAuthorizationToken

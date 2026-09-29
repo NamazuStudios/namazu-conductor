@@ -9,12 +9,17 @@ import dev.getelements.conductor.DaemonStatus
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.ecs.EcsDaemonExecutionDetails
+import dev.getelements.conductor.ecs.service.EcsOrchestrationService.Companion.TAG_DESIRED_COUNT
+import dev.getelements.conductor.ecs.service.EcsOrchestrationService.Companion.TAG_JOBSET
+import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import jakarta.ws.rs.client.Client
 import jakarta.ws.rs.client.ClientBuilder
 import jakarta.ws.rs.core.Response
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.assertNull
+import org.testng.Assert.assertThrows
 import org.testng.Assert.assertTrue
 import org.slf4j.LoggerFactory
 import org.testng.annotations.AfterClass
@@ -84,7 +89,16 @@ class EcsOrchestrationServiceIT {
 
     private var fargateExecutionId: String? = null
     private var ec2ExecutionId: String? = null
+    /** Owned by the metadata test; tracked separately so it doesn't clobber another test's field. */
+    private var metadataJobExecutionId: String? = null
+    private var metadataDaemonExecution: DaemonExecution? = null
     private var daemonExecution: DaemonExecution? = null
+
+    companion object {
+        /** Non-Conductor tag keys, standing in for arbitrary infrastructure metadata. */
+        private const val METADATA_OWNER_KEY = "docs.example.com/owner"
+        private const val METADATA_NOTE_KEY = "run.example.com/note"
+    }
 
     @BeforeClass
     fun setUp() {
@@ -161,6 +175,14 @@ class EcsOrchestrationServiceIT {
             }
         }
 
+        metadataJobExecutionId?.let {
+            try {
+                service.stop(JobExecution(id = it, status = JobStatus.RUNNING))
+            } catch (e: Exception) {
+                logger.warn("Failed to stop metadata-test ECS task {}", it, e)
+            }
+        }
+
         // ECS Services and Application Auto Scaling targets are not part of the CloudFormation
         // template, so they must be cleaned up here, before the stack (and its cluster) is deleted.
         daemonExecution?.let {
@@ -168,6 +190,14 @@ class EcsOrchestrationServiceIT {
                 service.undeploy(it)
             } catch (e: Exception) {
                 logger.warn("Failed to undeploy daemon execution {}", it.id, e)
+            }
+        }
+
+        metadataDaemonExecution?.let {
+            try {
+                service.undeploy(it)
+            } catch (e: Exception) {
+                logger.warn("Failed to undeploy metadata-test daemon execution {}", it.id, e)
             }
         }
 
@@ -315,6 +345,101 @@ class EcsOrchestrationServiceIT {
         val context = response.readEntity(TestContext::class.java)
         assertEquals(context.args, emptyList<String>(), "args mismatch (EC2)")
         assertEquals(context.environment, environment, "environment mismatch (EC2)")
+    }
+
+    // Metadata: the family's whole tag map declared verbatim, the caller's overrides merged over
+    // it and tagged onto the task, and the result read back off the task ARN. Disabled for the same
+    // CloudFormation reason as every other test in this suite -- see the note above
+    // launchFargateAndVerifyTestContext and https://github.com/NamazuStudios/namazu-conductor/issues/35.
+    @Test(enabled = false)
+    fun jobMetadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
+        val profile = service.findAvailableProfile(taskFamily)
+            ?: throw AssertionError("Fargate profile '$taskFamily' not found")
+
+        // Declared verbatim: a plain infrastructure tag, and a namazu.conductor tag that Conductor
+        // also interprets as a typed field -- reported here too, under its full key.
+        assertEquals(
+            profile.metadata[METADATA_OWNER_KEY], "platform-team",
+            "Expected a non-Conductor tag to be declared verbatim in the profile's metadata"
+        )
+        assertEquals(
+            profile.metadata[TAG_JOBSET], "default",
+            "Expected the namazu.conductor:jobSet tag to be declared verbatim, not stripped"
+        )
+
+        val execution = service.execute(JobRequest(
+            profile = profile,
+            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt")
+        ))
+        metadataJobExecutionId = execution.id
+
+        assertEquals(execution.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
+        assertEquals(execution.metadata[METADATA_NOTE_KEY], "second attempt", "New key was not added")
+        assertEquals(execution.metadata[TAG_JOBSET], "default", "Unmentioned declared tag was not preserved")
+
+        // On the task itself, not merely in the returned object.
+        val onCluster = ecsClient.listTagsForResource { it.resourceArn(execution.id) }.tags()
+            .associate { it.key() to it.value() }
+        assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the task")
+        assertEquals(onCluster[METADATA_NOTE_KEY], "second attempt", "New key did not land on the task")
+
+        // A reserved tag key is rejected before the task is ever run.
+        assertThrows(ReservedMetadataKeyException::class.java) {
+            service.execute(JobRequest(profile = profile, metadata = mapOf(TAG_JOBSET to "other")))
+        }
+    }
+
+    // Disabled for the same CloudFormation reason as the rest of this suite (see issue #35).
+    @Test(enabled = false)
+    fun daemonMetadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
+        val daemon = service.findAvailableDaemon(daemonTaskFamily)
+            ?: throw AssertionError("Daemon profile '$daemonTaskFamily' not found")
+
+        assertEquals(
+            daemon.metadata[METADATA_OWNER_KEY], "platform-team",
+            "Expected a non-Conductor tag to be declared verbatim"
+        )
+        assertEquals(
+            daemon.metadata[TAG_DESIRED_COUNT], "1",
+            "Expected the namazu.conductor:desiredCount tag to be declared verbatim, not stripped"
+        )
+
+        val execution = service.deploy(DaemonRequest(
+            profile = daemon,
+            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned")
+        ))
+        metadataDaemonExecution = execution
+
+        assertEquals(execution.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
+        assertEquals(execution.metadata[METADATA_NOTE_KEY], "pinned", "New key was not added")
+        assertEquals(execution.metadata[TAG_DESIRED_COUNT], "1", "Unmentioned declared tag was not preserved")
+
+        // Tagged on the service itself, and not propagated onto the tasks it launches.
+        val onService = ecsClient.listTagsForResource { it.resourceArn(execution.id) }.tags()
+            .associate { it.key() to it.value() }
+        assertEquals(onService[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the service")
+        assertEquals(onService[METADATA_NOTE_KEY], "pinned", "New key did not land on the service")
+
+        val serviceName = (execution.details as EcsDaemonExecutionDetails).serviceName
+        val taskArns = ecsClient.listTasks { it.cluster(cluster); it.serviceName(serviceName) }
+            .taskArns()
+        if (taskArns.isNotEmpty()) {
+            val onTask = ecsClient.listTagsForResource { it.resourceArn(taskArns.first()) }.tags()
+                .associate { it.key() to it.value() }
+            assertFalse(
+                onTask.containsKey(METADATA_NOTE_KEY),
+                "Metadata must not be propagated onto service-launched tasks: $onTask"
+            )
+        }
+
+        // getStatus() re-reads the service's tags rather than echoing the daemon it was handed.
+        val refreshed = service.getStatus(execution)
+        assertEquals(refreshed.metadata[METADATA_OWNER_KEY], "sre-oncall", "getStatus() lost the metadata")
+        assertEquals(refreshed.metadata[METADATA_NOTE_KEY], "pinned", "getStatus() lost the new key")
+
+        assertThrows(ReservedMetadataKeyException::class.java) {
+            service.deploy(DaemonRequest(profile = daemon, metadata = mapOf(TAG_DESIRED_COUNT to "9")))
+        }
     }
 
     @Test(enabled = false)
