@@ -149,6 +149,7 @@ class EcsOrchestrationService @Inject constructor(
                     launchType = launchType,
                     networkMode = networkMode,
                     assignPublicIp = assignPublicIp,
+                    name = tags.firstOrNull { it.key() == TAG_DISPLAY_NAME }?.value()?.ifBlank { null },
                     metadata = declaredMetadataOf(tags)
                 )
             }
@@ -217,6 +218,7 @@ class EcsOrchestrationService @Inject constructor(
                     desiredCount = desiredCount,
                     minCount = minCount,
                     maxCount = maxCount,
+                    name = tags.firstOrNull { it.key() == TAG_DISPLAY_NAME }?.value()?.ifBlank { null },
                     metadata = declaredMetadataOf(tags)
                 )
             }
@@ -846,6 +848,8 @@ class EcsOrchestrationService @Inject constructor(
         private const val POLL_INTERVAL_MS = 5_000L
 
         const val TAG_JOBSET = "namazu.conductor:jobSet"
+
+        const val TAG_DISPLAY_NAME = "namazu.conductor:displayName"
 
         const val TAG_LAUNCH_TYPE = "namazu.conductor:launchType"
 

@@ -6,7 +6,7 @@ import dev.getelements.conductor.service.Daemon
  * [Daemon] implementation for Kubernetes. Represents a single `PodTemplate` resource discovered in
  * the configured namespace, tagged `namazu.conductor/workload-kind: daemon`.
  *
- * The [id] is `"$namespace:$name"`. [primaryContainer] is the name of the first container in the
+ * The [id] is `"$namespace:$templateName"`. [primaryContainer] is the name of the first container in the
  * template's pod spec and is the target of command, argument, and environment overrides at deploy
  * time. [exposePorts] holds the raw `namazu.conductor/expose-ports` annotation value (empty when
  * absent, in which case no Service is created); [serviceType] holds the
@@ -19,7 +19,8 @@ import dev.getelements.conductor.service.Daemon
  */
 data class KubernetesDaemon(
     val namespace: String,
-    val name: String,
+    /** The `PodTemplate`'s resource name — distinct from [Daemon.name], the friendly display name. */
+    val templateName: String,
     val primaryContainer: String,
     val exposePorts: String,
     val serviceType: String,
@@ -27,6 +28,16 @@ data class KubernetesDaemon(
     val minReplicas: Int? = null,
     val maxReplicas: Int? = null,
     val targetCpuUtilizationPercentage: Int? = null,
+    /**
+     * The `namazu.conductor/display-name` annotation — the friendly name the admin dashboard shows in
+     * place of the raw [id]. `null` when the annotation is absent; callers fall back to [id].
+     */
+    override val name: String? = null,
+    /**
+     * The `namazu.conductor/description` annotation — Markdown, surfaced to the admin dashboard.
+     * `null` when the annotation is absent.
+     */
+    override val description: String? = null,
     /**
      * The `PodTemplate`'s **entire** top-level annotation map, verbatim and unfiltered, exactly as
      * for [KubernetesJobProfile.metadata]. Conductor assigns no meaning to any of them; see
@@ -36,6 +47,6 @@ data class KubernetesDaemon(
 ) : Daemon {
 
     override val id: String
-        get() = "$namespace:$name"
+        get() = "$namespace:$templateName"
 
 }

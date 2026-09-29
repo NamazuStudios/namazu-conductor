@@ -8,7 +8,7 @@ import dev.getelements.conductor.service.JobProfile
  * the discovery scope (the configured namespace, or every namespace when namespace discovery is `any`
  * — see [KubernetesAttributes.NAMESPACE_DISCOVERY]).
  *
- * The [id] is `"$namespace:$name"`. [primaryContainer] is the name of the first container in the
+ * The [id] is `"$namespace:$templateName"`. [primaryContainer] is the name of the first container in the
  * template's pod spec and is the target of command, argument, and environment overrides at execution
  * time; [containers] lists every container in the template's pod spec, in pod-spec order, with the
  * first entry marked [ContainerRef.primary]. [workloadKind] is derived from the
@@ -19,7 +19,8 @@ import dev.getelements.conductor.service.JobProfile
  */
 data class KubernetesJobProfile(
     override val namespace: String,
-    val name: String,
+    /** The `PodTemplate`'s resource name — distinct from [JobProfile.name], the friendly display name. */
+    val templateName: String,
     val primaryContainer: String,
     override val containers: List<ContainerRef>,
     val workloadKind: WorkloadKind,
@@ -53,6 +54,11 @@ data class KubernetesJobProfile(
      */
     val sessionSecretEnabledByDefault: Boolean = false,
     /**
+     * The `namazu.conductor/display-name` annotation — the friendly name the admin dashboard shows in
+     * place of the raw [id]. `null` when the annotation is absent; callers fall back to [id].
+     */
+    override val name: String? = null,
+    /**
      * The `PodTemplate`'s **entire** top-level annotation map, verbatim and unfiltered — the
      * `namazu.conductor/...` keys Conductor interprets as typed fields above, and every other key
      * the infrastructure set, all under their full annotation keys. Conductor assigns no meaning to
@@ -62,6 +68,6 @@ data class KubernetesJobProfile(
 ) : JobProfile {
 
     override val id: String
-        get() = "$namespace:$name"
+        get() = "$namespace:$templateName"
 
 }

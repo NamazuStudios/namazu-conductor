@@ -39,6 +39,15 @@ interface JobProfile {
     val description: String? get() = null
 
     /**
+     * An optional friendly display name for this profile, shown by generic consumers (the admin
+     * dashboard) in place of the raw [id]. `null` if the provider has no name source or none was
+     * given — callers should fall back to [id]. Kubernetes sources it from the
+     * `namazu.conductor/display-name` annotation, ECS from the `namazu.conductor:displayName` tag;
+     * providers without a name source default to `null`.
+     */
+    val name: String? get() = null
+
+    /**
      * The namespace this profile's jobs are created in, for providers that have a namespace
      * concept (Kubernetes). `null` for providers without one — mirrors
      * [dev.getelements.conductor.JobExecution.namespace]. Surfaced so authorization layers (e.g.

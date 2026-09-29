@@ -18,6 +18,20 @@ import dev.getelements.elements.sdk.annotation.ElementServiceExport
 interface DaemonOrchestrationService {
 
     /**
+     * An optional friendly name for this deployment's job set — the collection of daemons this
+     * service surfaces. Mirrors [OrchestrationService.jobSetName]; `null` for providers without a
+     * job-set concept.
+     */
+    val jobSetName: String? get() = null
+
+    /**
+     * An optional Markdown blurb describing this deployment's job set, for consumers that show one.
+     * Mirrors [OrchestrationService.jobSetDescription]; `null` for providers without a job-set
+     * concept.
+     */
+    val jobSetDescription: String? get() = null
+
+    /**
      * Queries the subsystem to get the available [Daemon]s that can be used to deploy a daemon. This
      * returns an opaque interface which may only be consumed by the same object which returned it.
      *

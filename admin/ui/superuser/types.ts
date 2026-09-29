@@ -24,6 +24,9 @@ export interface JobExecution {
 
 export interface JobProfile {
   id: string
+  /** Friendly display name from the provider (namazu.conductor/display-name annotation or
+   * displayName tag); null/absent when the provider has no name source — fall back to id. */
+  name?: string | null
   containers?: ContainerRef[]
   terminalJob?: boolean
   description?: string

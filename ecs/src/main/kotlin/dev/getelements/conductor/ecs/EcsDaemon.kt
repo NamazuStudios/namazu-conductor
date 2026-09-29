@@ -30,6 +30,11 @@ data class EcsDaemon(
     val minCount: Int? = null,
     val maxCount: Int? = null,
     /**
+     * The `namazu.conductor:displayName` tag — the friendly name the admin dashboard shows in place
+     * of the raw [id]. `null` when the tag is absent; callers fall back to [id].
+     */
+    override val name: String? = null,
+    /**
      * The task definition family's **entire** tag map, verbatim and unfiltered, exactly as for
      * [EcsJobProfile.metadata]. Conductor assigns no meaning to any of them; see
      * [dev.getelements.conductor.Metadata].

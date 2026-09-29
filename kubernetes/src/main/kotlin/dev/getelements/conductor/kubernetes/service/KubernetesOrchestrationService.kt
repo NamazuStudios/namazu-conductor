@@ -163,7 +163,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
         return KubernetesJobProfile(
             namespace = template.metadata?.namespace ?: namespace,
-            name = templateName,
+            templateName = templateName,
             primaryContainer = container.name,
             containers = containerRefsFor(containers, annotations),
             workloadKind = kind,
@@ -176,6 +176,7 @@ class KubernetesOrchestrationService @Inject constructor(
             parallelism = parseIntAnnotation(templateName, annotations, ANN_PARALLELISM),
             terminalJob = terminalJob,
             description = annotations[ANN_DESCRIPTION],
+            name = annotations[ANN_DISPLAY_NAME],
             sessionSecretEnv = annotations[ANN_SESSION_SECRET_ENV]?.trim()?.ifBlank { null },
             sessionSecretEnabledByDefault = annotations[ANN_ENABLE_SESSION_SECRET]?.trim()?.toBoolean() ?: false,
             metadata = declaredMetadataOf(annotations)
@@ -206,7 +207,7 @@ class KubernetesOrchestrationService @Inject constructor(
 
         return KubernetesDaemon(
             namespace = template.metadata?.namespace ?: namespace,
-            name = templateName,
+            templateName = templateName,
             primaryContainer = container.name,
             exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
             serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
@@ -214,6 +215,8 @@ class KubernetesOrchestrationService @Inject constructor(
             minReplicas = parseIntAnnotation(templateName, annotations, ANN_MIN_REPLICAS),
             maxReplicas = parseIntAnnotation(templateName, annotations, ANN_MAX_REPLICAS),
             targetCpuUtilizationPercentage = parseIntAnnotation(templateName, annotations, ANN_TARGET_CPU_UTILIZATION_PERCENTAGE),
+            name = annotations[ANN_DISPLAY_NAME],
+            description = annotations[ANN_DESCRIPTION],
             metadata = declaredMetadataOf(annotations)
         )
     }
@@ -263,25 +266,25 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("JobProfile must be a ${KubernetesJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val template = client.resources(PodTemplate::class.java)
-            .inNamespace(profile.namespace)
-            .withName(profile.name)
+            .inNamespace(profile.templateNamespace)
+            .withName(profile.templateName)
             .get()
-            ?: throw JobException("PodTemplate '${profile.name}' not found in namespace '${profile.namespace}'")
+            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.templateNamespace}'")
 
         val podTemplateSpec = template.template
-            ?: throw JobException("PodTemplate '${profile.name}' has no pod template spec")
+            ?: throw JobException("PodTemplate '${profile.templateName}' has no pod template spec")
 
         val spec = podTemplateSpec.spec
-            ?: throw JobException("PodTemplate '${profile.name}' has no pod spec")
+            ?: throw JobException("PodTemplate '${profile.templateName}' has no pod spec")
 
         applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
         applyPlacement(spec, request.placement)
         if (request.tty) applyTty(spec, profile.primaryContainer)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
-            ?: profile.namespace
+            ?: profile.templateNamespace
 
-        val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
+        val runName = "${profile.templateName}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
         val execAnnotations = execAnnotationsFor(profile.containers)
@@ -359,10 +362,10 @@ class KubernetesOrchestrationService @Inject constructor(
                     .build()
             }
             WorkloadKind.DAEMON ->
-                throw JobException("PodTemplate '${profile.name}' is workload-kind 'daemon'; use deploy() instead of execute()")
+                throw JobException("PodTemplate '${profile.templateName}' is workload-kind 'daemon'; use deploy() instead of execute()")
             WorkloadKind.HELM ->
                 throw JobException(
-                    "PodTemplate '${profile.name}' is workload-kind 'helm' -- this provider only discovers " +
+                    "PodTemplate '${profile.templateName}' is workload-kind 'helm' -- this provider only discovers " +
                         "and tears down an already-installed Helm release (see WorkloadKind.HELM); it cannot " +
                         "install one from a PodTemplate, which has no chart/values to install from"
                 )
@@ -402,24 +405,24 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("Daemon must be a ${KubernetesDaemon::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val template = client.resources(PodTemplate::class.java)
-            .inNamespace(profile.namespace)
-            .withName(profile.name)
+            .inNamespace(profile.templateNamespace)
+            .withName(profile.templateName)
             .get()
-            ?: throw JobException("PodTemplate '${profile.name}' not found in namespace '${profile.namespace}'")
+            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.templateNamespace}'")
 
         val podTemplateSpec = template.template
-            ?: throw JobException("PodTemplate '${profile.name}' has no pod template spec")
+            ?: throw JobException("PodTemplate '${profile.templateName}' has no pod template spec")
 
         val spec = podTemplateSpec.spec
-            ?: throw JobException("PodTemplate '${profile.name}' has no pod spec")
+            ?: throw JobException("PodTemplate '${profile.templateName}' has no pod spec")
 
         applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
         applyPlacement(spec, request.placement)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
-            ?: profile.namespace
+            ?: profile.templateNamespace
 
-        val runName = "${profile.name}-${UUID.randomUUID().toString().substring(0, 8)}"
+        val runName = "${profile.templateName}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
         val metadata = Metadata.merge(profile.metadata, request.metadata)
@@ -1347,6 +1350,8 @@ class KubernetesOrchestrationService @Inject constructor(
         const val ANN_TERMINAL_JOB = "namazu.conductor/terminal-job"
 
         const val ANN_DESCRIPTION = "namazu.conductor/description"
+
+        const val ANN_DISPLAY_NAME = "namazu.conductor/display-name"
 
         const val ANN_SESSION_SECRET_ENV = "namazu.conductor/session-secret-env"
 
