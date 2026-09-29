@@ -83,6 +83,9 @@ class KubernetesOrchestrationServiceIT {
         /** Non-`namazu.conductor` annotation keys, standing in for arbitrary infrastructure metadata. */
         private const val METADATA_OWNER_KEY = "docs.example.com/owner"
         private const val METADATA_NOTE_KEY = "run.example.com/note"
+
+        /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
+        private const val METADATA_HIDDEN_KEY = "namazu.conductor/hidden"
     }
 
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationServiceIT::class.java)
@@ -284,8 +287,9 @@ class KubernetesOrchestrationServiceIT {
             "Expected the namazu.conductor/workload-kind key to be reported verbatim, not stripped"
         )
 
-        // The reserved prefix is rejected, and rejected before anything is created -- a caller error
-        // must not leave a half-dispatched workload behind.
+        // A behavioural reserved key (workload-kind picks what Conductor creates) is rejected, and
+        // rejected before anything is created -- a caller error must not leave a half-dispatched
+        // workload behind. Cosmetic reserved keys, by contrast, are free to override.
         val jobsBefore = client.batch().v1().jobs().inNamespace(namespace).list().items.size
         assertThrows(ReservedMetadataKeyException::class.java) {
             service.execute(JobRequest(profile = profile, metadata = mapOf(ANN_WORKLOAD_KIND to "pod")))
@@ -297,7 +301,10 @@ class KubernetesOrchestrationServiceIT {
 
         val execution = service.execute(JobRequest(
             profile = profile,
-            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt")
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt",
+                METADATA_HIDDEN_KEY to "true"
+            )
         )).also { executions += it }
         service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
 
@@ -307,12 +314,16 @@ class KubernetesOrchestrationServiceIT {
         assertEquals(execution.metadata[METADATA_NOTE_KEY], "second attempt", "New key was not added")
         assertEquals(execution.metadata[ANN_WORKLOAD_KIND], "job", "Unmentioned declared key was not preserved")
 
+        // A cosmetic reserved key override is accepted, lands on the workload, and reads back.
+        assertEquals(execution.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
+
         // Actually on the cluster, not just in the returned object.
         val (_, _, jobName) = decodeExecutionId(execution.id)
         val onCluster = client.batch().v1().jobs().inNamespace(namespace).withName(jobName).get()
             ?.spec?.template?.metadata?.annotations.orEmpty()
         assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the Job's pod template")
         assertEquals(onCluster[METADATA_NOTE_KEY], "second attempt", "New key did not land on the Job's pod template")
+        assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the Job's pod template")
 
         // And still reported after a round-trip through listExecutions().
         val listed = service.listExecutions().firstOrNull { it.id == execution.id }

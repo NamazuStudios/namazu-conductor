@@ -1,5 +1,5 @@
 import React from 'react'
-import { KVEditor, ListEditor, RESERVED_METADATA_PREFIX } from './ui'
+import { KVEditor, ListEditor, isBehavioralMetadataKey, RESERVED_METADATA_PREFIX } from './ui'
 import type { KVPair } from './ui'
 import type { PlacementInput } from './types'
 
@@ -41,15 +41,17 @@ export function defaultAdvancedOptions(impliedTerminal: boolean, injectSessionSe
  * field keeps the request body honest that nothing was overridden, matching how `command` and
  * `placement` already behave.
  *
- * A `namazu.conductor`-prefixed key is dropped here rather than sent and rejected. The server would
- * answer 400 for it, but the field's label says the prefix is reserved, and letting an operator
- * compose a key that is guaranteed to be refused is a worse experience than not sending it.
+ * A behavioural `namazu.conductor` key (workload-kind, jobSet, replicas, …) is dropped here rather
+ * than sent and rejected: the server would answer 400 for it, and letting an operator compose a
+ * key that is guaranteed to be refused is a worse experience than not sending it. Cosmetic
+ * reserved keys (`hidden`, `agent`, `link.*`, …) are *not* dropped — per-run overrides of those
+ * are exactly the point of the vocabulary.
  */
 export function deriveMetadataOverrides(metadata: KVPair[]): Record<string, string> | undefined {
   const overrides: Record<string, string> = {}
   metadata.forEach((pair) => {
     const key = pair.key.trim()
-    if (!key || key.startsWith(RESERVED_METADATA_PREFIX)) return
+    if (!key || isBehavioralMetadataKey(key)) return
     overrides[key] = pair.value
   })
   return Object.keys(overrides).length > 0 ? overrides : undefined
@@ -140,8 +142,10 @@ export function RunForm(props: {
         onRemove: (i) => onChange({ ...value, metadata: value.metadata.filter((_, j) => j !== i) }),
       }),
       h('p', { className: 'text-xs text-muted-foreground mt-1' },
-        `merged over the profile's declared metadata for this launch; keys starting with ` +
-        `"${RESERVED_METADATA_PREFIX}" are reserved by Conductor and are ignored`)),
+        `merged over the profile's declared metadata for this launch. Cosmetic ` +
+        `"${RESERVED_METADATA_PREFIX}" keys (hidden, agent, link.*, …) may be overridden; ` +
+        `keys that drive Conductor's behaviour (workload-kind, jobSet, replicas, …) are ` +
+        `rejected with a 400`)),
 
     h('div', null,
       h('label', { className: labelClass }, 'Placement'),

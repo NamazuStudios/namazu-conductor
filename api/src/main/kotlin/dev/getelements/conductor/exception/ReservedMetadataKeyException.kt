@@ -4,9 +4,11 @@ import dev.getelements.conductor.Metadata
 
 /**
  * Thrown when a caller-supplied [dev.getelements.conductor.JobRequest.metadata] (or
- * `DaemonRequest.metadata`) entry uses a key carrying the [Metadata.RESERVED_PREFIX], which
- * Conductor reserves for its own semantics. Thrown from [Metadata.validate]/[Metadata.merge]
- * before any workload is created.
+ * `DaemonRequest.metadata`) entry uses a behavioural `namazu.conductor` key — one that drives what
+ * Conductor creates and how it manages it (e.g. `namazu.conductor/workload-kind`,
+ * `namazu.conductor:jobSet`); see [Metadata.isBehavioral]. Thrown from
+ * [Metadata.validate]/[Metadata.merge] before any workload is created. Cosmetic reserved keys
+ * (`hidden`, `agent`, `link.{title}`, …) are overridable and never rejected.
  *
  * A caller mistake rather than a provider fault, so it is a [JobException] like every other
  * contract violation in this module — callers already catching `JobException` around `execute()`
@@ -17,14 +19,13 @@ import dev.getelements.conductor.Metadata
 class ReservedMetadataKeyException : JobException {
 
     /**
-     * The reserved keys that were rejected, in iteration order.
+     * The behavioural keys that were rejected, in iteration order.
      */
     val keys: List<String>
 
     constructor(keys: List<String>) : super(
-        "Metadata key(s) ${keys.joinToString(prefix = "[", postfix = "]") { "'$it'" }} use the " +
-            "reserved '${Metadata.RESERVED_PREFIX}' prefix, which Namazu Conductor reserves for " +
-            "its own semantics and does not allow callers to override"
+        "Metadata key(s) ${keys.joinToString(prefix = "[", postfix = "]") { "'$it'" }} drive " +
+            "Conductor's own behaviour and do not allow callers to override"
     ) {
         this.keys = keys
     }

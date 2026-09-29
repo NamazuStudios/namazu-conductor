@@ -98,6 +98,9 @@ class EcsOrchestrationServiceIT {
         /** Non-Conductor tag keys, standing in for arbitrary infrastructure metadata. */
         private const val METADATA_OWNER_KEY = "docs.example.com/owner"
         private const val METADATA_NOTE_KEY = "run.example.com/note"
+
+        /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
+        private const val METADATA_HIDDEN_KEY = "namazu.conductor:hidden"
     }
 
     @BeforeClass
@@ -369,21 +372,27 @@ class EcsOrchestrationServiceIT {
 
         val execution = service.execute(JobRequest(
             profile = profile,
-            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt")
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "second attempt",
+                METADATA_HIDDEN_KEY to "true"
+            )
         ))
         metadataJobExecutionId = execution.id
 
         assertEquals(execution.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
         assertEquals(execution.metadata[METADATA_NOTE_KEY], "second attempt", "New key was not added")
         assertEquals(execution.metadata[TAG_JOBSET], "default", "Unmentioned declared tag was not preserved")
+        assertEquals(execution.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
 
         // On the task itself, not merely in the returned object.
         val onCluster = ecsClient.listTagsForResource { it.resourceArn(execution.id) }.tags()
             .associate { it.key() to it.value() }
         assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the task")
         assertEquals(onCluster[METADATA_NOTE_KEY], "second attempt", "New key did not land on the task")
+        assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the task")
 
-        // A reserved tag key is rejected before the task is ever run.
+        // A behavioural tag key (jobSet scopes the deployment) is rejected before the task is ever
+        // run. Cosmetic reserved keys, by contrast, are free to override -- see above.
         assertThrows(ReservedMetadataKeyException::class.java) {
             service.execute(JobRequest(profile = profile, metadata = mapOf(TAG_JOBSET to "other")))
         }
@@ -406,19 +415,24 @@ class EcsOrchestrationServiceIT {
 
         val execution = service.deploy(DaemonRequest(
             profile = daemon,
-            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned")
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned",
+                METADATA_HIDDEN_KEY to "true"
+            )
         ))
         metadataDaemonExecution = execution
 
         assertEquals(execution.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
         assertEquals(execution.metadata[METADATA_NOTE_KEY], "pinned", "New key was not added")
         assertEquals(execution.metadata[TAG_DESIRED_COUNT], "1", "Unmentioned declared tag was not preserved")
+        assertEquals(execution.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
 
         // Tagged on the service itself, and not propagated onto the tasks it launches.
         val onService = ecsClient.listTagsForResource { it.resourceArn(execution.id) }.tags()
             .associate { it.key() to it.value() }
         assertEquals(onService[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the service")
         assertEquals(onService[METADATA_NOTE_KEY], "pinned", "New key did not land on the service")
+        assertEquals(onService[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the service")
 
         val serviceName = (execution.details as EcsDaemonExecutionDetails).serviceName
         val taskArns = ecsClient.listTasks { it.cluster(cluster); it.serviceName(serviceName) }

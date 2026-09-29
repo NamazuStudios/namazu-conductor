@@ -143,7 +143,7 @@ class ConductorAdminJobsResource @Inject constructor(
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Job submitted. Returns a JobExecution with id, status, and any initial endpoints.")
-    @ApiResponse(responseCode = "400", description = "The request's metadata carries a reserved namazu.conductor-prefixed key.")
+    @ApiResponse(responseCode = "400", description = "The request's metadata carries a behavioural namazu.conductor key (workload selection, scoping, or tuning keys that drive what Conductor creates).")
     @ApiResponse(responseCode = "403", description = "Not authenticated, vetoed by a JobAccessPolicy, or insufficient privilege level.")
     @ApiResponse(responseCode = "404", description = "Element or profile not found.")
     @ApiResponse(responseCode = "500", description = "The provider accepted the request but execution failed.")
@@ -177,11 +177,12 @@ class ConductorAdminJobsResource @Inject constructor(
 
         val metadataOverrides = request.metadata ?: emptyMap()
 
-        // Reject reserved keys here rather than letting the provider's JobException fall into the
-        // generic 500 below. A reserved key is a malformed request, not a provider fault, and the
-        // caller needs to know which key was wrong to fix it. Checked before dispatch so nothing is
-        // created on the way to a rejection -- Metadata.merge() throws again provider-side, but
-        // that's a backstop, not the primary defence.
+        // Reject behavioural Conductor keys here rather than letting the provider's JobException
+        // fall into the generic 500 below. A behavioural-key override is a malformed request, not a
+        // provider fault, and the caller needs to know which key was wrong to fix it. Checked
+        // before dispatch so nothing is created on the way to a rejection -- Metadata.merge()
+        // throws again provider-side, but that's a backstop, not the primary defence. Cosmetic
+        // reserved keys (hidden, agent, link.*, ...) pass through and are free to override.
         try {
             Metadata.validate(metadataOverrides)
         } catch (e: ReservedMetadataKeyException) {
@@ -207,7 +208,7 @@ class ConductorAdminJobsResource @Inject constructor(
             // A provider that didn't pre-validate still reports the same condition; keep the status
             // code honest rather than letting it degrade into a 500.
             Response.status(Response.Status.BAD_REQUEST)
-                .entity(mapOf("error" to (e.message ?: "Reserved metadata key")))
+                .entity(mapOf("error" to (e.message ?: "Behavioural metadata key not allowed in overrides")))
                 .build()
         } catch (e: Exception) {
             logger.warn("Job execution failed for profile {} on element {}", request.profileId, request.element, e)

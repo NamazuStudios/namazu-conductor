@@ -55,6 +55,9 @@ class KubernetesDaemonOrchestrationServiceIT {
         /** Non-`namazu.conductor` annotation keys, standing in for arbitrary infrastructure metadata. */
         private const val METADATA_OWNER_KEY = "docs.example.com/owner"
         private const val METADATA_NOTE_KEY = "run.example.com/note"
+
+        /** A cosmetic reserved key — overridable per run, unlike the behavioural keys. */
+        private const val METADATA_HIDDEN_KEY = "namazu.conductor/hidden"
     }
 
     private val logger = LoggerFactory.getLogger(KubernetesDaemonOrchestrationServiceIT::class.java)
@@ -186,19 +189,24 @@ class KubernetesDaemonOrchestrationServiceIT {
 
         val execution = service.deploy(DaemonRequest(
             profile = profile,
-            metadata = mapOf(METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned")
+            metadata = mapOf(
+                METADATA_OWNER_KEY to "sre-oncall", METADATA_NOTE_KEY to "pinned",
+                METADATA_HIDDEN_KEY to "true"
+            )
         )).also { executions += it }
         val running = awaitStatus(execution, DaemonStatus.RUNNING)
 
         assertEquals(running.metadata[METADATA_OWNER_KEY], "sre-oncall", "Override did not win")
         assertEquals(running.metadata[METADATA_NOTE_KEY], "pinned", "New key was not added")
         assertEquals(running.metadata[ANN_REPLICAS], "2", "Unmentioned declared key was not preserved")
+        assertEquals(running.metadata[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override was not accepted")
 
         val (_, _, name) = decodeIdForTest(running.id)
         val onCluster = client.apps().deployments().inNamespace(namespace).withName(name).get()
             ?.spec?.template?.metadata?.annotations.orEmpty()
         assertEquals(onCluster[METADATA_OWNER_KEY], "sre-oncall", "Override did not land on the Deployment")
         assertEquals(onCluster[METADATA_NOTE_KEY], "pinned", "New key did not land on the Deployment")
+        assertEquals(onCluster[METADATA_HIDDEN_KEY], "true", "Cosmetic reserved override did not land on the Deployment")
 
         // getStatus() re-reads from the cluster rather than echoing the daemon we were handed.
         val refreshed = service.getStatus(running)
