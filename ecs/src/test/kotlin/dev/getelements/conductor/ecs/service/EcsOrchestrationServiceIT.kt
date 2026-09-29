@@ -291,12 +291,7 @@ class EcsOrchestrationServiceIT {
         return current
     }
 
-    // Disabled: the CloudFormation stack this suite deploys picks up a GuardDuty-managed security
-    // group whenever an EC2-launch-type task runs, which CloudFormation can't clean up itself and
-    // leaves the stack's Vpc resource stuck in DELETE_IN_PROGRESS — blocking every subsequent run's
-    // stack creation with a name collision. See https://github.com/NamazuStudios/namazu-conductor/issues/35
-    // for the root cause and planned fix; re-enable once that lands.
-    @Test(enabled = false)
+    @Test
     fun launchFargateAndVerifyTestContext() {
         val profile = service.findAvailableProfile(taskFamily)
             ?: throw AssertionError("Fargate profile '$taskFamily' not found")
@@ -323,7 +318,7 @@ class EcsOrchestrationServiceIT {
         assertEquals(context.environment, environment, "environment mismatch (Fargate)")
     }
 
-    @Test(enabled = false)
+    @Test
     fun launchEc2SpotAndVerifyTestContext() {
         val profile = service.findAvailableProfile(ec2TaskFamily)
             ?: throw AssertionError("EC2 profile '$ec2TaskFamily' not found")
@@ -351,10 +346,8 @@ class EcsOrchestrationServiceIT {
     }
 
     // Metadata: the family's whole tag map declared verbatim, the caller's overrides merged over
-    // it and tagged onto the task, and the result read back off the task ARN. Disabled for the same
-    // CloudFormation reason as every other test in this suite -- see the note above
-    // launchFargateAndVerifyTestContext and https://github.com/NamazuStudios/namazu-conductor/issues/35.
-    @Test(enabled = false)
+    // it and tagged onto the task, and the result read back off the task ARN.
+    @Test
     fun jobMetadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
         val profile = service.findAvailableProfile(taskFamily)
             ?: throw AssertionError("Fargate profile '$taskFamily' not found")
@@ -398,8 +391,7 @@ class EcsOrchestrationServiceIT {
         }
     }
 
-    // Disabled for the same CloudFormation reason as the rest of this suite (see issue #35).
-    @Test(enabled = false)
+    @Test
     fun daemonMetadataIsDeclaredVerbatimMergedWithOverridesAndReadBack() {
         val daemon = service.findAvailableDaemon(daemonTaskFamily)
             ?: throw AssertionError("Daemon profile '$daemonTaskFamily' not found")
@@ -456,7 +448,7 @@ class EcsOrchestrationServiceIT {
         }
     }
 
-    @Test(enabled = false)
+    @Test
     fun discoversDaemonProfileOnly() {
         val daemon = service.findAvailableDaemon(daemonTaskFamily)
         assertTrue(daemon != null, "Daemon profile '$daemonTaskFamily' not found via getAvailableDaemons()")
@@ -466,7 +458,7 @@ class EcsOrchestrationServiceIT {
         )
     }
 
-    @Test(enabled = false, dependsOnMethods = ["discoversDaemonProfileOnly"])
+    @Test(dependsOnMethods = ["discoversDaemonProfileOnly"])
     fun deployServiceReachesRunningWithExpectedRunningCount() {
         val daemon = service.findAvailableDaemon(daemonTaskFamily)
             ?: throw AssertionError("Daemon profile '$daemonTaskFamily' not found")
@@ -480,7 +472,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = running
     }
 
-    @Test(enabled = false, dependsOnMethods = ["deployServiceReachesRunningWithExpectedRunningCount"])
+    @Test(dependsOnMethods = ["deployServiceReachesRunningWithExpectedRunningCount"])
     fun setDesiredCountUpdatesService() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
 
@@ -492,7 +484,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = running
     }
 
-    @Test(enabled = false, dependsOnMethods = ["setDesiredCountUpdatesService"])
+    @Test(dependsOnMethods = ["setDesiredCountUpdatesService"])
     fun setScalingBoundsRegistersScalableTarget() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to update")
 
@@ -514,7 +506,7 @@ class EcsOrchestrationServiceIT {
         daemonExecution = updated
     }
 
-    @Test(enabled = false, dependsOnMethods = ["setScalingBoundsRegistersScalableTarget"])
+    @Test(dependsOnMethods = ["setScalingBoundsRegistersScalableTarget"])
     fun undeployDeletesServiceAndScalableTarget() {
         val execution = daemonExecution ?: throw AssertionError("No daemon execution to undeploy")
 
@@ -566,6 +558,8 @@ class EcsOrchestrationServiceIT {
             .securityGroups()
             .filter { it.groupName() != "default" && !it.groupName().startsWith("conductor-integration-test") }
             .forEach { sg ->
+                waitForSecurityGroupEnisToDetach(sg.groupId())
+
                 // Retry deletion — external agents (e.g. GuardDuty) may still hold the SG briefly
                 var lastException: Exception? = null
                 repeat(6) { attempt ->
@@ -590,6 +584,31 @@ class EcsOrchestrationServiceIT {
                     throw IllegalStateException("Failed to delete security group ${sg.groupId()} (${sg.groupName()}) after 6 attempts", lastException)
                 }
             }
+    }
+
+    /**
+     * Waits until no network interfaces reference [groupId] before it is deleted. An EC2 security
+     * group cannot be deleted while ENIs are attached, and the ENIs of a just-stopped EC2 task take
+     * minutes to detach while the instance terminates — deleting (or letting CloudFormation delete
+     * the VPC) before then wedges the group as undeletable, which is exactly how GuardDuty's
+     * auto-injected `GuardDutyManagedSecurityGroup-*` used to leave the stack's Vpc resource stuck
+     * in DELETE_IN_PROGRESS and every subsequent run's stack creation failing on a name collision
+     * (issue #35). The wait is capped; on timeout the caller's own delete retries still run, so a
+     * slow ENI detachment degrades rather than deadlocks.
+     */
+    private fun waitForSecurityGroupEnisToDetach(groupId: String, timeoutMs: Long = 300_000L) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val attached = deployerEc2Client.describeNetworkInterfaces {
+                it.filters(Filter.builder().name("group-id").values(groupId).build())
+            }.networkInterfaces()
+            if (attached.isEmpty()) return
+            logger.info("Waiting for {} ENI(s) to detach from security group {}", attached.size, groupId)
+            Thread.sleep(10_000)
+        }
+        logger.warn(
+            "Timed out waiting for ENIs to detach from security group {} — attempting deletion anyway", groupId
+        )
     }
 
     private fun resolveRepositoryUrl(): String {

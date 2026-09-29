@@ -1,0 +1,63 @@
+# Manually-triggered stand-up/teardown of the shared conductor-integration-test CloudFormation
+# stack, so the ECS Integration Test can run against a persistent harness instead of paying the
+# ~8-12 minute create/delete cost on every run (issue #35). Start it once, let IT runs reuse it
+# (EcsOrchestrationServiceIT.deployStack already reuses/updates a pre-existing stack), stop it
+# when done. Leaving it running costs roughly $10-20/month — don't forget to stop it.
+#
+# The stop path runs the same scrub as the test's own teardown: deleting any unmanaged security
+# group (e.g. GuardDuty's auto-injected GuardDutyManagedSecurityGroup-*) from the stack's VPC
+# before triggering the CloudFormation deletion, without which the Vpc resource can hang in
+# DELETE_IN_PROGRESS and block the next run's stack creation on a name collision.
+name: ECS Test Harness
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Stand up or tear down the conductor-integration-test stack"
+        type: choice
+        options:
+          - start
+          - stop
+        default: stop
+        required: true
+
+# Same group as the ECS Integration Test workflow: both touch the same named stack in one real
+# AWS account, so they must never overlap.
+concurrency:
+  group: conductor-ecs-it
+  cancel-in-progress: false
+
+jobs:
+
+  start-stack:
+    name: Start ECS test harness
+    if: inputs.action == 'start'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start the conductor-integration-test stack
+        run: ./ecs/cloudformation/start-integration-test-stack.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_PROFILE: ""
+
+  stop-stack:
+    name: Stop ECS test harness
+    if: inputs.action == 'stop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Stop the conductor-integration-test stack
+        run: ./ecs/cloudformation/stop-integration-test-stack.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_PROFILE: ""

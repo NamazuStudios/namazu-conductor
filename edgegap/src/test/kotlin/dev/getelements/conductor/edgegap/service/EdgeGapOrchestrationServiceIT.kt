@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.fail
+import org.testng.IRetryAnalyzer
+import org.testng.ITestResult
 import org.testng.annotations.AfterClass
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
@@ -45,7 +47,9 @@ class EdgeGapOrchestrationServiceIT {
     private lateinit var executor: ExecutorService
     private lateinit var service: EdgeGapOrchestrationService
 
-    private var executionId: String? = null
+    /** Every deployment created across attempts — a retried attempt makes another one, and
+     * teardown stops them all so a failed first attempt can't orphan a live deployment. */
+    private val executionIds = mutableListOf<String>()
 
     @BeforeClass
     fun setUp() {
@@ -76,12 +80,12 @@ class EdgeGapOrchestrationServiceIT {
 
     @AfterClass(alwaysRun = true)
     fun tearDown() {
-        executionId?.let { stopDeployment(it) }
+        executionIds.forEach { stopDeployment(it) }
         if (::executor.isInitialized) executor.shutdownNow()
         if (::client.isInitialized) client.close()
     }
 
-    @Test
+    @Test(retryAnalyzer = DeploymentFlakeRetryAnalyzer::class)
     fun deployNginxAndVerifyHelloWorld() {
         val profile = service.findAvailableProfile("integration_test:nginx")
             ?: throw AssertionError("Profile 'integration_test:nginx' not found — ensure the app and version exist in the EdgeGap account")
@@ -106,7 +110,7 @@ class EdgeGapOrchestrationServiceIT {
             )
         )
 
-        executionId = execution.id
+        executionIds.add(execution.id)
 
         val running = service
             .getFutureForStatus(execution, JobStatus.RUNNING)
@@ -155,6 +159,31 @@ class EdgeGapOrchestrationServiceIT {
         } catch (e: Exception) {
             logger.warn("Failed to stop EdgeGap deployment {}", requestId, e)
         }
+    }
+
+}
+
+/**
+ * Bounded auto-retry for [EdgeGapOrchestrationServiceIT.deployNginxAndVerifyHelloWorld]'s known
+ * real-cloud flake (issue #35): the deployment reaches RUNNING but the edge ingress stays at 403
+ * past the test's own 60s propagation window, then passes cleanly on a manual rerun — observed
+ * twice, both times self-healing. One automatic retry self-heals those; keeping it bounded means
+ * a real regression still fails the suite after two genuine attempts rather than retry-looping
+ * against a broken account. TestNG already reports each failed attempt in the run log, so a
+ * "passed on retry" is visibly distinct from a clean first-try pass.
+ */
+class DeploymentFlakeRetryAnalyzer : IRetryAnalyzer {
+
+    private var attempt = 0
+
+    override fun retry(result: ITestResult): Boolean {
+        if (attempt >= MAX_RETRIES) return false
+        attempt++
+        return true
+    }
+
+    private companion object {
+        const val MAX_RETRIES = 1
     }
 
 }
