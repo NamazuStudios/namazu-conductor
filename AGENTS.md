@@ -318,6 +318,23 @@ mvn install -Pbuild-ui
 
 ## Tests
 
+**Do not build locally. Have CI do it.** A full `mvn install` exhausts system RAM on a workstation,
+so a local build is not merely redundant — it actively breaks the machine and can leave partial
+`target/` output behind. Push the branch and let the workflow be the verdict.
+
+The cost of relying on CI is one CI cycle of latency; the cost of building locally is an unusable
+workstation. There is no case where the local build is worth it.
+
+Two further reasons CI is the right answer even ignoring RAM: it is the only run that can be trusted
+to match what ships, and the integration suites need real provisioned infrastructure (an EKS
+cluster, a CloudFormation stack, live EdgeGap allocations) that a workstation only approximates — so
+a local pass can be green for the wrong reason and a local failure can be environmental rather than a
+real defect. Note that the ECS suite currently passes vacuously: every test in it is
+`@Test(enabled = false)`, so a green ECS check is not evidence of anything.
+
+If you need to confirm a specific narrow thing cheaply — a single module's compilation, a TypeScript
+typecheck in `admin/ui`, a YAML parse — do just that one thing, not a reactor build.
+
 `ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `admin`, and `debug` have no tests.
 
 `StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
