@@ -266,10 +266,10 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("JobProfile must be a ${KubernetesJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val template = client.resources(PodTemplate::class.java)
-            .inNamespace(profile.templateNamespace)
+            .inNamespace(profile.namespace)
             .withName(profile.templateName)
             .get()
-            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.templateNamespace}'")
+            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.namespace}'")
 
         val podTemplateSpec = template.template
             ?: throw JobException("PodTemplate '${profile.templateName}' has no pod template spec")
@@ -282,7 +282,7 @@ class KubernetesOrchestrationService @Inject constructor(
         if (request.tty) applyTty(spec, profile.primaryContainer)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
-            ?: profile.templateNamespace
+            ?: profile.namespace
 
         val runName = "${profile.templateName}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
@@ -405,10 +405,10 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("Daemon must be a ${KubernetesDaemon::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val template = client.resources(PodTemplate::class.java)
-            .inNamespace(profile.templateNamespace)
+            .inNamespace(profile.namespace)
             .withName(profile.templateName)
             .get()
-            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.templateNamespace}'")
+            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.namespace}'")
 
         val podTemplateSpec = template.template
             ?: throw JobException("PodTemplate '${profile.templateName}' has no pod template spec")
@@ -420,7 +420,7 @@ class KubernetesOrchestrationService @Inject constructor(
         applyPlacement(spec, request.placement)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
-            ?: profile.templateNamespace
+            ?: profile.namespace
 
         val runName = "${profile.templateName}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
