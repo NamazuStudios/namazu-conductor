@@ -47,11 +47,29 @@ stack, runs the Fargate/EC2-spot/daemon/metadata tests against it, scrubs, and t
 - **`ECS Test Harness` workflow** (`.github/workflows/ecs-harness.yaml`): a manual
   `workflow_dispatch` with a `start`/`stop` choice runs the same start/stop scripts with
   environment credentials — the CI-side equivalent of the local persistent-stack workflow from
-  the issue's cost-analysis comment. Shares the `conductor-ecs-it` concurrency group with the
-  IT workflow so harness actions and test runs never overlap on the same named stack.
+  the issue's cost-analysis comment. A nightly scheduled stop self-cleans a forgotten harness, so
+  an always-on stack never persists by accident (a work session spanning that stop just re-runs
+  start); the stop script exits cleanly when the stack doesn't exist so the scheduled run no-ops.
+  Shares the `conductor-ecs-it` concurrency group with the IT workflow so harness actions and test
+  runs never overlap on the same named stack.
 - This does *not* switch routine CI to a persistent stack — every IT run still creates and deletes
   its own stack by default (clean state per run, no idle cost between merges). The harness is for
   deliberate stand-up when someone wants the stack running across a work session.
+
+## First CI run on the fix: two findings
+
+- **`ecs:TagResource` missing from the test user's policy.** Re-enabling the suite immediately
+  surfaced what the disabled era had been masking: the least-privilege IAM user in
+  `integration-test.yaml` predated the metadata feature, and every tagging path (the metadata
+  tests, and tag-on-create on `RunTask`/`CreateService`) failed with `AccessDenied` on
+  `ecs:TagResource` — five of nine tests. Added to the cluster-conditioned
+  `EcsClusterScopedActions` statement (the failed resources were all task/service ARNs in the
+  cluster; still fits the inline policy's 2,048-byte quota).
+- **The EdgeGap retry's first exercise 403'd on the retry itself.** Attempt 2's `execute()` failed
+  with an EdgeGap API 403: EdgeGap throttles concurrent deployments per account, and the failed
+  attempt's deployment was still live until teardown. The retry analyzer now stops all created
+  deployments before re-running (shared `stopCreatedDeployments()` with teardown), so a retry
+  tests the feature rather than the quota.
 
 ## EdgeGap flake hardening (from the issue's comments)
 

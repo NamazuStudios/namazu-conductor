@@ -2,7 +2,9 @@
 # stack, so the ECS Integration Test can run against a persistent harness instead of paying the
 # ~8-12 minute create/delete cost on every run (issue #35). Start it once, let IT runs reuse it
 # (EcsOrchestrationServiceIT.deployStack already reuses/updates a pre-existing stack), stop it
-# when done. Leaving it running costs roughly $10-20/month — don't forget to stop it.
+# when done. Leaving it running costs roughly $10-20/month — don't forget to stop it, and even if
+# you don't: the nightly scheduled stop self-cleans a forgotten harness (a work session spanning
+# that stop just re-runs start).
 #
 # The stop path runs the same scrub as the test's own teardown: deleting any unmanaged security
 # group (e.g. GuardDuty's auto-injected GuardDutyManagedSecurityGroup-*) from the stack's VPC
@@ -21,6 +23,9 @@ on:
           - stop
         default: stop
         required: true
+  schedule:
+    # Nightly safety net: auto-stop a forgotten harness stack.
+    - cron: "0 8 * * *"
 
 # Same group as the ECS Integration Test workflow: both touch the same named stack in one real
 # AWS account, so they must never overlap.
@@ -32,7 +37,7 @@ jobs:
 
   start-stack:
     name: Start ECS test harness
-    if: inputs.action == 'start'
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'start'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -48,7 +53,7 @@ jobs:
 
   stop-stack:
     name: Stop ECS test harness
-    if: inputs.action == 'stop'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.action == 'stop')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

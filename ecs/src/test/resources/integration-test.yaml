@@ -450,7 +450,10 @@ Resources:
             Resource: '*'
 
           # Cluster-scoped task and service lifecycle - execute()/getFutureForStatus()/stop()/
-          # deploy()/setDesiredCount()/undeploy()/getStatus()/resolveContainerInstanceHost()
+          # deploy()/setDesiredCount()/undeploy()/getStatus()/resolveContainerInstanceHost().
+          # ecs:TagResource covers both the explicit TagResource calls and tag-on-create — AWS
+          # requires it for RunTask/CreateService carrying tags too, so the metadata feature's
+          # tagging fails without it even though no standalone TagResource call may be visible.
           - Sid: EcsClusterScopedActions
             Effect: Allow
             Action:
@@ -461,6 +464,7 @@ Resources:
               - ecs:UpdateService
               - ecs:DeleteService
               - ecs:DescribeServices
+              - ecs:TagResource
             Resource: '*'
             Condition:
               ArnEquals:

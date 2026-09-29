@@ -80,9 +80,18 @@ class EdgeGapOrchestrationServiceIT {
 
     @AfterClass(alwaysRun = true)
     fun tearDown() {
-        executionIds.forEach { stopDeployment(it) }
+        stopCreatedDeployments()
         if (::executor.isInitialized) executor.shutdownNow()
         if (::client.isInitialized) client.close()
+    }
+
+    /** Stops every deployment created so far and forgets them. Shared by teardown and the retry
+     * analyzer: EdgeGap throttles concurrent deployments per account, so a retried attempt must
+     * not fire while the failed attempt's deployment is still live — the next `execute()` 403s on
+     * the quota instead of testing anything. */
+    fun stopCreatedDeployments() {
+        executionIds.forEach { stopDeployment(it) }
+        executionIds.clear()
     }
 
     @Test(retryAnalyzer = DeploymentFlakeRetryAnalyzer::class)
@@ -179,6 +188,10 @@ class DeploymentFlakeRetryAnalyzer : IRetryAnalyzer {
     override fun retry(result: ITestResult): Boolean {
         if (attempt >= MAX_RETRIES) return false
         attempt++
+        // Stop the failed attempt's deployment first: it stays RUNNING until teardown, and the
+        // account's concurrent-deployment quota makes the retry's own execute() 403 on top of it
+        // (seen on the first CI run with this analyzer) rather than retesting anything.
+        (result.getInstance() as? EdgeGapOrchestrationServiceIT)?.stopCreatedDeployments()
         return true
     }
 

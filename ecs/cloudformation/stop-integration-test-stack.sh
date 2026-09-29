@@ -59,6 +59,13 @@ function delete_security_group_with_retry() {
   return 1
 }
 
+# Nothing to stop when the stack was never created (or already stopped) — lets the harness
+# workflow's nightly scheduled stop run as a no-op instead of failing on a missing stack.
+if ! cloudformation describe-stacks --stack-name "${CFN_STACK_NAME}" >/dev/null 2>&1; then
+  echo "Stack '${CFN_STACK_NAME}' does not exist — nothing to stop."
+  exit 0
+fi
+
 # The stack's VPC carries a Name tag matching the stack name (see integration-test.yaml).
 VPC_IDS=$(ec2 describe-vpcs \
   --filters "Name=tag:Name,Values=${CFN_STACK_NAME}" \

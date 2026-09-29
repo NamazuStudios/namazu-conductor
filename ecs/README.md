@@ -317,9 +317,10 @@ tasks, has no idle cost). Don't forget to stop it when you're done.
 The manual **ECS Test Harness** GitHub Actions workflow
 (`.github/workflows/ecs-harness.yaml`) is the CI-side equivalent of the two scripts above: a
 `workflow_dispatch` with a start/stop choice stands the shared stack up or tears it down using the
-workflow's environment credentials (`AWS_PROFILE` left empty). It shares the `conductor-ecs-it`
-concurrency group with the IT workflow, so harness actions and test runs never overlap on the same
-stack.
+workflow's environment credentials (`AWS_PROFILE` left empty), and a nightly scheduled stop
+self-cleans a forgotten harness (a work session spanning that stop just re-runs start). It shares
+the `conductor-ecs-it` concurrency group with the IT workflow, so harness actions and test runs
+never overlap on the same stack.
 
 ### Teardown and the GuardDuty security group
 
