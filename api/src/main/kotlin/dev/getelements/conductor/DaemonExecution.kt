@@ -48,6 +48,14 @@ data class DaemonExecution(
      * [dev.getelements.conductor.service.DaemonOrchestrationService] implementation and is opaque
      * to this module. Serialised as-is by the REST layer.
      */
-    val details : Any? = null
+    val details : Any? = null,
+
+    /**
+     * The metadata actually present on the deployed workload — the daemon's declared set with
+     * [dev.getelements.conductor.DaemonRequest.metadata] applied over it. Mirrors
+     * [dev.getelements.conductor.JobExecution.metadata] exactly, including the may-be-a-superset
+     * caveat. Empty for providers with no metadata channel.
+     */
+    val metadata : Map<String, String> = emptyMap()
 
 )

@@ -50,6 +50,20 @@ data class JobRequest (
      * support interactive terminal jobs throw [UnsupportedOperationException] from
      * [dev.getelements.conductor.service.OrchestrationService.execute] when this is `true`.
      */
-    val tty : Boolean = false
+    val tty : Boolean = false,
+
+    /**
+     * Caller-supplied metadata overrides, merged over the
+     * [dev.getelements.conductor.service.JobProfile.metadata] the profile was declared with. Any
+     * key present here wins; keys not mentioned are left as the profile declared them. A key the
+     * profile doesn't declare is added.
+     *
+     * Ignored if the underlying [dev.getelements.conductor.service.OrchestrationService]
+     * implementation has no metadata channel.
+     *
+     * @throws dev.getelements.conductor.exception.ReservedMetadataKeyException if any key carries
+     * the reserved `namazu.conductor` prefix, which Conductor reserves for its own semantics.
+     */
+    val metadata : Map<String, String> = emptyMap()
 
 )

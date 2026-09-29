@@ -15,4 +15,15 @@ interface Daemon {
      */
     val id: String;
 
+    /**
+     * Free-form, provider-agnostic presentation metadata declared alongside this daemon by the
+     * underlying infrastructure. Mirrors
+     * [dev.getelements.conductor.service.JobProfile.metadata] exactly, including the full-key,
+     * no-filtering reporting rule — see [dev.getelements.conductor.Metadata] for the reserved-prefix
+     * rule and the run-time override path.
+     *
+     * Defaults to empty for providers with no metadata channel.
+     */
+    val metadata: Map<String, String> get() = emptyMap()
+
 }
