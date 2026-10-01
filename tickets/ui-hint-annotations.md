@@ -144,3 +144,35 @@ keys join to it (both separator forms as always):
 - **UI only.** Zero provider or REST changes: the keys ride the existing verbatim `metadata` maps.
   `parseLinkMetadata` (`admin/ui/superuser/ui.ts`) does the grouping; `LinkPills` renders the
   display text and the protocol badge.
+
+## Amendment: `link-protocol` family vocabulary and `Family.Sub` hierarchy (#65)
+
+Protocol tag values were free text; `namazu-agent` is adopting a family vocabulary, and the
+dashboard now recognizes it. A value is a bare **family** or a family with a dotted refinement
+(`Family.Sub`) naming the specific API or product. Canonical spellings are lowercase:
+
+| Family | Meaning |
+|---|---|
+| `swagger[.<api>]` | The URL is the actual API spec document (Swagger/OpenAPI, JSON or YAML) — not a rendered docs page; the refinement names which API |
+| `oas3[.<api>]` | Same, an OpenAPI 3 spec (JSON or YAML) |
+| `webdav` | A WebDAV endpoint |
+| `rest[.<api>]` | The base of a REST API (an endpoint root); the refinement names the specific API (e.g. `rest.quantum` — the Quantum File Browser REST API) |
+| *(absent)* | Implicit `browser` — generic web link; never set explicitly |
+
+- **Two generalizations** (settled in #65): `rest[.<api>]` is always the **base of the API** — the
+  dot notation names the specific API (`rest.quantum`, `rest.billing`, …); and
+  `swagger[.<api>]`/`oas3[.<api>]` are always the **actual spec document** (JSON or YAML), never a
+  rendered docs page, with the dot notation naming which API the spec documents.
+- **Hierarchy convention is dotted refinement, `Family.Sub`** — the bare family (e.g. `rest`) is
+  valid when the specific product isn't known; authors prefer the most specific value they can
+  honestly claim. Matching semantics: case-insensitive, dotted-segment prefix — `rest.quantum`
+  satisfies a `rest` family query, not vice versa; whole segments only, so `Restaurant` never
+  matches `rest`. The absent protocol is the implicit `browser` family.
+- **Known families canonicalize for display** — `WebDAV` renders as `webdav`, with the family
+  description in the badge tooltip; refinements inherit their family's description (there are no
+  per-refinement entries to maintain). Unknown families render verbatim (exact match only), so
+  other producers' vocabularies are safe and nothing is dropped.
+- **Still display-only.** No href rewriting, no scheme restriction, no new UI affordances yet —
+  per-protocol actions (WebDAV mount hint, spec preview, API-client open) remain candidates for a
+  follow-up. The matching semantics ship as an exported helper
+  (`linkProtocolMatches` in `admin/ui/superuser/ui.ts`) so a future affordance doesn't re-invent them.

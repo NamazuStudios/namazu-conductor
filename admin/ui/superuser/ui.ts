@@ -308,12 +308,74 @@ export function containerMetadataFlag(
   return metadataFlag(metadata, `${flag}.${containerName}`)
 }
 
+/**
+ * The `link-protocol.{Identifier}` vocabulary (see
+ * https://github.com/NamazuStudios/namazu-conductor/issues/65), organized by **family**: a value is
+ * either a bare family (`webdav`) or a family with a dotted refinement naming the specific API or
+ * product (`rest.quantum` — the Quantum File Browser REST API). Canonical spellings are
+ * **lowercase** (per the issue's final convention: absent = implicit `browser`, never set
+ * explicitly); matching is case-insensitive throughout, so an author's `WebDAV` or `REST.Quantum`
+ * canonicalizes to the lowercase form.
+ *
+ * The two generalizations that make this a family table rather than an enumerated list:
+ *
+ *  - `rest[.<api>]` — the URL is the **base of a REST API** (an endpoint root); the refinement
+ *    names the specific API. Any refinement is accepted (`rest.billing`), tooltip inherited.
+ *  - `swagger[.<api>]` / `oas3[.<api>]` — the URL is the **actual spec document** (JSON or YAML),
+ *    not a rendered docs page; the refinement names which API it documents.
+ *
+ * A value whose family isn't in this table is a foreign/unknown protocol: rendered verbatim,
+ * matched exactly, never dropped — other producers may carry vocabularies this bundle doesn't know.
+ */
+const KNOWN_LINK_PROTOCOL_FAMILIES: Record<string, { canonical: string; description: string }> = {
+  'swagger': { canonical: 'swagger', description: 'The actual API spec document (Swagger/OpenAPI, JSON or YAML) — not a rendered docs page' },
+  'oas3': { canonical: 'oas3', description: 'The actual API spec document (OpenAPI 3, JSON or YAML) — not a rendered docs page' },
+  'webdav': { canonical: 'webdav', description: 'A WebDAV endpoint' },
+  'rest': { canonical: 'rest', description: 'The base of a REST API — a refinement (rest.<api>) names the specific API' },
+}
+
+/** Splits [protocol] into its family segment (before the first dot) and the rest, lowercased. */
+function linkProtocolFamily(protocol: string): string {
+  return protocol.trim().toLowerCase().split('.', 1)[0]
+}
+
+/** The canonical display spelling for [protocol] — e.g. `WebDAV` → `webdav` — or the value
+ * verbatim when its family isn't a known member of the vocabulary. A known family with a
+ * refinement canonicalizes wholesale (`REST.Quantum` → `rest.quantum`). */
+export function canonicalLinkProtocol(protocol: string): string {
+  const trimmed = protocol.trim()
+  return linkProtocolFamily(trimmed) in KNOWN_LINK_PROTOCOL_FAMILIES
+    ? trimmed.toLowerCase()
+    : protocol
+}
+
+/** The vocabulary entry for [protocol]'s family, or `null` when the family is unknown. Refinements
+ * inherit their family's description — there are no per-refinement entries to maintain. */
+export function knownLinkProtocolFamily(protocol: string): { canonical: string; description: string } | null {
+  return KNOWN_LINK_PROTOCOL_FAMILIES[linkProtocolFamily(protocol)] ?? null
+}
+
+/**
+ * The `Family.Sub` hierarchy-matching semantics for `link-protocol` values (settled in
+ * https://github.com/NamazuStudios/namazu-conductor/issues/65): case-insensitive, and a
+ * dotted-segment *prefix* match, so the refinement `rest.quantum` satisfies a `rest` family
+ * query but not vice versa. Matching is on whole segments — `Restaurant` never satisfies `rest`.
+ * A null protocol is the implicit `browser` family, so it only satisfies a `browser` query.
+ */
+export function linkProtocolMatches(protocol: string | null, family: string): boolean {
+  const segments = (protocol ?? 'browser').trim().toLowerCase().split('.')
+  const query = family.trim().toLowerCase().split('.')
+  return query.length <= segments.length &&
+    query.every((segment, i) => segments[i] === segment)
+}
+
 /** One `namazu.conductor/link.{Identifier}` entry in the map, joined with its optional
  * companions: `link-display.{Identifier}` (the pill's text; falls back to the Identifier itself)
- * and `link-protocol.{Identifier}` (what the URL serves, e.g. `WebDAV` — a UI hint, not part of
+ * and `link-protocol.{Identifier}` (what the URL serves, e.g. `webdav` — a UI hint, not part of
  * the href). Identifier matching is case-insensitive on the verb and on the Identifier, consistent
  * with the flag matchers above; the fallback title preserves the Identifier's casing as written.
- * Values are rendered verbatim. */
+ * Known protocol families are canonicalized for display (`WebDAV` → `webdav`); unknown values stay
+ * verbatim. */
 export interface LinkMetadata {
   id: string
   title: string
@@ -357,10 +419,11 @@ export function parseLinkMetadata(metadata: Record<string, string> | undefined):
   })
   return links.map((link) => {
     const companion = companions.get(link.id.toLowerCase()) ?? {}
+    const protocol = companion.protocol?.length ? companion.protocol : null
     return {
       ...link,
       title: companion.title?.length ? companion.title : link.title,
-      protocol: companion.protocol?.length ? companion.protocol : null,
+      protocol: protocol === null ? null : canonicalLinkProtocol(protocol),
     }
   })
 }
@@ -388,25 +451,35 @@ export function Favicon(props: { url: string }) {
 /** Renders the map's `link.{Identifier}` entries as clickable pills — operator-curated deep links
  * (a preview page, a dashboard, docs), with the link's favicon where one exists. A companion
  * `link-display.{Identifier}` overrides the pill's text, and a `link-protocol.{Identifier}` renders
- * as a small badge on the pill (e.g. `WebDAV`) — a hint about what the URL serves, display-only.
+ * as a small badge on the pill (e.g. `webdav`) — a hint about what the URL serves, display-only.
+ * Known protocol families render canonically spelled (lowercase), with the family description in
+ * the badge's tooltip (see KNOWN_LINK_PROTOCOL_FAMILIES); unknown values render verbatim, plain.
  * Clicks stop propagation because these render inside `Accordion` headers, where a click toggles. */
 export function LinkPills(props: { metadata?: Record<string, string> }) {
   const links = parseLinkMetadata(props.metadata)
   if (links.length === 0) return null
   return h('div', { className: 'flex flex-wrap items-center gap-1' },
-    links.map((link) => h('a', {
-      key: link.id,
-      href: link.url,
-      target: '_blank',
-      rel: 'noopener noreferrer',
-      className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 transition-colors',
-      onClick: (e: React.MouseEvent) => e.stopPropagation(),
-      title: link.url,
-    },
-      h(Favicon, { url: link.url }),
-      link.title,
-      link.protocol && h('span', { className: 'font-mono text-[10px] opacity-70' }, `⟨${link.protocol}⟩`),
-      h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))))
+    links.map((link) => {
+      const known = link.protocol !== null
+        ? knownLinkProtocolFamily(link.protocol)
+        : null
+      return h('a', {
+        key: link.id,
+        href: link.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        className: 'text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 transition-colors',
+        onClick: (e: React.MouseEvent) => e.stopPropagation(),
+        title: link.url,
+      },
+        h(Favicon, { url: link.url }),
+        link.title,
+        link.protocol && h('span', {
+          className: 'font-mono text-[10px] opacity-70',
+          title: known?.description,
+        }, `⟨${link.protocol}⟩`),
+        h('span', { className: 'opacity-60', 'aria-hidden': 'true' }, ' ↗'))
+    }))
 }
 
 const SHOW_HIDDEN_STORAGE_KEY = 'conductor.show-hidden'
