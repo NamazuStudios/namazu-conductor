@@ -181,6 +181,11 @@ the inner `spec.template.metadata` block are part of the pod template proper and
 - `namazu.conductor/default-container-exec.*` annotations are synthesised by Conductor onto the pod at
   dispatch time rather than declared by the template, so they are excluded from both the declared and
   the reported set.
+- Execution read-back is a superset: for `Job` and `Deployment` workloads, Conductor merges the
+  workload's **top-level** `metadata.annotations` (reserved `namazu.conductor` keys only, top-level
+  winning) over the inner pod-template block — so runtime annotations, e.g. an agent's
+  `kubectl annotate job/… namazu.conductor/link.…` link publication, surface in
+  `JobExecution.metadata` / `DaemonExecution.metadata` alongside the declared set.
 
 Cosmetic annotations the **admin dashboard** interprets (all optional, both forms equivalent on
 ECS-style `:` separators):
