@@ -42,6 +42,25 @@ Once deployed, the page appears in the Elements dashboard under **Conductor** (L
 
 Each provider is listed by its fully-qualified element name (e.g. `dev.getelements.conductor.ecs`). Below it, a table renders every available `JobProfile` with all fields exposed — including provider-specific metadata such as launch type, network mode, app/version names, workload kind, and port configuration. Fields absent for a given profile are shown as `—`.
 
+### Link pills
+
+A profile can declare metadata-driven links that the dashboard renders as clickable pills (favicon, display text, ↗). Each pill comes from a `namazu.conductor/link.{Identifier}` metadata entry (a Kubernetes annotation or ECS tag) holding an http(s) URL, optionally decorated by companions keyed to the same Identifier: `namazu.conductor/link-display.{Identifier}` (the pill's text) and `namazu.conductor/link-protocol.{Identifier}` (a small badge describing what the URL serves). Protocol tags are display-only — never part of the href. Running executions render these pills too, plus the profile's Markdown `description` annotation in the expanded job detail — the annotation travels verbatim in `JobExecution.metadata`, so per-run overrides and runtime annotation updates show up alongside it.
+
+#### Protocol vocabulary (`link-protocol.*`)
+
+A protocol value is a **family**, optionally refined with a dot (`Family.Sub`) naming the specific API or product. Canonical spellings are lowercase; the badge renders the full canonical value, with the family description in its tooltip.
+
+| Family | Meaning |
+|---|---|
+| `swagger` | The URL is the actual API spec document (Swagger/OpenAPI, JSON or YAML) — not a rendered docs page |
+| `oas3` | The URL is the actual API spec document (OpenAPI 3, JSON or YAML) |
+| `webdav` | A WebDAV endpoint |
+| `rest` | The base of a REST API (an endpoint root) |
+| `rest.<api>` | Refinement: the base of that specific REST API (e.g. `rest.quantum` — the Quantum File Browser REST API) |
+| *(absent)* | Implicit `browser` — generic web link; never set explicitly |
+
+The two generalizations: `rest[.<api>]` is always the **base of the API** — the refinement names the specific API (`rest.quantum`, `rest.billing`, …); and `swagger[.<api>]`/`oas3[.<api>]` are always the **actual spec document** (JSON or YAML), with the refinement naming which API it documents. Matching is case-insensitive with dotted-segment prefix semantics (`rest.quantum` counts as `rest`, not vice versa; whole segments only, so `Restaurant` never matches `rest`). Unknown families render verbatim, so producer-specific vocabularies are safe. See [#65](https://github.com/NamazuStudios/namazu-conductor/issues/65).
+
 ---
 
 ## REST API

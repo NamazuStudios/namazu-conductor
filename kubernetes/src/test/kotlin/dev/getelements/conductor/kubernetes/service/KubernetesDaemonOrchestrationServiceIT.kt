@@ -18,9 +18,11 @@ import io.fabric8.kubernetes.api.model.PodTemplate
 import io.fabric8.kubernetes.api.model.PodTemplateBuilder
 import io.fabric8.kubernetes.api.model.autoscaling.v2.HorizontalPodAutoscaler
 import io.fabric8.kubernetes.api.model.apps.Deployment
+import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
+import io.fabric8.kubernetes.client.KubernetesClientException
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
@@ -214,6 +216,42 @@ class KubernetesDaemonOrchestrationServiceIT {
         assertEquals(refreshed.metadata[METADATA_NOTE_KEY], "pinned", "getStatus() lost the new key")
     }
 
+    /**
+     * Runtime annotations added to a Deployment's **top level** — where callers annotate at runtime
+     * (e.g. the agent's `kubectl annotate deployment/…` link publication) — surface in
+     * [KubernetesOrchestrationService.getStatus]'s read-back, merged over the inner
+     * `spec.template` block, while a non-`namazu.conductor` top-level annotation stays out of the
+     * reported metadata (see #67, mirroring the Job-path test in
+     * [KubernetesOrchestrationServiceIT]).
+     */
+    @Test
+    fun deploymentTopLevelAnnotationsSurfaceInReadBack() {
+        val profile = service.findAvailableDaemon("$namespace:$unboundedTemplate")
+            ?: throw AssertionError("Daemon profile '$namespace:$unboundedTemplate' not found")
+
+        val execution = service.deploy(DaemonRequest(
+            profile = profile, metadata = mapOf(METADATA_HIDDEN_KEY to "true")
+        )).also { executions += it }
+        awaitStatus(execution, DaemonStatus.RUNNING)
+
+        val (_, _, name) = decodeIdForTest(execution.id)
+        annotateDeploymentTopLevel(name, mapOf(
+            "namazu.conductor/link.QuantumREST" to "https://example.internal/quantum/api/",
+            METADATA_NOTE_KEY to "annotated at runtime"
+        ))
+
+        val refreshed = service.getStatus(execution)
+        assertEquals(
+            refreshed.metadata["namazu.conductor/link.QuantumREST"], "https://example.internal/quantum/api/",
+            "A runtime link published on the Deployment's top level was not surfaced in the read-back"
+        )
+        assertEquals(refreshed.metadata[METADATA_HIDDEN_KEY], "true", "The declared set from the template block was lost")
+        assertNull(
+            refreshed.metadata[METADATA_NOTE_KEY],
+            "A non-namazu.conductor top-level annotation must not leak into the reported metadata"
+        )
+    }
+
     @Test
     fun deployReachesRunningWithExpectedReplicaCount() {
         val profile = service.findAvailableDaemon("$namespace:$fixedTemplate")
@@ -355,6 +393,30 @@ class KubernetesDaemonOrchestrationServiceIT {
     private fun decodeIdForTest(id: String): Triple<String, String, String> {
         val parts = id.split(":", limit = 3)
         return Triple(parts[0], parts[1], parts[2])
+    }
+
+    /**
+     * Adds [annotations] to a Deployment's **top-level** `metadata.annotations`, retrying on 409
+     * Conflict: the deployment controller mutates the object concurrently (status bookkeeping), so a
+     * single replace can race it — each attempt re-fetches the latest version, which settles the
+     * conflict.
+     */
+    private fun annotateDeploymentTopLevel(deploymentName: String, annotations: Map<String, String>) {
+        repeat(5) { attempt ->
+            try {
+                client.apps().deployments().inNamespace(namespace).withName(deploymentName).edit { deployment ->
+                    DeploymentBuilder(deployment).editMetadata().apply {
+                        annotations.forEach { (k, v) -> addToAnnotations(k, v) }
+                    }.endMetadata().build()
+                }
+                return
+            } catch (e: KubernetesClientException) {
+                if (e.code != 409) throw e
+                logger.info("PATCH conflict annotating deployment '{}' (attempt {}); retrying", deploymentName, attempt + 1)
+                Thread.sleep(1000)
+            }
+        }
+        throw AssertionError("Could not annotate deployment '$deploymentName' — 409 Conflict did not settle after retries")
     }
 
     private fun buildClient(): KubernetesClient {

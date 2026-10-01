@@ -251,6 +251,27 @@ class KubernetesOrchestrationService @Inject constructor(
         declaredMetadataOf(annotations ?: emptyMap())
 
     /**
+     * The annotation block read back off a live `Job` or `Deployment`: the workload's inner
+     * `spec.template` block — where dispatch writes the merged declared set and where the pod's
+     * annotations actually live — with the workload's **top-level** `metadata.annotations` overlaid
+     * on top. Top-level wins because that is where callers annotate at runtime (e.g. the agent's
+     * `kubectl annotate job/…` link publication), and those tweaks must surface in the reported
+     * set; the overlay is filtered to [Metadata.isReserved] keys so Kubernetes' own bookkeeping
+     * (e.g. `kubectl.kubernetes.io/last-applied-configuration`) never leaks into the reported map.
+     *
+     * Only metadata and container decoration read the merged block. Workload-kind and
+     * helm-release detection deliberately stay on the inner template block alone: the dispatch-time
+     * kind is what [encodeId]/[stop] resolve against, and re-deriving it from a runtime annotation
+     * would make the list report an id that stops the wrong kind of workload.
+     */
+    private fun readBackAnnotations(
+        templateAnnotations: Map<String, String>?,
+        topLevelAnnotations: Map<String, String>?
+    ): Map<String, String> =
+        (templateAnnotations ?: emptyMap()) +
+            (topLevelAnnotations ?: emptyMap()).filterKeys { Metadata.isReserved(it) }
+
+    /**
      * Creates a `Pod` or `Job` for the given [JobRequest] and returns a [JobExecution] with status
      * [JobStatus.PENDING]. The workload's name is derived from the profile name plus a short unique
      * suffix and is carried in the [JobExecution.id] as `"$namespace:$kind:$name"`. When the profile
@@ -482,7 +503,9 @@ class KubernetesOrchestrationService @Inject constructor(
             minCount = profile.minReplicas,
             maxCount = profile.maxReplicas,
             details = KubernetesExecutionDetails(namespace = namespace, workloadKind = "daemon", name = runName),
-            metadata = reportedMetadataOf(created.spec?.template?.metadata?.annotations)
+            metadata = reportedMetadataOf(
+                readBackAnnotations(created.spec?.template?.metadata?.annotations, created.metadata?.annotations)
+            )
         )
     }
 
@@ -558,7 +581,9 @@ class KubernetesOrchestrationService @Inject constructor(
             maxCount = hpa?.spec?.maxReplicas,
             endpoints = endpoints,
             details = execution.details,
-            metadata = reportedMetadataOf(deployment.spec?.template?.metadata?.annotations)
+            metadata = reportedMetadataOf(
+                readBackAnnotations(deployment.spec?.template?.metadata?.annotations, deployment.metadata?.annotations)
+            )
         )
     }
 
@@ -748,14 +773,18 @@ class KubernetesOrchestrationService @Inject constructor(
                 val jobName = job.metadata?.name ?: return@job
                 // Per-row namespace, mirroring the standalone-pod loop above.
                 val ns = job.metadata?.namespace ?: namespace
-                val jobAnnotations = job.spec?.template?.metadata?.annotations ?: emptyMap()
+                // Kind/helm detection stays on the inner template block (dispatch-time truth —
+                // see readBackAnnotations); the merged block feeds containers and metadata so
+                // runtime top-level annotations (e.g. agent link publication) surface.
+                val templateAnnotations = job.spec?.template?.metadata?.annotations ?: emptyMap()
+                val jobAnnotations = readBackAnnotations(templateAnnotations, job.metadata?.annotations)
                 val containers = containerRefsFor(
                     job.spec?.template?.spec?.containers ?: emptyList(),
                     jobAnnotations
                 )
 
-                if (workloadKindOf(jobAnnotations) == WorkloadKind.HELM) {
-                    val releaseName = jobAnnotations[ANN_HELM_RELEASE]
+                if (workloadKindOf(templateAnnotations) == WorkloadKind.HELM) {
+                    val releaseName = templateAnnotations[ANN_HELM_RELEASE]
                     if (releaseName.isNullOrBlank()) {
                         logger.warn(
                             "job '{}' in namespace '{}' declares workload-kind=helm but has no {} " +

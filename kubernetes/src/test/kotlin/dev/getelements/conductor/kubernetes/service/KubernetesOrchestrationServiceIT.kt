@@ -14,13 +14,16 @@ import io.fabric8.kubernetes.api.model.ContainerBuilder
 import io.fabric8.kubernetes.api.model.NamespaceBuilder
 import io.fabric8.kubernetes.api.model.PodTemplate
 import io.fabric8.kubernetes.api.model.PodTemplateBuilder
+import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
+import io.fabric8.kubernetes.client.KubernetesClientException
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.assertNotNull
+import org.testng.Assert.assertNull
 import org.testng.Assert.assertThrows
 import org.testng.Assert.assertTrue
 import org.testng.annotations.AfterClass
@@ -340,6 +343,50 @@ class KubernetesOrchestrationServiceIT {
             ?: throw AssertionError("Execution '${execution.id}' missing from listing")
         assertEquals(listed.metadata[METADATA_OWNER_KEY], "sre-oncall", "listExecutions() lost the override")
         assertEquals(listed.metadata[METADATA_NOTE_KEY], "second attempt", "listExecutions() lost the new key")
+    }
+
+    /**
+     * Runtime annotations added to a Job's **top level** — where callers annotate at runtime (e.g.
+     * the agent's `kubectl annotate job/…` link publication) — surface in the read-back, merged
+     * over the inner `spec.template` block, while a non-`namazu.conductor` top-level annotation
+     * stays out of the reported metadata (see #67). The declared set from the template block is
+     * preserved underneath the top-level overlay.
+     */
+    @Test
+    fun jobWorkloadTopLevelAnnotationsSurfaceInReadBack() {
+        val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+            ?: throw AssertionError("Job profile '$namespace:$jobTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile, metadata = mapOf(
+            METADATA_OWNER_KEY to "platform-team", METADATA_HIDDEN_KEY to "true"
+        ))).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        val (_, _, jobName) = decodeExecutionId(execution.id)
+        // Note the keys must be valid Kubernetes annotation names — the ':' tag-separator form is
+        // an ECS-only spelling that can't exist as a k8s annotation at all.
+        annotateJobTopLevel(jobName, mapOf(
+            "namazu.conductor/link.QuantumREST" to "https://example.internal/quantum/api/",
+            "namazu.conductor/hidden.sidecar" to "true",
+            METADATA_NOTE_KEY to "annotated at runtime"
+        ))
+
+        val listed = service.listExecutions().firstOrNull { it.id == execution.id }
+            ?: throw AssertionError("Execution '${execution.id}' missing from listing")
+
+        assertEquals(
+            listed.metadata["namazu.conductor/link.QuantumREST"], "https://example.internal/quantum/api/",
+            "A runtime link published on the Job's top level was not surfaced in the read-back"
+        )
+        assertEquals(
+            listed.metadata[METADATA_CONTAINER_HIDDEN_KEY], "true",
+            "A runtime top-level container-scoped cosmetic key was not surfaced"
+        )
+        assertEquals(listed.metadata[METADATA_HIDDEN_KEY], "true", "The declared set from the template block was lost")
+        assertNull(
+            listed.metadata[METADATA_NOTE_KEY],
+            "A non-namazu.conductor top-level annotation must not leak into the reported metadata"
+        )
     }
 
     @Test
@@ -676,6 +723,30 @@ class KubernetesOrchestrationServiceIT {
     private fun decodeExecutionId(id: String): Triple<String, String, String> {
         val parts = id.split(":")
         return Triple(parts[0], parts[1], parts[2])
+    }
+
+    /**
+     * Adds [annotations] to a Job's **top-level** `metadata.annotations`, retrying on 409 Conflict:
+     * a Job that just reached COMPLETED is still mutated concurrently by the job controller
+     * (status/managedFields bookkeeping), so a single replace can race it — each attempt re-fetches
+     * the latest version, which settles the conflict.
+     */
+    private fun annotateJobTopLevel(jobName: String, annotations: Map<String, String>) {
+        repeat(5) { attempt ->
+            try {
+                client.batch().v1().jobs().inNamespace(namespace).withName(jobName).edit { job ->
+                    JobBuilder(job).editMetadata().apply {
+                        annotations.forEach { (k, v) -> addToAnnotations(k, v) }
+                    }.endMetadata().build()
+                }
+                return
+            } catch (e: KubernetesClientException) {
+                if (e.code != 409) throw e
+                logger.info("PATCH conflict annotating job '{}' (attempt {}); retrying", jobName, attempt + 1)
+                Thread.sleep(1000)
+            }
+        }
+        throw AssertionError("Could not annotate job '$jobName' — 409 Conflict did not settle after retries")
     }
 
     private fun env(name: String, default: String): String =

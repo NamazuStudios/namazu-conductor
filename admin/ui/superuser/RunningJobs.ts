@@ -1,8 +1,8 @@
 import React from 'react'
 import { fetchJobs, stopJob } from './api'
 import {
-  Accordion, containerMetadataFlag, DetailGrid, LinkPills, MarkdownBlock, MetadataPills,
-  ShowHiddenCheckbox, metadataFlag, useShowHidden,
+  Accordion, CollapsibleMarkdown, conductorKeySuffix, containerMetadataFlag, DetailGrid, LinkPills,
+  MarkdownBlock, MetadataPills, ShowHiddenCheckbox, metadataFlag, useShowHidden,
 } from './ui'
 import { terminalSessionManager } from './terminal'
 import type { JobExecution, ProviderExecutionsResult } from './types'
@@ -66,6 +66,13 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   const metadataEntries = Object.entries(ex.metadata ?? {}).filter(([k]) => k.trim())
 
+  // The profile's Markdown description (namazu.conductor/description — either separator form),
+  // carried verbatim in the execution's metadata by every provider, so an operator expanding a
+  // running job sees what the job is without going back to the profile list. Per-run overrides and
+  // runtime annotation updates surface here through the same read-back.
+  const description = Object.entries(ex.metadata ?? {})
+    .find(([k]) => conductorKeySuffix(k) === 'description')?.[1]
+
   // Container-scoped cosmetic flags — namazu.conductor/hidden.{container} and
   // namazu.conductor/agent.{container} (see AGENTS.md). Hidden attach rows vanish unless the
   // operator opted into Show hidden — the same toggle as hidden jobs, so one opt-in reveals both.
@@ -92,6 +99,8 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 
   return h(Accordion, { isExpanded: props.isExpanded, onToggle: props.onToggle, header },
     stopError && h('p', { className: 'text-xs text-destructive mb-2' }, stopError),
+    description && h('div', { className: 'mb-3' },
+      h(CollapsibleMarkdown, { markdown: description, label: 'Description' })),
     // What the workload actually carries, not what was requested — see JobExecution.metadata in the
     // api module. Only rendered when non-empty, since most executions declare nothing.
     metadataEntries.length > 0 &&

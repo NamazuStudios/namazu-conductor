@@ -180,6 +180,12 @@ custom handler registered on the terminal instance. Same caveat as Open URL: the
 `navigator.clipboard.writeText()` immediately, which can get rejected without a user gesture
 (especially in Firefox), so it also drops a toast with a **Copy** button as the reliable fallback.
 
+## Metadata link pills
+
+A profile's metadata can carry links the dashboard renders as clickable pills: `namazu.conductor/link.{Identifier}` holds an http(s) URL, with optional companions `link-display.{Identifier}` (pill text) and `link-protocol.{Identifier}` (a display-only badge for what the URL serves, never part of the href). Executions display these too (read back off the live workload), along with the profile's Markdown `description` annotation, rendered in the running-job detail the same way the profile list shows it.
+
+The protocol value is drawn from a family vocabulary, optionally dotted-refined with the specific API: `swagger[.<api>]`/`oas3[.<api>]` mean the URL is the **actual spec document** (Swagger/OpenAPI 3, JSON or YAML — not a rendered docs page; the refinement names which API), `webdav` a WebDAV endpoint, and `rest[.<api>]` the **base of a REST API** (an endpoint root; the refinement names the specific API, e.g. `rest.quantum` for the Quantum File Browser REST API). Canonical spellings are lowercase (prefer the most specific value you can honestly claim); matching is case-insensitive with dotted-segment prefix semantics (`rest.quantum` satisfies a `rest` family match), and an absent protocol is the implicit `browser`. Known families render with canonical lowercase spelling whatever casing was authored (`WebDAV` → `webdav`); unknown values render verbatim so other vocabularies are safe. See [#65](https://github.com/NamazuStudios/namazu-conductor/issues/65).
+
 ## Dashboard status indicator
 
 | Indicator | Meaning |
