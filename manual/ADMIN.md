@@ -44,7 +44,7 @@ Each provider is listed by its fully-qualified element name (e.g. `dev.getelemen
 
 ### Link pills
 
-A profile can declare metadata-driven links that the dashboard renders as clickable pills (favicon, display text, ↗). Each pill comes from a `namazu.conductor/link.{Identifier}` metadata entry (a Kubernetes annotation or ECS tag) holding an http(s) URL, optionally decorated by companions keyed to the same Identifier: `namazu.conductor/link-display.{Identifier}` (the pill's text) and `namazu.conductor/link-protocol.{Identifier}` (a small badge describing what the URL serves). Protocol tags are display-only — never part of the href.
+A profile can declare metadata-driven links that the dashboard renders as clickable pills (favicon, display text, ↗). Each pill comes from a `namazu.conductor/link.{Identifier}` metadata entry (a Kubernetes annotation or ECS tag) holding an http(s) URL, optionally decorated by companions keyed to the same Identifier: `namazu.conductor/link-display.{Identifier}` (the pill's text) and `namazu.conductor/link-protocol.{Identifier}` (a small badge describing what the URL serves). Protocol tags are display-only — never part of the href. Running executions render these pills too, plus the profile's Markdown `description` annotation in the expanded job detail — the annotation travels verbatim in `JobExecution.metadata`, so per-run overrides and runtime annotation updates show up alongside it.
 
 #### Protocol vocabulary (`link-protocol.*`)
 
