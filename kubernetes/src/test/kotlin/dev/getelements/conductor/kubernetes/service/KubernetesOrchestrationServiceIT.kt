@@ -363,9 +363,11 @@ class KubernetesOrchestrationServiceIT {
         service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
 
         val (_, _, jobName) = decodeExecutionId(execution.id)
+        // Note the keys must be valid Kubernetes annotation names — the ':' tag-separator form is
+        // an ECS-only spelling that can't exist as a k8s annotation at all.
         annotateJobTopLevel(jobName, mapOf(
             "namazu.conductor/link.QuantumREST" to "https://example.internal/quantum/api/",
-            "namazu.conductor:agent" to "true",
+            "namazu.conductor/hidden.sidecar" to "true",
             METADATA_NOTE_KEY to "annotated at runtime"
         ))
 
@@ -376,7 +378,10 @@ class KubernetesOrchestrationServiceIT {
             listed.metadata["namazu.conductor/link.QuantumREST"], "https://example.internal/quantum/api/",
             "A runtime link published on the Job's top level was not surfaced in the read-back"
         )
-        assertEquals(listed.metadata["namazu.conductor:agent"], "true", "A runtime top-level cosmetic key (tag separator form) was not surfaced")
+        assertEquals(
+            listed.metadata[METADATA_CONTAINER_HIDDEN_KEY], "true",
+            "A runtime top-level container-scoped cosmetic key was not surfaced"
+        )
         assertEquals(listed.metadata[METADATA_HIDDEN_KEY], "true", "The declared set from the template block was lost")
         assertNull(
             listed.metadata[METADATA_NOTE_KEY],
