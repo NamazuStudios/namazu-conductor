@@ -18,6 +18,7 @@ import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
+import io.fabric8.kubernetes.client.KubernetesClientException
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
@@ -362,14 +363,11 @@ class KubernetesOrchestrationServiceIT {
         service.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
 
         val (_, _, jobName) = decodeExecutionId(execution.id)
-        client.batch().v1().jobs().inNamespace(namespace).withName(jobName).edit { job ->
-            JobBuilder(job).editMetadata()
-                .addToAnnotations("namazu.conductor/link.QuantumREST", "https://example.internal/quantum/api/")
-                .addToAnnotations("namazu.conductor:agent", "true")
-                .addToAnnotations(METADATA_NOTE_KEY, "annotated at runtime")
-                .endMetadata()
-                .build()
-        }
+        annotateJobTopLevel(jobName, mapOf(
+            "namazu.conductor/link.QuantumREST" to "https://example.internal/quantum/api/",
+            "namazu.conductor:agent" to "true",
+            METADATA_NOTE_KEY to "annotated at runtime"
+        ))
 
         val listed = service.listExecutions().firstOrNull { it.id == execution.id }
             ?: throw AssertionError("Execution '${execution.id}' missing from listing")
@@ -720,6 +718,30 @@ class KubernetesOrchestrationServiceIT {
     private fun decodeExecutionId(id: String): Triple<String, String, String> {
         val parts = id.split(":")
         return Triple(parts[0], parts[1], parts[2])
+    }
+
+    /**
+     * Adds [annotations] to a Job's **top-level** `metadata.annotations`, retrying on 409 Conflict:
+     * a Job that just reached COMPLETED is still mutated concurrently by the job controller
+     * (status/managedFields bookkeeping), so a single replace can race it — each attempt re-fetches
+     * the latest version, which settles the conflict.
+     */
+    private fun annotateJobTopLevel(jobName: String, annotations: Map<String, String>) {
+        repeat(5) { attempt ->
+            try {
+                client.batch().v1().jobs().inNamespace(namespace).withName(jobName).edit { job ->
+                    JobBuilder(job).editMetadata().apply {
+                        annotations.forEach { (k, v) -> addToAnnotations(k, v) }
+                    }.endMetadata().build()
+                }
+                return
+            } catch (e: KubernetesClientException) {
+                if (e.code != 409) throw e
+                logger.info("PATCH conflict annotating job '{}' (attempt {}); retrying", jobName, attempt + 1)
+                Thread.sleep(1000)
+            }
+        }
+        throw AssertionError("Could not annotate job '$jobName' — 409 Conflict did not settle after retries")
     }
 
     private fun env(name: String, default: String): String =

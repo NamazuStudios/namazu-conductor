@@ -22,6 +22,7 @@ import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
+import io.fabric8.kubernetes.client.KubernetesClientException
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
@@ -234,13 +235,10 @@ class KubernetesDaemonOrchestrationServiceIT {
         awaitStatus(execution, DaemonStatus.RUNNING)
 
         val (_, _, name) = decodeIdForTest(execution.id)
-        client.apps().deployments().inNamespace(namespace).withName(name).edit { deployment ->
-            DeploymentBuilder(deployment).editMetadata()
-                .addToAnnotations("namazu.conductor/link.QuantumREST", "https://example.internal/quantum/api/")
-                .addToAnnotations(METADATA_NOTE_KEY, "annotated at runtime")
-                .endMetadata()
-                .build()
-        }
+        annotateDeploymentTopLevel(name, mapOf(
+            "namazu.conductor/link.QuantumREST" to "https://example.internal/quantum/api/",
+            METADATA_NOTE_KEY to "annotated at runtime"
+        ))
 
         val refreshed = service.getStatus(execution)
         assertEquals(
@@ -395,6 +393,30 @@ class KubernetesDaemonOrchestrationServiceIT {
     private fun decodeIdForTest(id: String): Triple<String, String, String> {
         val parts = id.split(":", limit = 3)
         return Triple(parts[0], parts[1], parts[2])
+    }
+
+    /**
+     * Adds [annotations] to a Deployment's **top-level** `metadata.annotations`, retrying on 409
+     * Conflict: the deployment controller mutates the object concurrently (status bookkeeping), so a
+     * single replace can race it — each attempt re-fetches the latest version, which settles the
+     * conflict.
+     */
+    private fun annotateDeploymentTopLevel(deploymentName: String, annotations: Map<String, String>) {
+        repeat(5) { attempt ->
+            try {
+                client.apps().deployments().inNamespace(namespace).withName(deploymentName).edit { deployment ->
+                    DeploymentBuilder(deployment).editMetadata().apply {
+                        annotations.forEach { (k, v) -> addToAnnotations(k, v) }
+                    }.endMetadata().build()
+                }
+                return
+            } catch (e: KubernetesClientException) {
+                if (e.code != 409) throw e
+                logger.info("PATCH conflict annotating deployment '{}' (attempt {}); retrying", deploymentName, attempt + 1)
+                Thread.sleep(1000)
+            }
+        }
+        throw AssertionError("Could not annotate deployment '$deploymentName' — 409 Conflict did not settle after retries")
     }
 
     private fun buildClient(): KubernetesClient {
