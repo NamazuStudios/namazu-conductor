@@ -325,9 +325,16 @@ npm run build
 
 Then restart `mvn -pl debug exec:java` to pick up the new bundle.
 
-**CI / Maven:** activate the `build-ui` profile to run npm via Maven:
+**CI / Maven:** the admin module's `build-ui` profile is active by default — every `mvn install`
+(plain, no `-P`) runs npm and rebuilds the UI into `src/main/ui/` before the `.elm` is assembled,
+so committed bundles are only a fallback, never the source of truth. Opt out on machines without
+npm:
 ```bash
-mvn install -Pbuild-ui
+mvn install -Dconductor.skip-ui
+```
+The admin/ui core also has unit tests (vitest; see `admin/ui/core/ConductorTerminal.test.ts`):
+```bash
+cd admin/ui && npm test
 ```
 
 ### User segmentation
@@ -353,7 +360,7 @@ real defect. Note that the ECS suite currently passes vacuously: every test in i
 If you need to confirm a specific narrow thing cheaply — a single module's compilation, a TypeScript
 typecheck in `admin/ui`, a YAML parse — do just that one thing, not a reactor build.
 
-`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `admin`, and `debug` have no tests.
+`ecs`, `edgegap`, and `kubernetes` each have integration tests under `src/test/kotlin/.../*IT.kt` (`EcsOrchestrationServiceIT`, `EdgeGapOrchestrationServiceIT`, `KubernetesOrchestrationServiceIT`, `KubernetesDaemonOrchestrationServiceIT`), run against real infrastructure via dedicated GitHub Actions workflows. `EcsOrchestrationServiceIT` and `KubernetesDaemonOrchestrationServiceIT` also cover each module's `DaemonOrchestrationService` implementation. `api`, `admin`, and `debug` have no JVM tests; the admin module's web UI (`admin/ui`) is unit-tested separately with vitest (`cd admin/ui && npm test`).
 
 `StdioBridgeClientIT` (in both `ecs` and `edgegap`) is disabled (`@Test(enabled = false)`) — the `namazu-stdio-bridge` sidecar it exercises has no real production consumer yet, and its Docker-container CI prerequisite was a recurring source of release flakiness. See https://github.com/NamazuStudios/namazu-conductor/issues/26 to re-enable it.
 
