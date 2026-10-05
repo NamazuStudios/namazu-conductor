@@ -279,13 +279,22 @@ Element-Builtin-Spis=${elm.builtin.spis}
     <profiles>
         <!--
             Builds the admin/ui Vite+TypeScript project and writes its output straight into
-            src/main/ui/superuser/plugin.bundle.js (see admin/ui/vite.config.ts), before the
-            elm-stage-ui antrun execution above copies src/main/ui into the .elm archive. Not bound
-            by default since it requires npm on the build machine; activate explicitly:
-            `mvn install -Pbuild-ui`.
+            src/main/ui/superuser/plugin.bundle.js and src/main/ui/widget/conductor-terminal.js
+            (see admin/ui/vite.config.ts and vite.widget.config.ts), before the elm-stage-ui antrun
+            execution above copies src/main/ui into the .elm archive.
+
+            Active by default so CI and every plain `mvn install` always ship a fresh UI — the
+            committed bundles are otherwise just whatever was last built by hand. Requires npm on
+            the build machine (present on GitHub's ubuntu runners); opt out for environments
+            without it: `mvn install -Dconductor.skip-ui`.
         -->
         <profile>
             <id>build-ui</id>
+            <activation>
+                <property>
+                    <name>!conductor.skip-ui</name>
+                </property>
+            </activation>
             <build>
                 <plugins>
                     <plugin>

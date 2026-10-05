@@ -20,7 +20,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Emitter } from './events'
 import { probeHostThemeDarkFallback, watchHostTheme } from './theme'
-import { builtInOscDefaults, TOAST_OSC_IDENT, OPEN_URL_OSC_IDENT, CLIPBOARD_OSC_IDENT } from './osc'
+import { builtInOscDefaults, BUILT_IN_OSC_IDENTS } from './osc'
 import type { ConductorTerminal, ConductorTerminalOptions, OscHandler, TerminalTheme } from './types'
 
 const DEFAULT_RESOLVE_WS_ROOT = async (): Promise<string> => {
@@ -48,6 +48,7 @@ export class ConductorTerminalCore implements ConductorTerminal {
   private disposed = false
   private stopThemeWatch: () => void = () => {}
   private oscHandlers = new Map<number, OscHandler[]>()
+  private lazyWiredOscIdents = new Set<number>()
   private emitter = new Emitter()
   private copied: string | null = null
   private options: ConductorTerminalOptions
@@ -83,6 +84,13 @@ export class ConductorTerminalCore implements ConductorTerminal {
     const handlers = this.oscHandlers.get(ident) ?? []
     handlers.push(handler)
     this.oscHandlers.set(ident, handlers)
+    // Issue #70: xterm only dispatches idents someone has registered. Built-ins are wired at
+    // construction; any other ident is wired here, once, on first `onOsc` — before that, the
+    // pty's sequences for it were parsed and silently dropped.
+    if (!BUILT_IN_OSC_IDENTS.has(ident) && !this.lazyWiredOscIdents.has(ident)) {
+      this.lazyWiredOscIdents.add(ident)
+      this.term.parser.registerOscHandler(ident, (data) => this.dispatchOsc(ident, data))
+    }
     return () => {
       const list = this.oscHandlers.get(ident)
       if (list) this.oscHandlers.set(ident, list.filter((h) => h !== handler))
@@ -185,17 +193,17 @@ export class ConductorTerminalCore implements ConductorTerminal {
       copy: (text) => { this.copied = text; this.emitter.emit('copy', { text }) },
     })
 
-    const register = (ident: number, builtIn: OscHandler) => {
-      this.term.parser.registerOscHandler(ident, (data) => {
-        this.emitter.emit('osc', { ident, data })
-        const custom = this.oscHandlers.get(ident)
-        if (custom && custom.some((h) => h(data) === true)) return true
-        return builtIn(data) ?? false
-      })
+    for (const ident of BUILT_IN_OSC_IDENTS) {
+      this.term.parser.registerOscHandler(ident, (data) => this.dispatchOsc(ident, data, defaults[ident]))
     }
+  }
 
-    register(TOAST_OSC_IDENT, defaults[TOAST_OSC_IDENT])
-    register(OPEN_URL_OSC_IDENT, defaults[OPEN_URL_OSC_IDENT])
-    register(CLIPBOARD_OSC_IDENT, defaults[CLIPBOARD_OSC_IDENT])
+  /** The one dispatch chain, shared by built-in and lazily-wired idents: `osc` event listeners →
+   * host `onOsc(ident)` handlers (first `true` claims) → optional built-in default. */
+  private dispatchOsc(ident: number, data: string, builtIn?: OscHandler): boolean {
+    this.emitter.emit('osc', { ident, data })
+    const custom = this.oscHandlers.get(ident)
+    if (custom && custom.some((h) => h(data) === true)) return true
+    return builtIn ? (builtIn(data) ?? false) : false
   }
 }

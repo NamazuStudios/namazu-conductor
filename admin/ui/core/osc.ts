@@ -20,6 +20,15 @@ export const OPEN_URL_OSC_IDENT = 1337
 export const OPEN_URL_OSC_PREFIX = 'OpenURL='
 export const CLIPBOARD_OSC_IDENT = 52
 
+/** The idents `registerBuiltIns()` wires at construction. Any other ident is wired lazily by
+ * `onOsc()` (issue #70: without this, sequences for host-registered idents like OSC 777 were
+ * parsed and silently discarded — nothing ever wired them to xterm's parser). */
+export const BUILT_IN_OSC_IDENTS: ReadonlySet<number> = new Set([
+  TOAST_OSC_IDENT,
+  OPEN_URL_OSC_IDENT,
+  CLIPBOARD_OSC_IDENT,
+])
+
 /** Only http(s) URLs are ever surfaced — defense in depth against an open redirect from
  * container-controlled output. */
 export function parseAllowedUrl(raw: string): string | null {

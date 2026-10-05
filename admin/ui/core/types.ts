@@ -92,7 +92,8 @@ export interface ConductorTerminal {
   on<K extends TerminalEventName>(name: K, handler: TerminalEventHandler<K>): () => void
   /** Register a handler for an extended/custom OSC ident. Returning `true` prevents the built-in
    * default for that ident (if any). Built-in idents: 9001 (toast), 1337 `OpenURL=` (open url),
-   * 52 (clipboard copy). */
+   * 52 (clipboard copy). Any other ident is wired to xterm's parser lazily, on this first call
+   * for it (issue #70) — sequences arriving before that are dropped by xterm, so register early. */
   onOsc(ident: number, handler: OscHandler): () => void
   /** The last clipboard text really copied via OSC 52, if any. */
   get lastCopiedText(): string | null
