@@ -1,5 +1,7 @@
 package dev.getelements.conductor.admin.ws
 
+import dev.getelements.conductor.TerminalLivenessEvents
+import dev.getelements.elements.sdk.annotation.ElementEventProducer
 import jakarta.websocket.OnClose
 import jakarta.websocket.OnError
 import jakarta.websocket.OnMessage
@@ -15,6 +17,12 @@ import jakarta.websocket.server.ServerEndpoint
  * the default-container equivalent.
  */
 @ServerEndpoint("/service/{jobId}/{containerId}")
+@ElementEventProducer(
+    value = TerminalLivenessEvents.PONG,
+    description = "Published when a pong from an attached terminal client proves a live, " +
+        "authenticated session is watching the referenced job; throttled per job. See " +
+        "TerminalLivenessPongEvent for the payload and the consumer contract."
+)
 class ContainerTerminalEndpoint {
 
     @OnOpen
