@@ -593,7 +593,9 @@ class KubernetesOrchestrationServiceIT {
         name: String,
         rules: List<PolicyRule>,
         awaitVerb: String,
-        awaitResource: String
+        awaitResource: String,
+        denyVerb: String? = null,
+        denyResource: String? = null
     ): KubernetesOrchestrationService {
         client.serviceAccounts().inNamespace(namespace).resource(
             ServiceAccountBuilder().withNewMetadata().withName(name).endMetadata().build()
@@ -641,9 +643,11 @@ class KubernetesOrchestrationServiceIT {
 
         restrictedIdentities += name
 
-        // The RBAC authorizer reads an informer cache: poll a SelfSubjectAccessReview (performed
-        // as the restricted identity itself) until the binding's grants are visible, so the tests
-        // never race the propagation.
+        // The RBAC authorizer reads an informer cache: poll SelfSubjectAccessReviews (performed as
+        // the restricted identity itself) until the binding's grants are visible AND — when a deny
+        // is requested — until the un-granted verb is confirmed absent. The deny gate is what
+        // catches a mis-scoped identity: if the base kubeconfig's client credentials survived the
+        // override (mTLS wins at the TLS layer), every SSAR would answer as the cluster admin.
         KubernetesClientBuilder().withConfig(
             buildBaseConfig().apply {
                 oauthToken = token
@@ -651,27 +655,32 @@ class KubernetesOrchestrationServiceIT {
                 password = null
                 clientCertData = null
                 clientKeyData = null
+                clientCertFile = null
+                clientKeyFile = null
                 namespace = namespace
             }
         ).build().use { reviewClient ->
+            fun allowed(verb: String, resource: String): Boolean = runCatching {
+                reviewClient.authorization().v1().selfSubjectAccessReview().create(
+                    SelfSubjectAccessReviewBuilder()
+                        .withNewSpec()
+                            .withNewResourceAttributes()
+                                .withNamespace(namespace)
+                                .withVerb(verb)
+                                .withResource(resource)
+                            .endResourceAttributes()
+                        .endSpec()
+                        .build()
+                ).status?.allowed == true
+            }.getOrNull() ?: false
+
             (1..30).firstOrNull { attempt ->
                 if (attempt > 1) Thread.sleep(1000)
-                val allowed = runCatching {
-                    reviewClient.authorization().v1().selfSubjectAccessReview().create(
-                        SelfSubjectAccessReviewBuilder()
-                            .withNewSpec()
-                                .withNewResourceAttributes()
-                                    .withNamespace(namespace)
-                                    .withVerb(awaitVerb)
-                                    .withResource(awaitResource)
-                                .endResourceAttributes()
-                            .endSpec()
-                            .build()
-                    ).status?.allowed == true
-                }.getOrNull() ?: false
-                allowed
+                allowed(awaitVerb, awaitResource) && (denyVerb == null || denyResource == null || !allowed(denyVerb, denyResource))
             } ?: throw IllegalStateException(
-                "RBAC grants for '$name' ($awaitVerb on $awaitResource) never became visible to the authorizer"
+                "RBAC identity '$name' never converged (granted $awaitVerb/$awaitResource" +
+                    (if (denyVerb != null && denyResource != null) ", denied $denyVerb/$denyResource" else "") +
+                    ") — check that the kubeconfig's client credentials were fully overridden"
             )
         }
 
@@ -682,6 +691,8 @@ class KubernetesOrchestrationServiceIT {
                 password = null
                 clientCertData = null
                 clientKeyData = null
+                clientCertFile = null
+                clientKeyFile = null
                 namespace = namespace
             }
         ).build().also { restrictedClients += it }
@@ -964,7 +975,9 @@ class KubernetesOrchestrationServiceIT {
                     .withVerbs("get", "list", "watch", "create", "delete").build(),
             ),
             awaitVerb = "create",
-            awaitResource = "jobs"
+            awaitResource = "jobs",
+            denyVerb = "create",
+            denyResource = "services"
         )
         val profile = restricted.findAvailableProfile("$namespace:$serviceGuardTemplate")
             ?: throw AssertionError("Profile '$namespace:$serviceGuardTemplate' not found")
@@ -1014,7 +1027,9 @@ class KubernetesOrchestrationServiceIT {
                     .withVerbs("get", "list", "watch", "create", "delete").build(),
             ),
             awaitVerb = "create",
-            awaitResource = "services"
+            awaitResource = "services",
+            denyVerb = "delete",
+            denyResource = "services"
         )
         val profile = restricted.findAvailableProfile("$namespace:$serviceGuardTemplate")
             ?: throw AssertionError("Profile '$namespace:$serviceGuardTemplate' not found")
