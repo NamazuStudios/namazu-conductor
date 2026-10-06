@@ -594,8 +594,10 @@ class KubernetesOrchestrationServiceIT {
         rules: List<PolicyRule>,
         awaitVerb: String,
         awaitResource: String,
+        awaitGroup: String = "",
         denyVerb: String? = null,
-        denyResource: String? = null
+        denyResource: String? = null,
+        denyGroup: String = ""
     ): KubernetesOrchestrationService {
         client.serviceAccounts().inNamespace(namespace).resource(
             ServiceAccountBuilder().withNewMetadata().withName(name).endMetadata().build()
@@ -660,12 +662,13 @@ class KubernetesOrchestrationServiceIT {
                 namespace = namespace
             }
         ).build().use { reviewClient ->
-            fun allowed(verb: String, resource: String): Boolean = runCatching {
+            fun allowed(group: String, verb: String, resource: String): Boolean = runCatching {
                 reviewClient.authorization().v1().selfSubjectAccessReview().create(
                     SelfSubjectAccessReviewBuilder()
                         .withNewSpec()
                             .withNewResourceAttributes()
                                 .withNamespace(namespace)
+                                .withGroup(group)
                                 .withVerb(verb)
                                 .withResource(resource)
                             .endResourceAttributes()
@@ -673,23 +676,23 @@ class KubernetesOrchestrationServiceIT {
                         .build()
                 ).status
             }.onFailure {
-                logger.warn("SSAR for {} {} as '{}' failed: {}", verb, resource, name, it.toString())
+                logger.warn("SSAR for {} {} {} as '{}' failed: {}", group, verb, resource, name, it.toString())
             }.getOrNull()?.let { it.allowed && it.denied != true } ?: false
 
             (1..30).firstOrNull { attempt ->
                 if (attempt > 1) Thread.sleep(1000)
-                val granted = allowed(awaitVerb, awaitResource)
-                val denied = denyVerb == null || denyResource == null || !allowed(denyVerb, denyResource)
+                val granted = allowed(awaitGroup, awaitVerb, awaitResource)
+                val denied = denyVerb == null || denyResource == null || !allowed(denyGroup, denyVerb, denyResource)
                 if (!(granted && denied)) {
                     logger.info(
-                        "RBAC gate for '{}' attempt {}: {} {} granted={}; {} {} not-granted={}",
-                        name, attempt, awaitVerb, awaitResource, granted, denyVerb, denyResource, denied
+                        "RBAC gate for '{}' attempt {}: {} {} {} granted={}; {} {} {} not-granted={}",
+                        name, attempt, awaitGroup, awaitVerb, awaitResource, granted, denyGroup, denyVerb, denyResource, denied
                     )
                 }
                 granted && denied
             } ?: throw IllegalStateException(
-                "RBAC identity '$name' never converged (granted $awaitVerb/$awaitResource" +
-                    (if (denyVerb != null && denyResource != null) ", denied $denyVerb/$denyResource" else "") +
+                "RBAC identity '$name' never converged (granted $awaitGroup/$awaitVerb/$awaitResource" +
+                    (if (denyVerb != null && denyResource != null) ", denied $denyGroup/$denyVerb/$denyResource" else "") +
                     ") — check that the kubeconfig's client credentials were fully overridden"
             )
         }
@@ -986,6 +989,7 @@ class KubernetesOrchestrationServiceIT {
             ),
             awaitVerb = "create",
             awaitResource = "jobs",
+            awaitGroup = "batch",
             denyVerb = "create",
             denyResource = "services"
         )
