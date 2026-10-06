@@ -994,18 +994,22 @@ class KubernetesOrchestrationService @Inject constructor(
      * racing an already-uninstalled release doesn't surface as an error.
      */
     private fun stopHelmRelease(ns: String, releaseName: String) {
-        val uninstall = Helm.uninstall(releaseName)
-            .withNamespace(ns)
-            .ignoreNotFound()
-
-        if (kubeconfigPath.isNotBlank()) {
-            uninstall.withKubeConfig(Paths.get(kubeconfigPath))
-        }
-
         try {
+            // The Helm.uninstall() builder itself triggers helm-java's HelmLibHolder static init —
+            // first native resolution (bundled classifier or, with none bundled, the RemoteJarLoader
+            // download for the runtime OS/arch) happens here, not in call() — so it must sit inside
+            // the try or those failures escape as raw RuntimeExceptions/Errors.
+            val uninstall = Helm.uninstall(releaseName)
+                .withNamespace(ns)
+                .ignoreNotFound()
+
+            if (kubeconfigPath.isNotBlank()) {
+                uninstall.withKubeConfig(Paths.get(kubeconfigPath))
+            }
+
             val output = uninstall.call()
             logger.debug("stop(): helm uninstall '{}' in namespace '{}' succeeded: {}", releaseName, ns, output)
-        } catch (e: IllegalStateException) {
+        } catch (e: Exception) {
             throw JobException("helm uninstall '$releaseName' --namespace '$ns' failed: ${e.message}", e)
         }
     }

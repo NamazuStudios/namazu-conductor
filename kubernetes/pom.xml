@@ -120,16 +120,46 @@
         </dependency>
         <!--
             Helm client (WorkloadKind.HELM's stop()) via JNA bindings to Helm's own Go
-            implementation, avoiding a runtime dependency on a `helm` binary on PATH. The parent POM
-            (com.marcnuri.helm-java:helm-java-parent) activates a Maven profile per OS/arch that pulls
-            in the matching native artifact (e.g. linux-amd64, darwin-arm64) for whichever machine
-            runs `mvn install`; if that differs from the OS/arch the .elm is deployed to, the
-            bundled native library won't load at runtime.
+            implementation, avoiding a runtime dependency on a `helm` binary on PATH.
+
+            The platform-specific native library (e.g. linux-amd64, linux-arm64) is deliberately
+            NOT bundled: helm-java's parent POM activates a Maven profile per OS/arch of the BUILD
+            machine, so whatever classifier it pulls would bake the wrong architecture into .elms
+            deployed elsewhere (the ws tier runs on both amd64 and arm64 — issue #78). With no
+            classifier on the classpath, helm-java's built-in RemoteJarLoader resolves the native
+            for the RUNTIME OS/arch on first use, downloading it from Maven Central and caching it
+            in java.io.tmpdir. This requires outbound access to repo1.maven.org wherever the
+            Element runs; helm-java's com.marcnuri.jkube-helm.skipRemoteJar system property (which
+            we do not set) is the opt-out for that behavior.
         -->
         <dependency>
             <groupId>com.marcnuri.helm-java</groupId>
             <artifactId>helm-java</artifactId>
             <version>0.0.21</version>
+            <exclusions>
+                <!-- Every per-platform classifier helm-java's parent POM might activate, for any
+                     build machine — the runtime resolves its own via RemoteJarLoader (see above). -->
+                <exclusion>
+                    <groupId>com.marcnuri.helm-java</groupId>
+                    <artifactId>linux-amd64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.marcnuri.helm-java</groupId>
+                    <artifactId>linux-arm64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.marcnuri.helm-java</groupId>
+                    <artifactId>darwin-amd64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.marcnuri.helm-java</groupId>
+                    <artifactId>darwin-arm64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.marcnuri.helm-java</groupId>
+                    <artifactId>windows-amd64</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- TestNG for integration tests -->
         <dependency>
