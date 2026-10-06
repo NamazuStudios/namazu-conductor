@@ -6,6 +6,7 @@ import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.exception.UnknownContainerException
+import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
@@ -768,6 +769,33 @@ class KubernetesOrchestrationServiceIT {
                 containerEnvironment = mapOf("no-such-container" to mapOf("A" to "b")),
             ))
         }
+    }
+
+    /**
+     * Stopping a HELM execution must succeed with **no native classifier bundled** in the .elm
+     * (issue #78): helm-java resolves the native library for the runtime OS/arch on first use via
+     * its built-in RemoteJarLoader — downloading the matching classifier artifact from Maven
+     * Central and caching it in java.io.tmpdir — instead of whatever classifier the build machine's
+     * Maven profile happened to bake in (the arm64 ws tier previously 500'd every HELM stop with an
+     * amd64-only bundle). Uninstalling a release that was never installed exercises the entire
+     * path — native resolution, kube-config resolution, and helm-java's own ignoreNotFound
+     * handling — while leaving no real release behind.
+     */
+    @Test
+    fun helmStopOnMissingReleaseSucceeds() {
+        val releaseName = "conductor-it-helm-missing-$runSuffix"
+        val execution = JobExecution(
+            id = "$namespace:helm:$releaseName",
+            status = JobStatus.RUNNING,
+            details = KubernetesExecutionDetails(
+                namespace = namespace,
+                workloadKind = "helm",
+                name = releaseName
+            ),
+            namespace = namespace
+        )
+
+        service.stop(execution)
     }
 
     private fun decodeExecutionId(id: String): Triple<String, String, String> {
