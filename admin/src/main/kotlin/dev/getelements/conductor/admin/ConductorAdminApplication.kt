@@ -49,6 +49,23 @@ class ConductorAdminApplication : Application() {
         @ElementDefaultAttribute(value = "/conductor/admin")
         val RS_ROOT: String = "dev.getelements.elements.element.rs.root"
 
+        /**
+         * Default for [TERMINAL_LIVENESS_INTERVAL_SECONDS] — three minutes, comfortably inside the
+         * agent-side idle watchdog's 30-minute default timeout (issue #81), so a missed pong or a
+         * briefly-slow consumer never tips a live agent into "stale".
+         */
+        const val DEFAULT_TERMINAL_LIVENESS_INTERVAL_SECONDS = 180L
+
+        /**
+         * Minimum interval, in seconds, between consecutive [dev.getelements.conductor.TerminalLivenessEvents.PONG]
+         * publishes per job — the dedup window that keeps N concurrently-attached terminal clients
+         * from producing N liveness events per interval. Read by
+         * [dev.getelements.conductor.admin.ws.TerminalSessionHandler].
+         */
+        @JvmField
+        @ElementDefaultAttribute(value = "180")
+        val TERMINAL_LIVENESS_INTERVAL_SECONDS: String = "dev.getelements.conductor.admin.terminal-liveness.interval.seconds"
+
     }
 
     override fun getClasses(): Set<Class<*>> = setOf(

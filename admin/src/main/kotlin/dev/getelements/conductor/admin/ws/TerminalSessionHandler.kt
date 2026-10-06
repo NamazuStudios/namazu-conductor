@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.TerminalAttachContext
 import dev.getelements.conductor.TerminalAttachVote
+import dev.getelements.conductor.TerminalLivenessEvents
+import dev.getelements.conductor.TerminalLivenessPongEvent
+import dev.getelements.conductor.admin.ConductorAdminApplication
 import dev.getelements.conductor.admin.ElementLookup
 import dev.getelements.conductor.admin.model.TerminalInitMessage
+import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.model.user.User
 import dev.getelements.elements.sdk.service.auth.SessionService
 import jakarta.websocket.CloseReason
+import jakarta.websocket.MessageHandler
+import jakarta.websocket.PongMessage
 import jakarta.websocket.Session
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -59,6 +66,7 @@ internal object TerminalSessionHandler {
     private const val PING_FUTURE_PROPERTY = "conductor.pingFuture"
     private const val INIT_DEFERRED_PROPERTY = "conductor.initDeferred"
     private const val AUTH_JOB_PROPERTY = "conductor.authJob"
+    private const val LOOKUP_PROPERTY = "conductor.lookup"
 
     // Comfortably under common container/proxy idle-timeout defaults (typically 30-60s), so an
     // otherwise-silent terminal (no keystrokes, no pty output) never gets closed out from under it.
@@ -75,6 +83,43 @@ internal object TerminalSessionHandler {
         Thread(it, "conductor-terminal-ping").apply { isDaemon = true }
     }
 
+    /**
+     * Minimum interval between [TerminalLivenessEvents.PONG] publishes per job, in milliseconds —
+     * read (lazily, on first pong) from this Element's
+     * [ConductorAdminApplication.TERMINAL_LIVENESS_INTERVAL_SECONDS] attribute, defaulting to the
+     * attribute's declared default when absent or unparsable. The throttle is per **job**, not per
+     * session: N concurrently attached terminals still yield one event per interval.
+     */
+    private val livenessIntervalMs: Long by lazy {
+        val registry = ElementRegistrySupplier.getElementLocal(TerminalSessionHandler::class.java).get()
+        val ownElement = registry.stream().toList()
+            .firstOrNull { it.elementRecord.isPartOfElement(TerminalSessionHandler::class.java) }
+        val seconds = ownElement?.elementRecord?.attributes()
+            ?.getAttributeOptional(ConductorAdminApplication.TERMINAL_LIVENESS_INTERVAL_SECONDS)
+            ?.map { it.toString().toLongOrNull() }
+            ?.orElse(null)
+            ?: ConductorAdminApplication.DEFAULT_TERMINAL_LIVENESS_INTERVAL_SECONDS
+        if (seconds <= 0) {
+            logger.warn(
+                "Attribute '{}' is '{}' — not a positive second count; using the default of {}s",
+                ConductorAdminApplication.TERMINAL_LIVENESS_INTERVAL_SECONDS, seconds,
+                ConductorAdminApplication.DEFAULT_TERMINAL_LIVENESS_INTERVAL_SECONDS
+            )
+            ConductorAdminApplication.DEFAULT_TERMINAL_LIVENESS_INTERVAL_SECONDS
+        } else {
+            seconds
+        } * 1000
+    }
+
+    /** Last [TerminalLivenessEvents.PONG] publish (epoch millis) per job id — the dedup window. */
+    private val lastLivenessByJob = ConcurrentHashMap<String, Long>()
+
+    // Publishes are quick (the fan-out is synchronous; consumers are contractually non-blocking),
+    // so a single daemon thread serializes them safely off the WS/ping threads.
+    private val livenessPublisher = Executors.newSingleThreadExecutor {
+        Thread(it, "conductor-terminal-liveness").apply { isDaemon = true }
+    }
+
     // Shared across all terminal sessions' auth-wait coroutines - SupervisorJob so one session's
     // failure/cancellation can't affect another's; Dispatchers.Default since this is short-lived,
     // non-blocking coordination work (the actual stdio pump remains a dedicated Thread, unchanged).
@@ -89,6 +134,13 @@ internal object TerminalSessionHandler {
     fun onOpen(session: Session, jobId: String, containerId: String?) {
         val initDeferred = CompletableDeferred<String>()
         session.userProperties[INIT_DEFERRED_PROPERTY] = initDeferred
+
+        // Protocol pongs are deliverable only to a programmatically-registered handler (JSR-356
+        // annotations cannot receive them). Browsers answer the server's pings automatically at
+        // the protocol level, so every healthy attached client produces a pong cadence for free —
+        // the raw material for the terminal-liveness event (issue #81). Pongs arriving before the
+        // session is authorized are ignored by onPong.
+        session.addMessageHandler(PongMessage::class.java, MessageHandler.Whole<PongMessage> { onPong(session) })
 
         val authJob = handlerScope.launch {
             val rawInit = withTimeoutOrNull(AUTH_TIMEOUT_SECONDS * 1000) { initDeferred.await() }
@@ -197,6 +249,9 @@ internal object TerminalSessionHandler {
         }
 
         session.userProperties[STDIO_PROPERTY] = stdio
+        // Stored before the ping schedule starts: the pong handler keys off it, and the first
+        // scheduled ping's pong must find the lookup already in place.
+        session.userProperties[LOOKUP_PROPERTY] = lookup
 
         // Guards every session.basicRemote send (both the stdout pump below and the ping heartbeat)
         // so they're never in flight concurrently - see TerminalSessionHandler's plan notes: the spec
@@ -231,6 +286,56 @@ internal object TerminalSessionHandler {
 
     private fun cancelPing(session: Session) {
         (session.userProperties[PING_FUTURE_PROPERTY] as? ScheduledFuture<*>)?.cancel(false)
+    }
+
+    /**
+     * A pong arrived from the attached client (browsers answer the heartbeat's pings
+     * protocol-automatically). Ignored until the session is authorized; otherwise claims the
+     * job's [livenessIntervalMs] dedup window and — on success — publishes
+     * [TerminalLivenessEvents.PONG] fire-and-forget. Never touches the session state: a pong is
+     * a liveness signal, not a message to reply to.
+     */
+    private fun onPong(session: Session) {
+        val lookup = session.userProperties[LOOKUP_PROPERTY] as? ElementLookup.JobLookup ?: return
+        val jobId = lookup.execution.id
+        val now = System.currentTimeMillis()
+        var claimed = false
+        lastLivenessByJob.compute(jobId) { _, last ->
+            if (last != null && now - last < livenessIntervalMs) last else { claimed = true; now }
+        }
+        if (claimed) livenessPublisher.submit { publishLiveness(lookup) }
+    }
+
+    /**
+     * Publishes [TerminalLivenessEvents.PONG] for [lookup]'s job. Runs on [livenessPublisher] —
+     * never the WS/ping threads — because the platform's event fan-out is synchronous and
+     * same-thread (LinkedPublisher), so a consumer's slow-but-contractually-disallowed blocking
+     * must not reach the terminal session either way.
+     */
+    private fun publishLiveness(lookup: ElementLookup.JobLookup) {
+        try {
+            val registry = ElementRegistrySupplier.getElementLocal(TerminalSessionHandler::class.java).get()
+            val ownElement = registry.stream().toList()
+                .firstOrNull { it.elementRecord.isPartOfElement(TerminalSessionHandler::class.java) }
+            if (ownElement == null) {
+                logger.warn(
+                    "Could not resolve this Element in the registry; not publishing terminal liveness for job '{}'",
+                    lookup.execution.id
+                )
+                return
+            }
+            ownElement.publish(
+                TerminalLivenessPongEvent(
+                    jobId = lookup.execution.id,
+                    elementName = lookup.elementName,
+                    execution = lookup.execution,
+                    namespace = lookup.execution.namespace
+                )
+            )
+            logger.debug("Published terminal liveness event for job '{}'", lookup.execution.id)
+        } catch (e: Exception) {
+            logger.warn("Failed to publish terminal liveness event for job '{}'", lookup.execution.id, e)
+        }
     }
 
     fun onBinaryMessage(session: Session, data: ByteArray) {

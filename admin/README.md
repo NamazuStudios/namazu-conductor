@@ -111,6 +111,28 @@ provider fails to open stdio for the job/container.
 | Binary | Both | Raw stdio bytes — keystrokes client→server, pty output server→client |
 | Text | Client→server only | Resize control message: `{"type":"resize","cols":N,"rows":N}` |
 
+### Terminal liveness events (issue #81)
+
+Every authorized terminal session is kept alive by a protocol-level ping/pong heartbeat (browsers
+answer pings automatically — no client code involved). The admin element publishes a
+`dev.getelements.conductor.terminal.liveness.pong` **event** whenever a pong proves a live,
+authenticated client is watching a job: any deployed Element can consume it
+(`@ElementEventConsumer`, payload `TerminalLivenessPongEvent` from the `api` module) and act on the
+liveness signal — the motivating consumer being an agent-side idle watchdog that checks the pod in
+via remote exec, so the pod's lifetime is governed by websocket liveness rather than process
+heuristics.
+
+Publishing rules:
+
+- **Throttled per job** — a job with several concurrently attached terminals yields one event per
+  interval, not one per session. The interval is the
+  `dev.getelements.conductor.admin.terminal-liveness.interval.seconds` attribute (default `180`).
+- **Fire-and-forget** — consumers run off the WebSocket/ping threads, their failures are logged,
+  and nothing about the terminal session depends on them.
+- **Consumers must not block** — the platform's event fan-out is synchronous and same-thread, so a
+  blocking consumer stalls every other consumer. Long-running work belongs on the consumer's own
+  executor.
+
 ### Toast notifications (bell-adjacent)
 
 A job/container can surface a toast in the operator's dashboard (in addition to, or instead of, an
