@@ -671,12 +671,22 @@ class KubernetesOrchestrationServiceIT {
                             .endResourceAttributes()
                         .endSpec()
                         .build()
-                ).status?.allowed == true
-            }.getOrNull() ?: false
+                ).status
+            }.onFailure {
+                logger.warn("SSAR for {} {} as '{}' failed: {}", verb, resource, name, it.toString())
+            }.getOrNull()?.let { it.allowed && it.denied != true } ?: false
 
             (1..30).firstOrNull { attempt ->
                 if (attempt > 1) Thread.sleep(1000)
-                allowed(awaitVerb, awaitResource) && (denyVerb == null || denyResource == null || !allowed(denyVerb, denyResource))
+                val granted = allowed(awaitVerb, awaitResource)
+                val denied = denyVerb == null || denyResource == null || !allowed(denyVerb, denyResource)
+                if (!(granted && denied)) {
+                    logger.info(
+                        "RBAC gate for '{}' attempt {}: {} {} granted={}; {} {} not-granted={}",
+                        name, attempt, awaitVerb, awaitResource, granted, denyVerb, denyResource, denied
+                    )
+                }
+                granted && denied
             } ?: throw IllegalStateException(
                 "RBAC identity '$name' never converged (granted $awaitVerb/$awaitResource" +
                     (if (denyVerb != null && denyResource != null) ", denied $denyVerb/$denyResource" else "") +
