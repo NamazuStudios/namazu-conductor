@@ -14,6 +14,12 @@ data class ExecuteJobRequest @JsonCreator constructor(
     @JsonProperty("args")        val args: List<String>?,
     @JsonProperty("command")     val command: List<String>?,
     @JsonProperty("environment") val environment: Map<String, String>?,
+    /**
+     * Per-container environment overrides (issue #73), keyed by container name — as reported by the
+     * profile's `containers` list. Additive: the flat [environment] keeps targeting the primary
+     * container; a key naming a container that doesn't exist is rejected with 400 before dispatch.
+     */
+    @JsonProperty("containerEnvironment") val containerEnvironment: Map<String, Map<String, String>>?,
     @JsonProperty("placement")   val placement: List<PlacementDto>?,
     @JsonProperty("tty")         val tty: Boolean?,
     /**

@@ -99,6 +99,9 @@ export interface ExecuteJobRequestBody {
   args?: string[]
   command?: string[]
   environment?: Record<string, string>
+  /** Per-container environment overrides (issue #73), keyed by container name. Omitted when the
+   * operator targeted only the primary container. Unknown names are rejected with 400. */
+  containerEnvironment?: Record<string, Record<string, string>>
   placement?: unknown[]
   tty?: boolean
   /** Per-launch metadata overrides, merged over the profile's declared `metadata`. Omitted

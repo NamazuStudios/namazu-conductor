@@ -26,8 +26,28 @@ data class JobRequest (
 
     /**
      * Environment variables to inject into the container at runtime, as a map of name to value.
+     * Targets the profile's primary (first) container only.
      */
     val environment : Map<String, String> = emptyMap(),
+
+    /**
+     * Environment variables injected into a *specific* container at runtime, keyed by container
+     * name — as reported by [dev.getelements.conductor.service.JobProfile.containers] (a
+     * [dev.getelements.conductor.ContainerRef.id]). This is additive: [environment] keeps applying
+     * to the primary container exactly as before, and leaving this map empty changes nothing.
+     *
+     * When both [environment] and an entry here target the same container, precedence is: the
+     * container's own profile-declared env, overridden by [environment] (primary only), overridden
+     * by the matching entry here — so a per-container key wins over a flat key on the same
+     * container.
+     *
+     * Naming a container that doesn't exist in the profile fails the launch outright — never a
+     * silent drop — with
+     * [dev.getelements.conductor.exception.UnknownContainerException] before anything is created.
+     * Providers with no multi-container concept (e.g. EdgeGap, whose environment is
+     * deployment-wide) reject every named entry the same way.
+     */
+    val containerEnvironment : Map<String, Map<String, String>> = emptyMap(),
 
     /**
      * Optional [JobPlacement] hints that influence where the job is scheduled. Ignored if the

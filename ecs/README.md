@@ -228,6 +228,18 @@ Configure each conductor with the matching attribute:
 dev.getelements.conductor.ecs.job.set = game-sessions
 ```
 
+## Runtime environment overrides
+
+`JobRequest.environment` is applied to the task definition's **primary (first) container** as a
+`ContainerOverride` on `runTask`, merged over the container's own env.
+
+Per-container env (`JobRequest.containerEnvironment`, issue #73) is **validated but primary-only**:
+this provider's profiles surface only the primary container, so an entry naming a sidecar is
+rejected with `UnknownContainerException` before the task runs — ECS sidecars are not addressable
+(yet). An entry naming the primary container merges over the flat `environment` on the same key.
+
+`DaemonRequest` overrides are ignored entirely (see `EcsOrchestrationService.deploy`).
+
 ## Stdio Streaming
 
 ECS has no native container stdio API, so `streamStdio(execution)` depends on the task's image

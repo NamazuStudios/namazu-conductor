@@ -4,12 +4,25 @@ import {
   Accordion, CollapsibleMarkdown, ErrorBoundary, LinkPills, MarkdownBlock, MetadataPills,
   Pagination, ShowHiddenCheckbox, StatusIndicator, metadataFlag, useShowHidden,
 } from './ui'
-import { RunForm, defaultAdvancedOptions, deriveMetadataOverrides, derivePlacementList } from './RunForm'
-import type { AdvancedOptions } from './RunForm'
+import { RunForm, deriveMetadataOverrides } from './RunForm'
+import { defaultAdvancedOptions, deriveEnvironment, deriveContainerEnvironment, derivePlacementList, deriveSessionSecretEnv } from './runOptions'
+import type { AdvancedOptions } from './runOptions'
 import type { JobProfile, ProviderProfilesResult } from './types'
 
 const h = React.createElement
 const PAGE_SIZE = 10
+
+/** Shallow-merges two `containerEnvironment` maps; [b]'s entries win on container- and key-level
+ * collisions (the session secret must not be clobbered by an empty side). */
+function mergeContainerEnv(
+  a: Record<string, Record<string, string>> | undefined,
+  b: Record<string, Record<string, string>> | undefined
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {}
+  for (const [container, env] of Object.entries(a ?? {})) out[container] = { ...env }
+  for (const [container, env] of Object.entries(b ?? {})) out[container] = { ...(out[container] ?? {}), ...env }
+  return out
+}
 
 interface FlatProfile {
   element: string
@@ -41,12 +54,17 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
   function handleStart() {
     setStarting(true); setStartError(null); setStartedId(null)
 
-    const environment: Record<string, string> = {}
-    advanced.env.forEach((pair) => { if (pair.key.trim()) environment[pair.key.trim()] = pair.value })
-    if (sessionSecretEnvVar && advanced.injectSessionSecret) {
-      const secret = getSessionSecret()
-      if (secret) environment[sessionSecretEnvVar] = secret
-    }
+    const { environment: secretEnv, containerEnvironment: secretContainerEnv } = deriveSessionSecretEnv(
+      advanced.injectSessionSecret,
+      advanced.sessionSecretContainers,
+      sessionSecretEnvVar ?? '',
+      getSessionSecret() ?? null)
+
+    // Undefined (omitted) when the operator added nothing — mirrors command/metadata, keeps the
+    // request body honest about what was overridden. Secret entries win on key collision, as they
+    // did when this was a single flat map.
+    const environment = { ...deriveEnvironment(advanced.env), ...secretEnv }
+    const containerEnvironment = mergeContainerEnv(deriveContainerEnvironment(advanced.env), secretContainerEnv)
 
     executeJob({
       element,
@@ -57,6 +75,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
       // profiles run via the simple path.
       command: advanced.command.length > 0 ? advanced.command.map((s) => s.trim()).filter(Boolean) : undefined,
       environment,
+      containerEnvironment: Object.keys(containerEnvironment).length > 0 ? containerEnvironment : undefined,
       placement: derivePlacementList(advanced.placement),
       tty: advanced.tty,
       // undefined when the operator added no overrides — see deriveMetadataOverrides.
@@ -124,7 +143,7 @@ function ProfileRow(props: { item: FlatProfile; isExpanded: boolean; onToggle: (
         onToggle: () => setAdvancedExpanded((v) => !v),
         header: h('span', { className: 'text-sm font-medium' }, 'Advanced Run Options'),
       },
-        h(RunForm, { value: advanced, onChange: setAdvanced, sessionSecretEnvVar }))))
+        h(RunForm, { value: advanced, onChange: setAdvanced, sessionSecretEnvVar, containers: profile.containers }))))
 }
 
 export function AvailableJobsPage() {
