@@ -5,6 +5,7 @@ import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
+import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
@@ -718,6 +719,55 @@ class KubernetesOrchestrationServiceIT {
         }
 
         assertThrows(StdioUnavailableException::class.java) { service.streamStdio(execution, "no-such-container") }
+    }
+
+    /**
+     * Per-container env (issue #73): `containerEnvironment` entries land on the containers they
+     * name, the flat `environment` keeps targeting the primary, and a per-container entry wins over
+     * a flat key on the same container. Asserted by exec-echoing the variables in each container.
+     */
+    @Test
+    fun containerEnvironmentReachesNamedContainers() {
+        val profile = service.findAvailableProfile("$namespace:$multiContainerTemplate")
+            ?: throw AssertionError("Profile '$namespace:$multiContainerTemplate' not found")
+
+        val execution = service.execute(JobRequest(
+            profile = profile,
+            environment = mapOf("CONDUCTOR_IT_FLAT" to "flat"),
+            containerEnvironment = mapOf(
+                MULTI_CONTAINER_PRIMARY to mapOf("CONDUCTOR_IT_FLAT" to "qualified-wins"),
+                MULTI_CONTAINER_SECONDARY to mapOf("CONDUCTOR_IT_SIDE" to "side-val"),
+            ),
+        )).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        fun envOf(container: String, variable: String): String =
+            service.streamStdio(execution, container, listOf("sh", "-c", "echo -n \$$variable")).use { stdio ->
+                stdio.stdout.bufferedReader().readText()
+            }
+
+        assertEquals(
+            envOf(MULTI_CONTAINER_SECONDARY, "CONDUCTOR_IT_SIDE"), "side-val",
+            "The sidecar never received its containerEnvironment entry"
+        )
+        assertEquals(
+            envOf(MULTI_CONTAINER_PRIMARY, "CONDUCTOR_IT_FLAT"), "qualified-wins",
+            "A per-container entry must win over the flat environment key on the same container"
+        )
+    }
+
+    /** An unknown container name fails the launch outright (issue #73) — never a silent drop. */
+    @Test
+    fun containerEnvironmentRejectsUnknownContainer() {
+        val profile = service.findAvailableProfile("$namespace:$multiContainerTemplate")
+            ?: throw AssertionError("Profile '$namespace:$multiContainerTemplate' not found")
+
+        assertThrows(UnknownContainerException::class.java) {
+            service.execute(JobRequest(
+                profile = profile,
+                containerEnvironment = mapOf("no-such-container" to mapOf("A" to "b")),
+            ))
+        }
     }
 
     private fun decodeExecutionId(id: String): Triple<String, String, String> {

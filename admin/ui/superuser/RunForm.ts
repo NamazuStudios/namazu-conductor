@@ -1,38 +1,18 @@
 import React from 'react'
 import { KVEditor, ListEditor, isBehavioralMetadataKey, RESERVED_METADATA_PREFIX } from './ui'
 import type { KVPair } from './ui'
-import type { PlacementInput } from './types'
+import type { ContainerRef, PlacementInput } from './types'
+import { TERMINAL_COMMAND_SUGGESTION, defaultAdvancedOptions } from './runOptions'
+import type { AdvancedOptions, EnvPair } from './runOptions'
+
+// Re-exported so existing importers of RunForm keep working; the implementations (and the tests)
+// live in the React-free runOptions.ts.
+export { TERMINAL_COMMAND_SUGGESTION, defaultAdvancedOptions }
+export type { AdvancedOptions, EnvPair }
 
 const h = React.createElement
 const inputClass = 'w-full rounded border bg-background px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary'
 const labelClass = 'block text-xs font-medium text-muted-foreground mb-1'
-
-export const TERMINAL_COMMAND_SUGGESTION = ['/bin/sh']
-
-export interface AdvancedOptions {
-  args: string[]
-  command: string[]
-  env: KVPair[]
-  metadata: KVPair[]
-  placement: PlacementInput
-  tty: boolean
-  /** Whether to add the operator's own session secret to `env` at launch time — see
-   * `namazu.conductor/session-secret-env`/`enable-session-secret` in kubernetes/README.md. Only
-   * meaningful (and only ever shown as a checkbox) when the profile declares an env var to put it in. */
-  injectSessionSecret: boolean
-}
-
-export function defaultAdvancedOptions(impliedTerminal: boolean, injectSessionSecretByDefault = false): AdvancedOptions {
-  return {
-    args: [],
-    command: impliedTerminal ? TERMINAL_COMMAND_SUGGESTION : [],
-    env: [],
-    metadata: [],
-    placement: { type: '', region: '', ip: '', lat: '', lon: '' },
-    tty: impliedTerminal,
-    injectSessionSecret: injectSessionSecretByDefault,
-  }
-}
 
 /**
  * The metadata overrides to actually send, or `undefined` when the operator added none.
@@ -57,20 +37,6 @@ export function deriveMetadataOverrides(metadata: KVPair[]): Record<string, stri
   return Object.keys(overrides).length > 0 ? overrides : undefined
 }
 
-/** `undefined` (omitted), not `[]`, when the caller never touched the field — see AvailableJobsPage. */
-export function derivePlacementList(placement: PlacementInput): unknown[] {
-  if (placement.type === 'REGION' && placement.region.trim()) {
-    return [{ type: 'REGION', region: placement.region.trim() }]
-  }
-  if (placement.type === 'IP_ADDRESS' && placement.ip.trim()) {
-    return [{ type: 'IP_ADDRESS', ip: placement.ip.trim() }]
-  }
-  if (placement.type === 'LAT_LON' && placement.lat && placement.lon) {
-    return [{ type: 'LAT_LON', latitude: parseFloat(placement.lat), longitude: parseFloat(placement.lon) }]
-  }
-  return []
-}
-
 /**
  * Plain controlled-fields editor for the advanced run options — no submit/cancel, no internal state,
  * no own `executeJob` call. The single "Run" button (in `AvailableJobsPage`'s `ProfileRow`) reads
@@ -81,8 +47,12 @@ export function RunForm(props: {
   onChange: (value: AdvancedOptions) => void
   /** Env var name from `namazu.conductor/session-secret-env` — absent hides the checkbox entirely. */
   sessionSecretEnvVar?: string
+  /** The profile's containers (issue #73); when it declares more than one, env rows get a
+   * container selector and the session-secret injection a per-container checkbox set. */
+  containers?: ContainerRef[]
 }) {
-  const { value, onChange, sessionSecretEnvVar } = props
+  const { value, onChange, sessionSecretEnvVar, containers } = props
+  const multiContainer = (containers?.length ?? 0) > 1
 
   const updateListItem = (key: 'args' | 'command', i: number, val: string) =>
     onChange({ ...value, [key]: value[key].map((v, j) => (j === i ? val : v)) })
@@ -93,6 +63,15 @@ export function RunForm(props: {
 
   const setPlacementField = (key: keyof PlacementInput) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, placement: { ...value.placement, [key]: e.target.value } })
+
+  const setEnvRow = (i: number, patch: Partial<EnvPair>) =>
+    onChange({ ...value, env: value.env.map((p, j) => (j === i ? { ...p, ...patch } : p)) })
+
+  const toggleSecretContainer = (container: string, checked: boolean) => {
+    const set = new Set(value.sessionSecretContainers)
+    if (checked) set.add(container); else set.delete(container)
+    onChange({ ...value, sessionSecretContainers: [...set] })
+  }
 
   function handleTtyToggle(e: React.ChangeEvent<HTMLInputElement>) {
     const checked = e.target.checked
@@ -124,13 +103,39 @@ export function RunForm(props: {
 
     h('div', null,
       h('label', { className: labelClass }, 'Environment variables'),
-      h(KVEditor, {
-        items: value.env,
-        onChangeKey: (i, v) => onChange({ ...value, env: value.env.map((p, j) => (j === i ? { ...p, key: v } : p)) }),
-        onChangeValue: (i, v) => onChange({ ...value, env: value.env.map((p, j) => (j === i ? { ...p, value: v } : p)) }),
-        onAdd: () => onChange({ ...value, env: [...value.env, { key: '', value: '' }] }),
-        onRemove: (i) => onChange({ ...value, env: value.env.filter((_, j) => j !== i) }),
-      })),
+      h('div', { className: 'space-y-1' },
+        value.env.map((pair, i) =>
+          h('div', { key: i, className: 'flex gap-1 items-center' },
+            multiContainer && h('select', {
+              className: `${inputClass} w-36 shrink-0`,
+              value: pair.container,
+              title: 'Container this variable is injected into',
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setEnvRow(i, { container: e.target.value }),
+            },
+              h('option', { value: '' }, 'primary (default)'),
+              containers!.map((c) => h('option', { key: c.id, value: c.id }, c.name))),
+            h('input', {
+              className: inputClass, placeholder: 'NAME', value: pair.key,
+              onChange: (e: React.ChangeEvent<HTMLInputElement>) => setEnvRow(i, { key: e.target.value }),
+            }),
+            h('input', {
+              className: inputClass, placeholder: 'value', value: pair.value,
+              onChange: (e: React.ChangeEvent<HTMLInputElement>) => setEnvRow(i, { value: e.target.value }),
+            }),
+            h('button', {
+              type: 'button', className: 'px-2 text-muted-foreground hover:text-destructive',
+              title: 'Remove',
+              onClick: () => onChange({ ...value, env: value.env.filter((_, j) => j !== i) }),
+            }, '✕'))),
+        h('button', {
+          type: 'button',
+          className: 'mt-1 px-2 py-0.5 text-xs rounded border border-border text-muted-foreground hover:bg-muted',
+          onClick: () => onChange({ ...value, env: [...value.env, { key: '', value: '', container: '' }] }),
+        }, '+ Add variable'),
+      ),
+      multiContainer && h('p', { className: 'text-xs text-muted-foreground mt-1' },
+        `'primary (default)' injects into the pod's first container; other values inject into the
+         named sidecar and are rejected with a 400 if the name doesn't exist`)),
 
     h('div', null,
       h('label', { className: labelClass }, 'Metadata overrides'),
@@ -173,13 +178,23 @@ export function RunForm(props: {
       h('span', { className: 'text-xs text-muted-foreground' },
         '(allocates a pty; attach a terminal from Running Jobs once it starts — Kubernetes jobs only)')),
 
-    sessionSecretEnvVar && h('label', { className: 'flex items-center gap-2 text-sm cursor-pointer' },
-      h('input', {
-        type: 'checkbox',
-        checked: value.injectSessionSecret,
-        onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, injectSessionSecret: e.target.checked }),
-      }),
-      h('span', null, 'Inject my session secret'),
-      h('span', { className: 'text-xs text-muted-foreground' },
-        `(sets $${sessionSecretEnvVar} to your current session secret — visible to anything running in the container)`)))
+    sessionSecretEnvVar && h('div', { className: 'text-sm' },
+      h('label', { className: 'flex items-center gap-2 cursor-pointer' },
+        h('input', {
+          type: 'checkbox',
+          checked: value.injectSessionSecret,
+          onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, injectSessionSecret: e.target.checked }),
+        }),
+        h('span', null, 'Inject my session secret'),
+        h('span', { className: 'text-xs text-muted-foreground' },
+          `(sets $${sessionSecretEnvVar} to your current session secret — visible to anything running in the targeted container(s))`)),
+      value.injectSessionSecret && multiContainer && h('div', { className: 'ml-6 mt-1 flex flex-wrap gap-3' },
+        containers!.map((c) =>
+          h('label', { key: c.id, className: 'flex items-center gap-1 text-xs cursor-pointer' },
+            h('input', {
+              type: 'checkbox',
+              checked: value.sessionSecretContainers.includes(c.primary ? '' : c.id),
+              onChange: (e: React.ChangeEvent<HTMLInputElement>) => toggleSecretContainer(c.primary ? '' : c.id, e.target.checked),
+            }),
+            c.primary ? 'primary (default)' : c.name)))))
 }

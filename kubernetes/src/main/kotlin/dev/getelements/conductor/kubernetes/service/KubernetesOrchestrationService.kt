@@ -19,6 +19,7 @@ import dev.getelements.conductor.RegionPlacement
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
+import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
 import dev.getelements.conductor.kubernetes.KubernetesDaemon
 import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
@@ -198,7 +199,8 @@ class KubernetesOrchestrationService @Inject constructor(
             .mapNotNull { toDaemon(it) }
 
     private fun toDaemon(template: PodTemplate): KubernetesDaemon? {
-        val container = template.template?.spec?.containers?.firstOrNull() ?: return null
+        val containers = template.template?.spec?.containers ?: emptyList()
+        val container = containers.firstOrNull() ?: return null
         val annotations = template.metadata?.annotations ?: emptyMap()
 
         if (workloadKindOf(annotations) != WorkloadKind.DAEMON) return null
@@ -209,6 +211,7 @@ class KubernetesOrchestrationService @Inject constructor(
             namespace = template.metadata?.namespace ?: namespace,
             templateName = templateName,
             primaryContainer = container.name,
+            containers = containerRefsFor(containers, annotations),
             exposePorts = annotations[ANN_EXPOSE_PORTS] ?: "",
             serviceType = annotations[ANN_SERVICE_TYPE]?.trim()?.ifBlank { null } ?: DEFAULT_SERVICE_TYPE,
             replicas = parseIntAnnotation(templateName, annotations, ANN_REPLICAS) ?: 1,
@@ -299,6 +302,7 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("PodTemplate '${profile.templateName}' has no pod spec")
 
         applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
+        applyContainerEnvironment(spec, request.containerEnvironment)
         applyPlacement(spec, request.placement)
         if (request.tty) applyTty(spec, profile.primaryContainer)
 
@@ -438,6 +442,7 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("PodTemplate '${profile.templateName}' has no pod spec")
 
         applyOverrides(spec, profile.primaryContainer, request.command, request.args, request.environment)
+        applyContainerEnvironment(spec, request.containerEnvironment)
         applyPlacement(spec, request.placement)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
@@ -1265,6 +1270,18 @@ class KubernetesOrchestrationService @Inject constructor(
         if (args.isNotEmpty()) container.args = args
 
         if (environment.isNotEmpty()) mergeEnv(container, environment)
+    }
+
+    /** Applies [JobRequest.containerEnvironment]/[DaemonRequest.containerEnvironment] — env merged
+     *  onto the *named* container (issue #73). Runs after [applyOverrides] so a per-container entry
+     *  wins over the flat primary-targeted [environment] on the same key. Any name that doesn't
+     *  match a container in the spec fails the launch before anything is created. */
+    private fun applyContainerEnvironment(spec: PodSpec, containerEnvironment: Map<String, Map<String, String>>) {
+        containerEnvironment.forEach { (name, values) ->
+            val container = spec.containers.firstOrNull { it.name == name }
+                ?: throw UnknownContainerException("Container '$name' not found in PodTemplate spec")
+            if (values.isNotEmpty()) mergeEnv(container, values)
+        }
     }
 
     /** Merges [values] into [container]'s env by name, preserving any entries already declared on the

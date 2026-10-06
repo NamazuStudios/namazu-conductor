@@ -5,6 +5,7 @@ import dev.getelements.conductor.DaemonRequest
 import dev.getelements.conductor.DaemonStatus
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
+import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MAX_REPLICAS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MIN_REPLICAS
@@ -366,6 +367,44 @@ class KubernetesDaemonOrchestrationServiceIT {
         service.undeploy(execution)
 
         assertThrows(JobException::class.java) { service.undeploy(execution) }
+    }
+
+    /**
+     * Per-container env, daemon parity with the job path (issue #73): `containerEnvironment` merges
+     * into the named container of the `Deployment`'s pod template, the flat `environment` keeps
+     * targeting the primary, and an unknown container name is refused before any Deployment exists.
+     */
+    @Test
+    fun containerEnvironmentMergesIntoDeploymentPodTemplate() {
+        val profile = service.findAvailableDaemon("$namespace:$fixedTemplate")
+            ?: throw AssertionError("Daemon profile '$namespace:$fixedTemplate' not found")
+
+        val deploymentsBefore = client.apps().deployments().inNamespace(namespace).list().items.size
+        assertThrows(UnknownContainerException::class.java) {
+            service.deploy(DaemonRequest(
+                profile = profile,
+                containerEnvironment = mapOf("no-such-container" to mapOf("A" to "b")),
+            ))
+        }
+        assertEquals(
+            client.apps().deployments().inNamespace(namespace).list().items.size, deploymentsBefore,
+            "A rejected containerEnvironment entry must not have created a Deployment"
+        )
+
+        val execution = service.deploy(DaemonRequest(
+            profile = profile,
+            environment = mapOf("CONDUCTOR_IT_FLAT" to "flat"),
+            containerEnvironment = mapOf("server" to mapOf("CONDUCTOR_IT_QUALIFIED" to "qualified")),
+        )).also { executions += it }
+        awaitStatus(execution, DaemonStatus.RUNNING)
+
+        val (_, _, name) = decodeIdForTest(execution.id)
+        val server = client.apps().deployments().inNamespace(namespace).withName(name).get()
+            ?.spec?.template?.spec?.containers.orEmpty()
+            .first { it.name == "server" }
+        val env = server.env.orEmpty().associate { it.name to it.value }
+        assertEquals(env["CONDUCTOR_IT_FLAT"], "flat", "Flat environment did not reach the primary container")
+        assertEquals(env["CONDUCTOR_IT_QUALIFIED"], "qualified", "Per-container entry did not reach the named container")
     }
 
     private fun awaitStatus(execution: DaemonExecution, target: DaemonStatus): DaemonExecution {

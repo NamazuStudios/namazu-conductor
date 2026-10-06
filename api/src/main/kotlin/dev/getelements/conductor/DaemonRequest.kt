@@ -26,8 +26,21 @@ data class DaemonRequest (
 
     /**
      * Environment variables to inject into the container at runtime, as a map of name to value.
+     * Targets the profile's primary (first) container only.
      */
     val environment : Map<String, String> = emptyMap(),
+
+    /**
+     * Environment variables injected into a *specific* container at runtime, keyed by container
+     * name — as reported by [dev.getelements.conductor.service.Daemon.containers] (a
+     * [dev.getelements.conductor.ContainerRef.id]). Additive, mirroring
+     * [dev.getelements.conductor.JobRequest.containerEnvironment]: [environment] keeps applying to
+     * the primary container, an empty map changes nothing, and an unknown container name fails the
+     * deploy outright with [dev.getelements.conductor.exception.UnknownContainerException] before
+     * anything is created. Precedence on the same container: profile-declared env, then
+     * [environment] (primary only), then the matching entry here.
+     */
+    val containerEnvironment : Map<String, Map<String, String>> = emptyMap(),
 
     /**
      * Optional [JobPlacement] hints that influence where the daemon is scheduled. Ignored if the

@@ -21,6 +21,7 @@ import dev.getelements.conductor.ecs.EcsJobProfile
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
+import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.service.Daemon
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
@@ -526,7 +527,20 @@ class EcsOrchestrationService @Inject constructor(
 
         val stdioToken = UUID.randomUUID().toString()
 
-        val envVars = (request.environment + mapOf(STDIO_TOKEN_ENV_VAR to stdioToken)).map { (k, v) ->
+        // Per-container env (issue #73): the profile only ever surfaces the task definition's
+        // primary container, so any named entry targeting a sidecar is refused before runTask —
+        // ECS sidecars aren't addressable (yet), and a silently dropped entry would strand the
+        // caller's credentials.
+        val unknownContainers = request.containerEnvironment.keys - profile.containerName
+        if (unknownContainers.isNotEmpty()) {
+            throw UnknownContainerException(
+                "Container(s) ${unknownContainers.sorted().joinToString()} not found in task definition " +
+                    "'${profile.id}'; this profile exposes only '${profile.containerName}'"
+            )
+        }
+
+        val envVars = (request.environment + (request.containerEnvironment[profile.containerName] ?: emptyMap())
+                + mapOf(STDIO_TOKEN_ENV_VAR to stdioToken)).map { (k, v) ->
             KeyValuePair.builder().name(k).value(v).build()
         }
 

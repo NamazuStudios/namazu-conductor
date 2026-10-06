@@ -217,6 +217,27 @@ When a Service is created (both `execute()` and `deploy()`), the primary contain
 
 Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
 
+Multi-container pods can receive caller-supplied env on any container via
+`JobRequest.containerEnvironment` (issue #73): a map keyed by container name (as listed in the
+profile's `containers`), whose values merge over that container's env. It is additive — the flat
+`environment` keeps applying to the primary container, and leaving the map empty changes nothing.
+On the same container and key, precedence is: the container's profile-declared env, then the flat
+`environment`, then the matching `containerEnvironment` entry. Naming a container that doesn't
+exist in the pod spec fails the launch outright with `UnknownContainerException` — nothing is
+created. `DaemonRequest.containerEnvironment` behaves identically for `daemon` workloads.
+
+```kotlin
+service.execute(
+    JobRequest(
+        profile = profile,
+        environment = mapOf("LOG_LEVEL" to "debug"),            // primary container
+        containerEnvironment = mapOf(
+            "agent-proxy" to mapOf("NAMAZU_CLOUD_SESSION_SECRET" to secret)  // sidecar
+        )
+    )
+)
+```
+
 Only `RegionPlacement` is honoured, mapped to a `topology.kubernetes.io/zone` node selector (zone is finer-grained than region; its `id` is the target zone). `IpPlacement` and `LatitudeLongitudePlacement` are silently ignored.
 
 ## Daemons

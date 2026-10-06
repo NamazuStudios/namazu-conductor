@@ -95,6 +95,11 @@ service.execute(
 )
 ```
 
+EdgeGap's environment is deployment-wide — an app version has no per-container addressing — so
+`JobRequest.containerEnvironment` is **not supported**: any named entry is rejected with
+`UnknownContainerException` before the deploy request is sent. Use `environment` for everything;
+it reaches whichever containers the app version runs.
+
 ### Passing a custom command
 
 `JobRequest.command` and `JobRequest.args` are concatenated (command first, then args) and sent as the `command` field in the EdgeGap deploy request, overriding the container's default entrypoint command.

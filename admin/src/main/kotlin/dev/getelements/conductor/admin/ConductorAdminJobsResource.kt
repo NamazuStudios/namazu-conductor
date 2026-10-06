@@ -143,7 +143,7 @@ class ConductorAdminJobsResource @Inject constructor(
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     @ApiResponse(responseCode = "200", description = "Job submitted. Returns a JobExecution with id, status, and any initial endpoints.")
-    @ApiResponse(responseCode = "400", description = "The request's metadata carries a behavioural namazu.conductor key (workload selection, scoping, or tuning keys that drive what Conductor creates).")
+    @ApiResponse(responseCode = "400", description = "The request's metadata carries a behavioural namazu.conductor key (workload selection, scoping, or tuning keys that drive what Conductor creates), or containerEnvironment names a container the profile doesn't declare.")
     @ApiResponse(responseCode = "403", description = "Not authenticated, vetoed by a JobAccessPolicy, or insufficient privilege level.")
     @ApiResponse(responseCode = "404", description = "Element or profile not found.")
     @ApiResponse(responseCode = "500", description = "The provider accepted the request but execution failed.")
@@ -191,11 +191,26 @@ class ConductorAdminJobsResource @Inject constructor(
                 .build()
         }
 
+        // Same fail-fast-into-400 pattern for per-container env (issue #73): a container name the
+        // profile doesn't declare is a malformed request, not a provider fault. Validation runs
+        // again provider-side against the live workload spec (the backstop), but the profile's
+        // container list is authoritative enough here to save the caller a round trip.
+        val containerEnvironment = request.containerEnvironment ?: emptyMap()
+        val knownContainers = profile.containers.map { it.id }.toSet()
+        val unknownContainers = containerEnvironment.keys - knownContainers
+        if (unknownContainers.isNotEmpty()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to ("Unknown container(s) ${unknownContainers.sorted().joinToString()}; " +
+                    "this profile declares: ${knownContainers.sorted().joinToString()}")))
+                .build()
+        }
+
         val jobRequest = JobRequest(
             profile     = profile,
             args        = request.args ?: emptyList(),
             command     = effectiveCommand,
             environment = request.environment ?: emptyMap(),
+            containerEnvironment = request.containerEnvironment ?: emptyMap(),
             placement   = request.placement?.map { it.toPlacement() } ?: emptyList(),
             tty         = effectiveTty,
             metadata    = metadataOverrides

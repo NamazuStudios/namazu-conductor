@@ -24,6 +24,7 @@ import dev.getelements.conductor.edgegap.model.EdgeGapGeoIp
 import dev.getelements.conductor.edgegap.model.EdgeGapStatusResponse
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.StdioUnavailableException
+import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
 import jakarta.ws.rs.client.Client
@@ -167,6 +168,17 @@ class EdgeGapOrchestrationService @Inject constructor(
             ?: throw JobException("JobProfile must be an ${EdgeGapJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val stdioToken = UUID.randomUUID().toString()
+
+        // Per-container env (issue #73): EdgeGap's env is deployment-wide — an appSpec/version has
+        // no container addressing at all — so ANY named entry is refused before the deploy request
+        // is sent. Deployment-wide env goes through JobRequest.environment.
+        if (request.containerEnvironment.isNotEmpty()) {
+            throw UnknownContainerException(
+                "EdgeGap does not support per-container environment overrides " +
+                    "(requested: ${request.containerEnvironment.keys.sorted().joinToString()}); " +
+                    "env must go through JobRequest.environment, which applies deployment-wide"
+            )
+        }
 
         val deployRequest = EdgeGapDeployRequest(
             appName = profile.appName,

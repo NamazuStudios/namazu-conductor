@@ -1,5 +1,7 @@
 package dev.getelements.conductor.service
 
+import dev.getelements.conductor.ContainerRef
+
 /**
  * Describes a pre-configured daemon template available on a [DaemonOrchestrationService]. Each
  * [DaemonOrchestrationService] exposes its own set of daemons via
@@ -14,6 +16,16 @@ interface Daemon {
      * The unique identifier of this [Daemon] within its [DaemonOrchestrationService].
      */
     val id: String;
+
+    /**
+     * The containers a deployment of this [Daemon] will have. Mirrors
+     * [JobProfile.containers]: providers that only ever run a single container per workload return
+     * a single-element list with that container marked [ContainerRef.primary]; providers that
+     * support multiple containers (e.g. Kubernetes pods with sidecars) return one entry per
+     * container. Defaults to empty for providers without the concept — the container names
+     * [dev.getelements.conductor.DaemonRequest.containerEnvironment] keys against come from here.
+     */
+    val containers: List<ContainerRef> get() = emptyList()
 
     /**
      * An optional friendly display name for this daemon, shown by generic consumers (the admin
