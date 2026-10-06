@@ -396,7 +396,16 @@ class KubernetesOrchestrationService @Inject constructor(
                 )
         }
 
-        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef)
+        // A Service-create failure rolls the workload back (issue #77) — see
+        // createServiceIfRequested. Only POD/JOB reach this point; the when above throws for
+        // DAEMON/HELM, so the else branch here is exactly the JOB path.
+        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
+            if (profile.workloadKind == WorkloadKind.POD) {
+                client.pods().inNamespace(namespace).withName(runName).delete()
+            } else {
+                client.batch().v1().jobs().inNamespace(namespace).withName(runName).delete()
+            }
+        }
 
         return JobExecution(
             id = encodeId(namespace, profile.workloadKind, runName),
@@ -487,7 +496,11 @@ class KubernetesOrchestrationService @Inject constructor(
             .withBlockOwnerDeletion(true)
             .build()
 
-        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef)
+        // A Service-create failure rolls the Deployment back (issue #77) — see
+        // createServiceIfRequested.
+        createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
+            client.apps().deployments().inNamespace(namespace).withName(runName).delete()
+        }
 
         if (profile.minReplicas != null && profile.maxReplicas != null) {
             createHpa(
@@ -540,8 +553,20 @@ class KubernetesOrchestrationService @Inject constructor(
 
         logger.debug("undeploy(): deleted Deployment '{}' in namespace '{}'", name, ns)
 
-        // Delete any owned Service. No-op when none was created.
-        client.services().inNamespace(ns).withName(name).delete()
+        // Best-effort deletion of the owned Service (issue #77): the Deployment teardown above has
+        // already succeeded, and the Service is owner-ref'd to it (Kubernetes GC removes it
+        // asynchronously), so a failure here — an RBAC 403, which the API server raises before any
+        // object-existence check, or an already-gone race — must not turn a successful undeploy
+        // into a reported failure. Mirrors the best-effort HorizontalPodAutoscaler deletion above.
+        runCatching {
+            client.services().inNamespace(ns).withName(name).delete()
+        }.onFailure {
+            logger.warn(
+                "undeploy(): failed to delete Service '{}' in namespace '{}' (the Deployment itself is gone; " +
+                    "the owner-ref'd Service will be garbage-collected): {}",
+                name, ns, it.message
+            )
+        }
     }
 
     /**
@@ -975,8 +1000,22 @@ class KubernetesOrchestrationService @Inject constructor(
 
         logger.debug("stop(): deleted {} '{}' in namespace '{}'", kind, name, ns)
 
-        // Delete any owned Service. No-op when none was created.
-        client.services().inNamespace(ns).withName(name).delete()
+        // Best-effort deletion of the owned Service (issue #77): the workload teardown above has
+        // already succeeded, and the Service is owner-ref'd to the workload (Kubernetes GC removes
+        // it asynchronously), so a failure here — an RBAC 403, which the API server raises before
+        // any object-existence check (the live production failure behind namazu-agent-opencode
+        // reporting "Failed to stop" while the Job was genuinely gone), or an already-gone race —
+        // must not turn a successful stop into a reported failure. Mirrors the best-effort
+        // HorizontalPodAutoscaler deletion in undeploy().
+        runCatching {
+            client.services().inNamespace(ns).withName(name).delete()
+        }.onFailure {
+            logger.warn(
+                "stop(): failed to delete Service '{}' in namespace '{}' (the workload itself is gone; " +
+                    "the owner-ref'd Service will be garbage-collected): {}",
+                name, ns, it.message
+            )
+        }
     }
 
     /**
@@ -1199,12 +1238,19 @@ class KubernetesOrchestrationService @Inject constructor(
     private fun locatePod(ns: String, jobName: String): Pod? =
         client.pods().inNamespace(ns).withLabel(LABEL_OWNED_BY, jobName).list().items.firstOrNull()
 
+    /**
+     * Creates the workload's `Service` when the profile declares `expose-ports`, and — on create
+     * failure — runs [rollback] so a failed [execute]/[deploy] cannot orphan a running workload
+     * behind it (issue #77). The rollback itself is best-effort: it is logged on failure, never
+     * allowed to mask the Service-create error that caused it, which is always rethrown verbatim.
+     */
     private fun createServiceIfRequested(
         exposePorts: String,
         serviceType: String,
         namespace: String,
         runName: String,
-        ownerRef: OwnerReference
+        ownerRef: OwnerReference,
+        rollback: () -> Unit
     ) {
         val ports = parseExposePorts(exposePorts)
         if (ports.isEmpty()) return
@@ -1234,7 +1280,21 @@ class KubernetesOrchestrationService @Inject constructor(
             .endSpec()
             .build()
 
-        client.services().inNamespace(namespace).resource(service).create()
+        try {
+            client.services().inNamespace(namespace).resource(service).create()
+        } catch (e: Exception) {
+            // The workload was created first (the Service's ownerReference needs its UID), so a
+            // Service-create failure here would otherwise leave it running behind a launch the
+            // caller was told failed — the live production shape that turned the RBAC gap of
+            // namazu-cloud-instance#57 into an orphaned Job. Best-effort rollback; never mask `e`.
+            runCatching(rollback).onFailure { rollbackFailure ->
+                logger.warn(
+                    "Failed to roll back workload '{}' after Service-create failure in namespace '{}'; it may be orphaned",
+                    runName, namespace, rollbackFailure
+                )
+            }
+            throw e
+        }
     }
 
     private fun containerRefsFor(containers: List<Container>, annotations: Map<String, String>): List<ContainerRef> =

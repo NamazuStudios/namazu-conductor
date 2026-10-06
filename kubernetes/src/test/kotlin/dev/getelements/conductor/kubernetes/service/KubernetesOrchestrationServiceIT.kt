@@ -16,7 +16,16 @@ import io.fabric8.kubernetes.api.model.ContainerBuilder
 import io.fabric8.kubernetes.api.model.NamespaceBuilder
 import io.fabric8.kubernetes.api.model.PodTemplate
 import io.fabric8.kubernetes.api.model.PodTemplateBuilder
+import io.fabric8.kubernetes.api.model.SecretBuilder
+import io.fabric8.kubernetes.api.model.ServiceAccountBuilder
+import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder
+import io.fabric8.kubernetes.api.model.rbac.PolicyRule
+import io.fabric8.kubernetes.api.model.rbac.PolicyRuleBuilder
+import io.fabric8.kubernetes.api.model.rbac.RoleBuilder
+import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder
+import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder
+import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
@@ -38,6 +47,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.Base64
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -117,6 +127,7 @@ class KubernetesOrchestrationServiceIT {
     private val loadBalancerTemplate get() = "conductor-it-lb-$runSuffix"
     private val jobTemplate get() = "conductor-it-job-$runSuffix"
     private val multiContainerTemplate get() = "conductor-it-multi-$runSuffix"
+    private val serviceGuardTemplate get() = "conductor-it-svcguard-$runSuffix"
     private lateinit var runSuffix: String
 
     private var podPort: Int = 80
@@ -126,6 +137,13 @@ class KubernetesOrchestrationServiceIT {
     private var timeoutMinutes: Long = 5
 
     private val executions = mutableListOf<JobExecution>()
+
+    /** Names of the restricted ServiceAccounts (plus their Role/RoleBinding/Secret companions)
+     *  created by the issue-#77 tests, all deleted in teardown. */
+    private val restrictedIdentities = mutableListOf<String>()
+
+    /** Kubernetes clients authenticating as [restrictedIdentities], closed in teardown. */
+    private val restrictedClients = mutableListOf<KubernetesClient>()
 
     /** Second namespace created by the discovery=any test, deleted in teardown. Null when unused. */
     private var altNamespaceCreated: String? = null
@@ -169,10 +187,11 @@ class KubernetesOrchestrationServiceIT {
         createServerTemplate(loadBalancerTemplate, "LoadBalancer")
         createJobTemplate(jobTemplate)
         createMultiContainerTemplate(multiContainerTemplate)
+        createJobWithServiceTemplate(serviceGuardTemplate)
 
         logger.info(
-            "Created PodTemplates in namespace '{}': {}, {}, {}, {}",
-            namespace, nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate
+            "Created PodTemplates in namespace '{}': {}, {}, {}, {}, {}",
+            namespace, nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate, serviceGuardTemplate
         )
     }
 
@@ -192,9 +211,16 @@ class KubernetesOrchestrationServiceIT {
             // sibling setUp racing the terminating namespace gets spurious "NamespaceTerminating" 403s.
             // Deleting only the templates this class created is sufficient; the namespace itself is
             // harmless to leave behind on an ephemeral CI cluster.
-            listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate).forEach { name ->
+            listOf(nodePortTemplate, loadBalancerTemplate, jobTemplate, multiContainerTemplate, serviceGuardTemplate).forEach { name ->
                 runCatching { client.resources(PodTemplate::class.java).inNamespace(namespace).withName(name).delete() }
                     .onFailure { logger.warn("Failed to delete PodTemplate '{}'", name, it) }
+            }
+            restrictedIdentities.forEach { name ->
+                runCatching { client.services().inNamespace(namespace).withName(name).delete() }
+                runCatching { client.secrets().inNamespace(namespace).withName("$name-token").delete() }
+                runCatching { client.rbac().roleBindings().inNamespace(namespace).withName("$name-binding").delete() }
+                runCatching { client.rbac().roles().inNamespace(namespace).withName("$name-role").delete() }
+                runCatching { client.serviceAccounts().inNamespace(namespace).withName(name).delete() }
             }
             altNamespaceCreated?.let { alt ->
                 runCatching { client.namespaces().withName(alt).delete() }
@@ -203,6 +229,7 @@ class KubernetesOrchestrationServiceIT {
         }
 
         if (::executor.isInitialized) executor.shutdownNow()
+        restrictedClients.forEach { runCatching { it.close() } }
         if (::client.isInitialized) client.close()
     }
 
@@ -537,7 +564,10 @@ class KubernetesOrchestrationServiceIT {
         return latest
     }
 
-    private fun buildClient(): KubernetesClient {
+    private fun buildClient(): KubernetesClient = KubernetesClientBuilder().withConfig(buildBaseConfig()).build()
+
+    /** The shared kubeconfig-derived base [Config] (env-overridden), before per-identity tweaks. */
+    private fun buildBaseConfig(): Config {
         val context = System.getenv("KUBERNETES_IT_CONTEXT")
         val kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG")
 
@@ -548,8 +578,149 @@ class KubernetesOrchestrationServiceIT {
         }
 
         System.getenv("KUBERNETES_IT_MASTER_URL")?.takeIf { it.isNotBlank() }?.let { config.masterUrl = it }
+        return config
+    }
 
-        return KubernetesClientBuilder().withConfig(config).build()
+    /**
+     * Creates a ServiceAccount + Role + RoleBinding in the test namespace granting exactly
+     * [rules], mints a long-lived token Secret for it, waits for RBAC propagation via a
+     * SelfSubjectAccessReview against [awaitVerb]/[awaitResource], and returns a
+     * [KubernetesOrchestrationService] whose Kubernetes client authenticates as that restricted
+     * identity. Mirrors the production control-plane SA whose ClusterRole granted `services`
+     * read-only — the shape that made bare Service deletes 403 on every stop (issue #77).
+     */
+    private fun restrictedConductorService(
+        name: String,
+        rules: List<PolicyRule>,
+        awaitVerb: String,
+        awaitResource: String,
+        awaitGroup: String = "",
+        denyVerb: String? = null,
+        denyResource: String? = null,
+        denyGroup: String = ""
+    ): KubernetesOrchestrationService {
+        client.serviceAccounts().inNamespace(namespace).resource(
+            ServiceAccountBuilder().withNewMetadata().withName(name).endMetadata().build()
+        ).create()
+
+        // Long-lived (Secret-based) SA token: the token controller fills data["token"] shortly
+        // after the annotated Secret is created. Unlike TokenRequest tokens it never expires
+        // mid-suite.
+        val secretName = "$name-token"
+        client.secrets().inNamespace(namespace).resource(
+            SecretBuilder()
+                .withNewMetadata()
+                    .withName(secretName)
+                    .addToAnnotations("kubernetes.io/service-account.name", name)
+                .endMetadata()
+                .withType("kubernetes.io/service-account-token")
+                .build()
+        ).create()
+
+        val token = (1..30).firstNotNullOfOrNull { attempt ->
+            if (attempt > 1) Thread.sleep(1000)
+            client.secrets().inNamespace(namespace).withName(secretName).get()?.data?.get("token")
+                ?.let { String(Base64.getDecoder().decode(it)) }
+        } ?: throw IllegalStateException("ServiceAccount token Secret '$secretName' was never populated")
+
+        client.rbac().roles().inNamespace(namespace).resource(
+            RoleBuilder()
+                .withNewMetadata().withName("$name-role").endMetadata()
+                .withRules(rules)
+                .build()
+        ).create()
+
+        client.rbac().roleBindings().inNamespace(namespace).resource(
+            RoleBindingBuilder()
+                .withNewMetadata().withName("$name-binding").endMetadata()
+                .withRoleRef(
+                    RoleRefBuilder()
+                        .withApiGroup("rbac.authorization.k8s.io").withKind("Role").withName("$name-role").build()
+                )
+                .withSubjects(
+                    SubjectBuilder().withKind("ServiceAccount").withName(name).withNamespace(namespace).build()
+                )
+                .build()
+        ).create()
+
+        restrictedIdentities += name
+
+        // The RBAC authorizer reads an informer cache: poll SelfSubjectAccessReviews (performed as
+        // the restricted identity itself) until the binding's grants are visible AND — when a deny
+        // is requested — until the un-granted verb is confirmed absent. The deny gate is what
+        // catches a mis-scoped identity: if the base kubeconfig's client credentials survived the
+        // override (mTLS wins at the TLS layer), every SSAR would answer as the cluster admin.
+        KubernetesClientBuilder().withConfig(
+            buildBaseConfig().apply {
+                oauthToken = token
+                username = null
+                password = null
+                clientCertData = null
+                clientKeyData = null
+                clientCertFile = null
+                clientKeyFile = null
+                namespace = namespace
+            }
+        ).build().use { reviewClient ->
+            fun allowed(group: String, verb: String, resource: String): Boolean = runCatching {
+                reviewClient.authorization().v1().selfSubjectAccessReview().create(
+                    SelfSubjectAccessReviewBuilder()
+                        .withNewSpec()
+                            .withNewResourceAttributes()
+                                .withNamespace(namespace)
+                                .withGroup(group)
+                                .withVerb(verb)
+                                .withResource(resource)
+                            .endResourceAttributes()
+                        .endSpec()
+                        .build()
+                ).status
+            }.onFailure {
+                logger.warn("SSAR for {} {} {} as '{}' failed: {}", group, verb, resource, name, it.toString())
+            }.getOrNull()?.let { it.allowed && it.denied != true } ?: false
+
+            (1..30).firstOrNull { attempt ->
+                if (attempt > 1) Thread.sleep(1000)
+                val granted = allowed(awaitGroup, awaitVerb, awaitResource)
+                val denied = denyVerb == null || denyResource == null || !allowed(denyGroup, denyVerb, denyResource)
+                if (!(granted && denied)) {
+                    logger.info(
+                        "RBAC gate for '{}' attempt {}: {} {} {} granted={}; {} {} {} not-granted={}",
+                        name, attempt, awaitGroup, awaitVerb, awaitResource, granted, denyGroup, denyVerb, denyResource, denied
+                    )
+                }
+                granted && denied
+            } ?: throw IllegalStateException(
+                "RBAC identity '$name' never converged (granted $awaitGroup/$awaitVerb/$awaitResource" +
+                    (if (denyVerb != null && denyResource != null) ", denied $denyGroup/$denyVerb/$denyResource" else "") +
+                    ") — check that the kubeconfig's client credentials were fully overridden"
+            )
+        }
+
+        val restrictedClient = KubernetesClientBuilder().withConfig(
+            buildBaseConfig().apply {
+                oauthToken = token
+                username = null
+                password = null
+                clientCertData = null
+                clientKeyData = null
+                clientCertFile = null
+                clientKeyFile = null
+                namespace = namespace
+            }
+        ).build().also { restrictedClients += it }
+
+        return KubernetesOrchestrationService(
+            namespace = namespace,
+            jobSet = jobSet,
+            jobSetName = jobSet,
+            jobSetDescription = "",
+            pollInterval = "3000",
+            watchEnabled = "false",
+            kubeconfigPath = "",
+            client = restrictedClient,
+            executor = executor
+        )
     }
 
     private fun ensureNamespace() {
@@ -622,6 +793,32 @@ class KubernetesOrchestrationServiceIT {
             .endTemplate()
             .build()
         client.resources(PodTemplate::class.java).inNamespace(ns).resource(template).create()
+    }
+
+    /** A one-off job template that also declares `expose-ports` — the shape whose Service-create
+     *  and Service-delete paths the restricted-identity tests (issue #77) exercise. */
+    private fun createJobWithServiceTemplate(name: String) {
+        val template = PodTemplateBuilder()
+            .withNewMetadata()
+                .withName(name)
+                .withNamespace(namespace)
+                .addToLabels(LABEL_JOB_SET, jobSet)
+                .addToAnnotations(ANN_WORKLOAD_KIND, "job")
+                .addToAnnotations(ANN_EXPOSE_PORTS, "$podPort/$podProtocol")
+                .addToAnnotations(ANN_SERVICE_TYPE, "ClusterIP")
+            .endMetadata()
+            .withNewTemplate()
+                .withNewSpec()
+                    .withRestartPolicy("Never")
+                    .addNewContainer()
+                        .withName("worker")
+                        .withImage(jobImage)
+                        .withCommand(jobCommand)
+                    .endContainer()
+                .endSpec()
+            .endTemplate()
+            .build()
+        client.resources(PodTemplate::class.java).inNamespace(namespace).resource(template).create()
     }
 
     /** A one-off job template carrying arbitrary non-Conductor annotations, for the metadata test. */
@@ -768,6 +965,104 @@ class KubernetesOrchestrationServiceIT {
                 profile = profile,
                 containerEnvironment = mapOf("no-such-container" to mapOf("A" to "b")),
             ))
+        }
+    }
+
+    /**
+     * A Service-create failure at dispatch rolls the just-created workload back (issue #77): the
+     * launch fails with the Service error and **no Job is left running behind it**. Simulated the
+     * way it happened live in production (namazu-cloud-instance#57): a service account whose
+     * ClusterRole granted `services` read-only — exactly the pre-fix control-plane shape — so the
+     * Service create 403s after the Job create already succeeded.
+     */
+    @Test
+    fun serviceCreateFailureRollsBackWorkload() {
+        val restricted = restrictedConductorService(
+            name = "conductor-it-svccreate-deny-$runSuffix",
+            rules = listOf(
+                PolicyRuleBuilder()
+                    .withApiGroups("").withResources("pods", "podtemplates", "services", "endpoints")
+                    .withVerbs("get", "list", "watch").build(),
+                PolicyRuleBuilder()
+                    .withApiGroups("batch").withResources("jobs")
+                    .withVerbs("get", "list", "watch", "create", "delete").build(),
+            ),
+            awaitVerb = "create",
+            awaitResource = "jobs",
+            awaitGroup = "batch",
+            denyVerb = "create",
+            denyResource = "services"
+        )
+        val profile = restricted.findAvailableProfile("$namespace:$serviceGuardTemplate")
+            ?: throw AssertionError("Profile '$namespace:$serviceGuardTemplate' not found")
+
+        try {
+            restricted.execute(JobRequest(profile = profile))
+            throw AssertionError("execute() must fail when the Service create is forbidden")
+        } catch (e: KubernetesClientException) {
+            assertEquals(403, e.code)
+            assertTrue(
+                e.message?.contains("services") == true,
+                "The failure must name the Service create: ${e.message}"
+            )
+        }
+
+        val leftovers = client.batch().v1().jobs().inNamespace(namespace)
+            .withLabel(LABEL_OWNED_BY).list().items
+            .filter { it.metadata.name.startsWith("$serviceGuardTemplate-") }
+        assertTrue(
+            leftovers.isEmpty(),
+            "A Service-create failure must not leave the workload behind: ${leftovers.map { it.metadata.name }}"
+        )
+    }
+
+    /**
+     * A Service-delete failure after a successful workload teardown must not fail the stop (issue
+     * #77): the Job is gone and `stop()` returns normally even though the Service delete 403s —
+     * the live production failure that made the admin panel report "Failed to stop job" for a
+     * stop that had actually succeeded. Simulated with a service account allowed to CREATE
+     * services but not to DELETE them. The stranded Service is GC'd with the Job (ownerReference)
+     * and only asserted opportunistically: its collection is asynchronous, so its absence cannot
+     * be asserted reliably.
+     */
+    @Test
+    fun stopSucceedsWhenServiceDeleteIsForbidden() {
+        val restricted = restrictedConductorService(
+            name = "conductor-it-svcdelete-deny-$runSuffix",
+            rules = listOf(
+                PolicyRuleBuilder()
+                    .withApiGroups("").withResources("pods", "podtemplates", "endpoints")
+                    .withVerbs("get", "list", "watch").build(),
+                PolicyRuleBuilder()
+                    .withApiGroups("").withResources("services")
+                    .withVerbs("get", "list", "watch", "create").build(),
+                PolicyRuleBuilder()
+                    .withApiGroups("batch").withResources("jobs")
+                    .withVerbs("get", "list", "watch", "create", "delete").build(),
+            ),
+            awaitVerb = "create",
+            awaitResource = "services",
+            denyVerb = "delete",
+            denyResource = "services"
+        )
+        val profile = restricted.findAvailableProfile("$namespace:$serviceGuardTemplate")
+            ?: throw AssertionError("Profile '$namespace:$serviceGuardTemplate' not found")
+
+        val execution = restricted.execute(JobRequest(profile = profile))
+        val runName = decodeExecutionId(execution.id).third
+
+        restricted.stop(execution)
+
+        assertNull(
+            client.batch().v1().jobs().inNamespace(namespace).withName(runName).get(),
+            "The Job itself must be deleted"
+        )
+        client.services().inNamespace(namespace).withName(runName).get()?.let { stranded ->
+            logger.info(
+                "Service '{}' still present after the forbidden delete, as expected (it will be GC'd with the Job's ownerReference); labels: {}",
+                runName, stranded.metadata.labels
+            )
+            client.services().inNamespace(namespace).withName(runName).delete()
         }
     }
 
