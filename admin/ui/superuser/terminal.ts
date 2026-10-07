@@ -432,8 +432,22 @@ class TerminalSessionManager {
       session.term.reset()
       this.notify()
     }
+    // The initial fit() runs before the WebSocket is open (panel mount precedes the handshake), and
+    // term.onResize only fires on changes — so without this the remote pty would stay at its default
+    // 80x24 for the whole session: bash runs with wrong $COLUMNS/$LINES and never receives SIGWINCH
+    // (issue #85). The first binary frame is the only reliable proof that server-side stdio is open
+    // (the auth exchange has completed), so the current size is sent exactly once at that point;
+    // every later resize flows through the onResize handler below.
+    let initialResizeSent = false
     ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) session.term.write(new Uint8Array(event.data))
+      if (event.data instanceof ArrayBuffer) {
+        if (!initialResizeSent) {
+          initialResizeSent = true
+          if (ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: 'resize', cols: session.term.cols, rows: session.term.rows }))
+        }
+        session.term.write(new Uint8Array(event.data))
+      }
     }
     ws.onclose = (event) => {
       session.status = 'closed'
