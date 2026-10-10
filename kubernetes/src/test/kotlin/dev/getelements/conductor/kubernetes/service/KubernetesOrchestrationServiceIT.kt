@@ -1195,6 +1195,12 @@ class KubernetesOrchestrationServiceIT {
     fun secretRefUnknownNameFailsBeforeAnythingIsCreated() {
         val profile = service.findAvailableProfile("$namespace:$jobTemplate")
             ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+        // The failed launch must not change the set of owned jobs. Snapshotted rather than
+        // checked for emptiness: other tests in this suite legitimately leave completed jobs
+        // behind (cleaned up at class teardown / by TTL GC asynchronously), so an absolute
+        // emptiness check would false-fail on suite ordering.
+        val jobsBefore = client.batch().v1().jobs().inNamespace(namespace)
+            .withLabel(LABEL_OWNED_BY).list().items.map { it.metadata.name }.toSet()
         try {
             service.execute(JobRequest(
                 profile = profile,
@@ -1204,10 +1210,9 @@ class KubernetesOrchestrationServiceIT {
         } catch (e: JobException) {
             // expected — nothing was created
         }
-        val leftovers = client.batch().v1().jobs().inNamespace(namespace)
-            .withLabel(LABEL_OWNED_BY).list().items
-            .filter { it.metadata.name.startsWith("$jobTemplate-") }
-        assertTrue(leftovers.isEmpty(), "A failed launch must not leave the workload behind")
+        val jobsAfter = client.batch().v1().jobs().inNamespace(namespace)
+            .withLabel(LABEL_OWNED_BY).list().items.map { it.metadata.name }.toSet()
+        assertEquals(jobsBefore, jobsAfter, "A failed launch must not leave the workload behind")
     }
 
     /** A SecretRef's envKey colliding with a literal env override fails before anything is created. */
@@ -1217,6 +1222,8 @@ class KubernetesOrchestrationServiceIT {
         try {
             val profile = service.findAvailableProfile("$namespace:$jobTemplate")
                 ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+            val jobsBefore = client.batch().v1().jobs().inNamespace(namespace)
+                .withLabel(LABEL_OWNED_BY).list().items.map { it.metadata.name }.toSet()
             try {
                 service.execute(JobRequest(
                     profile = profile,
@@ -1227,10 +1234,9 @@ class KubernetesOrchestrationServiceIT {
             } catch (e: JobException) {
                 // expected — nothing was created
             }
-            val leftovers = client.batch().v1().jobs().inNamespace(namespace)
-                .withLabel(LABEL_OWNED_BY).list().items
-                .filter { it.metadata.name.startsWith("$jobTemplate-") }
-            assertTrue(leftovers.isEmpty(), "A failed launch must not leave the workload behind")
+            val jobsAfter = client.batch().v1().jobs().inNamespace(namespace)
+                .withLabel(LABEL_OWNED_BY).list().items.map { it.metadata.name }.toSet()
+            assertEquals(jobsBefore, jobsAfter, "A failed launch must not leave the workload behind")
         } finally {
             runCatching { secretStore.delete(secretName) }
         }

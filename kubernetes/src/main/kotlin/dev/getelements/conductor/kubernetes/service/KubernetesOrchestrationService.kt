@@ -337,6 +337,12 @@ class KubernetesOrchestrationService @Inject constructor(
         // `spec.template` block, a different and much smaller set of annotations.)
         val metadata = Metadata.merge(profile.metadata, request.metadata)
 
+        // Secret refs resolve BEFORE anything is created: pre-creation validation (unknown
+        // name, unknown container, env-key collision) must reject the launch with no workload
+        // left behind, and the injected env must be part of the spec the workload is created
+        // from — mutating the spec after create() has no effect server-side.
+        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
+
         val ownerRef = when (profile.workloadKind) {
             WorkloadKind.POD -> {
                 val pod = PodBuilder()
@@ -412,8 +418,9 @@ class KubernetesOrchestrationService @Inject constructor(
 
         // A Service-create failure rolls the workload back (issue #77) — see
         // createServiceIfRequested. Only POD/JOB reach this point; the when above throws for
-        // DAEMON/HELM, so the else branch here is exactly the JOB path.
-        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
+        // DAEMON/HELM, so the else branch here is exactly the JOB path. Secret refs resolved
+        // earlier (pre-creation, see above); the copies land here, after creation, so they can
+        // carry the workload's ownerReference.
         createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
             if (profile.workloadKind == WorkloadKind.POD) {
                 client.pods().inNamespace(namespace).withName(runName).delete()
@@ -484,6 +491,11 @@ class KubernetesOrchestrationService @Inject constructor(
         val templateLabels = podTemplateSpec.metadata?.labels ?: emptyMap()
         val metadata = Metadata.merge(profile.metadata, request.metadata)
 
+        // Secret refs resolve BEFORE anything is created (same discipline as execute() — see
+        // the comment there): pre-creation validation, and the injected env must be part of
+        // the spec the Deployment is created from.
+        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
+
         val podMeta = ObjectMetaBuilder()
             .addToLabels(templateLabels)
             .addToLabels(LABEL_OWNED_BY, runName)
@@ -519,8 +531,8 @@ class KubernetesOrchestrationService @Inject constructor(
             .build()
 
         // A Service-create failure rolls the Deployment back (issue #77) — see
-        // createServiceIfRequested.
-        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
+        // createServiceIfRequested. Secret refs resolved earlier (pre-creation, see above); the
+        // copies land here, after creation, so they can carry the Deployment's ownerReference.
         createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
             client.apps().deployments().inNamespace(namespace).withName(runName).delete()
         }
