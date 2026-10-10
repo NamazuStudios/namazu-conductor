@@ -257,10 +257,19 @@ class KubernetesOrchestrationService @Inject constructor(
      * The annotation block read back off a live `Job` or `Deployment`: the workload's inner
      * `spec.template` block — where dispatch writes the merged declared set and where the pod's
      * annotations actually live — with the workload's **top-level** `metadata.annotations` overlaid
-     * on top. Top-level wins because that is where callers annotate at runtime (e.g. the agent's
-     * `kubectl annotate job/…` link publication), and those tweaks must surface in the reported
-     * set; the overlay is filtered to [Metadata.isReserved] keys so Kubernetes' own bookkeeping
-     * (e.g. `kubectl.kubernetes.io/last-applied-configuration`) never leaks into the reported map.
+     * on top, unfiltered. Top-level wins because that is where callers annotate at runtime (e.g.
+     * the agent's `kubectl annotate job/…` link publication, or the agent-proxy's
+     * `namazu.ade/status` readiness patch), and those tweaks must surface in the reported set.
+     *
+     * The overlay is verbatim, consistent with [declaredMetadataOf]: deciding what a key "really"
+     * means is the consumer's call, not this provider's. An earlier revision filtered the overlay
+     * to [Metadata.isReserved] keys out of caution for `kubectl.kubernetes.io/last-applied-configuration`-style
+     * housekeeping — but the filter silently dropped every non-conductor runtime namespace (the
+     * ADE's `namazu.ade/status` readiness patch never surfaced, leaving agents stuck reporting
+     * their declared chart state), and was asymmetric with the standalone-pod row, which has
+     * always reported its annotations verbatim. Conductor creates these workloads itself via the
+     * client API, so nothing `kubectl apply`s them and such housekeeping annotations do not occur
+     * in practice.
      *
      * Only metadata and container decoration read the merged block. Workload-kind and
      * helm-release detection deliberately stay on the inner template block alone: the dispatch-time

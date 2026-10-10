@@ -376,10 +376,13 @@ class KubernetesOrchestrationServiceIT {
 
     /**
      * Runtime annotations added to a Job's **top level** — where callers annotate at runtime (e.g.
-     * the agent's `kubectl annotate job/…` link publication) — surface in the read-back, merged
-     * over the inner `spec.template` block, while a non-`namazu.conductor` top-level annotation
-     * stays out of the reported metadata (see #67). The declared set from the template block is
-     * preserved underneath the top-level overlay.
+     * the agent's `kubectl annotate job/…` link publication, or the agent-proxy's
+     * `namazu.ade/status` readiness patch) — surface in the read-back, merged **unfiltered** over
+     * the inner `spec.template` block: any top-level annotation is reported verbatim, consistently
+     * with the declared template block and the standalone-pod row (originally #67, which first
+     * surfaced the top-level annotations at all — a `namazu.conductor`-only overlay filter
+     * subsequently proved to be a silent-drop trap and was removed). The declared set from the
+     * template block is preserved underneath the top-level overlay.
      */
     @Test
     fun jobWorkloadTopLevelAnnotationsSurfaceInReadBack() {
@@ -412,9 +415,9 @@ class KubernetesOrchestrationServiceIT {
             "A runtime top-level container-scoped cosmetic key was not surfaced"
         )
         assertEquals(listed.metadata[METADATA_HIDDEN_KEY], "true", "The declared set from the template block was lost")
-        assertNull(
-            listed.metadata[METADATA_NOTE_KEY],
-            "A non-namazu.conductor top-level annotation must not leak into the reported metadata"
+        assertEquals(
+            listed.metadata[METADATA_NOTE_KEY], "annotated at runtime",
+            "A non-namazu.conductor top-level annotation must be read back verbatim"
         )
     }
 

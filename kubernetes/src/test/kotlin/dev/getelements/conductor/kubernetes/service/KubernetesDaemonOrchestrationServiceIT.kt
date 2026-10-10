@@ -219,10 +219,13 @@ class KubernetesDaemonOrchestrationServiceIT {
 
     /**
      * Runtime annotations added to a Deployment's **top level** — where callers annotate at runtime
-     * (e.g. the agent's `kubectl annotate deployment/…` link publication) — surface in
-     * [KubernetesOrchestrationService.getStatus]'s read-back, merged over the inner
-     * `spec.template` block, while a non-`namazu.conductor` top-level annotation stays out of the
-     * reported metadata (see #67, mirroring the Job-path test in
+     * (e.g. the agent's `kubectl annotate deployment/…` link publication, or the agent-proxy's
+     * `namazu.ade/status` readiness patch) — surface in
+     * [KubernetesOrchestrationService.getStatus]'s read-back, merged **unfiltered** over the inner
+     * `spec.template` block: any top-level annotation is reported verbatim, consistently with the
+     * declared template block and the standalone-pod row (originally #67, which first surfaced the
+     * top-level annotations at all — a `namazu.conductor`-only overlay filter subsequently proved
+     * to be a silent-drop trap and was removed, mirroring the Job-path test in
      * [KubernetesOrchestrationServiceIT]).
      */
     @Test
@@ -247,9 +250,9 @@ class KubernetesDaemonOrchestrationServiceIT {
             "A runtime link published on the Deployment's top level was not surfaced in the read-back"
         )
         assertEquals(refreshed.metadata[METADATA_HIDDEN_KEY], "true", "The declared set from the template block was lost")
-        assertNull(
-            refreshed.metadata[METADATA_NOTE_KEY],
-            "A non-namazu.conductor top-level annotation must not leak into the reported metadata"
+        assertEquals(
+            refreshed.metadata[METADATA_NOTE_KEY], "annotated at runtime",
+            "A non-namazu.conductor top-level annotation must be read back verbatim"
         )
     }
 
