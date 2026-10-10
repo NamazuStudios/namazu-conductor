@@ -8,8 +8,10 @@ import com.google.inject.Singleton
 import com.google.inject.name.Named
 import dev.getelements.conductor.kubernetes.KubernetesAttributes
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService
+import dev.getelements.conductor.kubernetes.service.KubernetesSecretStore
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.OrchestrationService
+import dev.getelements.conductor.service.SecretStore
 import io.fabric8.kubernetes.client.Config
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
@@ -37,6 +39,10 @@ class KubernetesOrchestrationModule : PrivateModule() {
         bind(DaemonOrchestrationService::class.java).to(KubernetesOrchestrationService::class.java)
         expose(OrchestrationService::class.java)
         expose(DaemonOrchestrationService::class.java)
+
+        bind(KubernetesSecretStore::class.java).`in`(Singleton::class.java)
+        bind(SecretStore::class.java).to(KubernetesSecretStore::class.java)
+        expose(SecretStore::class.java)
     }
 
     @Provides

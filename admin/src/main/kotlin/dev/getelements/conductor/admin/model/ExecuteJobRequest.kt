@@ -7,6 +7,7 @@ import dev.getelements.conductor.JobPlacement
 import dev.getelements.conductor.LatitudeLongitudePlacement
 import dev.getelements.conductor.PlacementType
 import dev.getelements.conductor.RegionPlacement
+import dev.getelements.conductor.SecretRef
 
 data class ExecuteJobRequest @JsonCreator constructor(
     @JsonProperty("element")     val element: String,
@@ -20,6 +21,13 @@ data class ExecuteJobRequest @JsonCreator constructor(
      * container; a key naming a container that doesn't exist is rejected with 400 before dispatch.
      */
     @JsonProperty("containerEnvironment") val containerEnvironment: Map<String, Map<String, String>>?,
+    /**
+     * Secrets the workload consumes by reference (issue #84) — injected at launch under each
+     * [SecretRefDto.envKey], with the value never appearing in the workload's spec. A container
+     * that doesn't exist is rejected with 400 before dispatch; a provider without a SecretStore
+     * rejects the launch outright.
+     */
+    @JsonProperty("secrets")     val secrets: List<SecretRefDto>?,
     @JsonProperty("placement")   val placement: List<PlacementDto>?,
     @JsonProperty("tty")         val tty: Boolean?,
     /**
@@ -31,6 +39,20 @@ data class ExecuteJobRequest @JsonCreator constructor(
      */
     @JsonProperty("metadata")   val metadata: Map<String, String>?
 )
+
+data class SecretRefDto @JsonCreator constructor(
+    @JsonProperty("name")        val name: String,
+    @JsonProperty("envKey")      val envKey: String,
+    @JsonProperty("containerId") val containerId: String?,
+    @JsonProperty("key")         val key: String?
+) {
+    fun toSecretRef() = SecretRef(
+        name = name,
+        envKey = envKey,
+        containerId = containerId,
+        key = key
+    )
+}
 
 data class PlacementDto @JsonCreator constructor(
     @JsonProperty("type")      val type: PlacementType,

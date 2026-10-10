@@ -253,6 +253,12 @@ class EcsOrchestrationService @Inject constructor(
      *   `namazu.conductor`-prefixed tag key. Thrown before the service is created.
      */
     override fun deploy(request: DaemonRequest): DaemonExecution {
+        if (request.secrets.isNotEmpty()) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} does not support secret references (issue #84): no " +
+                    "SecretStore is deployed for this provider"
+            )
+        }
         val profile = request.profile as? EcsDaemon
             ?: throw JobException("Daemon must be a ${EcsDaemon::class.simpleName}; got ${request.profile::class.simpleName}")
 
@@ -520,6 +526,12 @@ class EcsOrchestrationService @Inject constructor(
     override fun execute(request: JobRequest): JobExecution {
         if (request.tty) {
             throw UnsupportedOperationException("${this::class.simpleName} does not support tty/terminal jobs")
+        }
+        if (request.secrets.isNotEmpty()) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} does not support secret references (issue #84): no " +
+                    "SecretStore is deployed for this provider"
+            )
         }
 
         val profile = request.profile as? EcsJobProfile

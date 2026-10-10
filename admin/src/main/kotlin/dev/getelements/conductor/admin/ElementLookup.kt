@@ -4,6 +4,7 @@ import dev.getelements.conductor.JobAccessPolicy
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.TerminalAttachPolicy
 import dev.getelements.conductor.service.OrchestrationService
+import dev.getelements.conductor.service.SecretStore
 import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
 
@@ -116,6 +117,25 @@ internal object ElementLookup {
                 null
             }
             if (policy != null) action(name, policy)
+        }
+    }
+
+    /**
+     * Calls [action] once per deployed Element that exposes a [SecretStore], passing the Element's
+     * name and the store. Mirrors [forEachTerminalAttachPolicy]'s registry scan — elements that
+     * don't expose one (including the `SdkServiceNotFoundException` visibility quirk documented on
+     * [ConductorAdminJobsResource]) are silently skipped.
+     */
+    fun forEachSecretStore(callerClass: Class<*>, action: (elementName: String, store: SecretStore) -> Unit) {
+        val registry = ElementRegistrySupplier.getElementLocal(callerClass).get()
+        registry.stream().toList().forEach { element ->
+            val name = element.elementRecord.definition().name()
+            val store: SecretStore? = try {
+                element.serviceLocator.findInstance(SecretStore::class.java).map { it.get() }.orElse(null)
+            } catch (e: SdkServiceNotFoundException) {
+                null
+            }
+            if (store != null) action(name, store)
         }
     }
 

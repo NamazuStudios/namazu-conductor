@@ -163,6 +163,12 @@ class EdgeGapOrchestrationService @Inject constructor(
         if (request.tty) {
             throw UnsupportedOperationException("${this::class.simpleName} does not support tty/terminal jobs")
         }
+        if (request.secrets.isNotEmpty()) {
+            throw UnsupportedOperationException(
+                "${this::class.simpleName} does not support secret references (issue #84): no " +
+                    "SecretStore is deployed for this provider"
+            )
+        }
 
         val profile = request.profile as? EdgeGapJobProfile
             ?: throw JobException("JobProfile must be an ${EdgeGapJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")

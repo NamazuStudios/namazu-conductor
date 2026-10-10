@@ -16,6 +16,7 @@ import dev.getelements.conductor.JobStdio
 import dev.getelements.conductor.Metadata
 import dev.getelements.conductor.NamespaceScope
 import dev.getelements.conductor.RegionPlacement
+import dev.getelements.conductor.SecretRef
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
@@ -29,10 +30,12 @@ import dev.getelements.conductor.service.Daemon
 import dev.getelements.conductor.service.DaemonOrchestrationService
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.conductor.service.OrchestrationService
+import dev.getelements.conductor.service.StoredSecret
 import com.marcnuri.helm.Helm
 import io.fabric8.kubernetes.api.model.Container
 import io.fabric8.kubernetes.api.model.DeletionPropagation
 import io.fabric8.kubernetes.api.model.EnvVar
+import io.fabric8.kubernetes.api.model.EnvVarBuilder
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder
 import io.fabric8.kubernetes.api.model.OwnerReference
@@ -42,8 +45,10 @@ import io.fabric8.kubernetes.api.model.PodBuilder
 import io.fabric8.kubernetes.api.model.PodSpec
 import io.fabric8.kubernetes.api.model.PodTemplate
 import io.fabric8.kubernetes.api.model.PodTemplateSpecBuilder
+import io.fabric8.kubernetes.api.model.SecretBuilder
 import io.fabric8.kubernetes.api.model.Service
 import io.fabric8.kubernetes.api.model.ServiceBuilder
+
 import io.fabric8.kubernetes.api.model.ServicePort
 import io.fabric8.kubernetes.api.model.ServicePortBuilder
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder
@@ -106,7 +111,8 @@ class KubernetesOrchestrationService @Inject constructor(
     @Named(KubernetesAttributes.WATCH_ENABLED) watchEnabled: String = "false",
     @Named(KubernetesAttributes.KUBECONFIG_PATH) private val kubeconfigPath: String,
     private val client: KubernetesClient,
-    private val executor: ExecutorService
+    private val executor: ExecutorService,
+    private val secretStore: KubernetesSecretStore
 ) : OrchestrationService, DaemonOrchestrationService {
 
     private val logger = LoggerFactory.getLogger(KubernetesOrchestrationService::class.java)
@@ -280,8 +286,7 @@ class KubernetesOrchestrationService @Inject constructor(
         templateAnnotations: Map<String, String>?,
         topLevelAnnotations: Map<String, String>?
     ): Map<String, String> =
-        (templateAnnotations ?: emptyMap()) +
-            (topLevelAnnotations ?: emptyMap()).filterKeys { Metadata.isReserved(it) }
+        (templateAnnotations ?: emptyMap()) + (topLevelAnnotations ?: emptyMap())
 
     /**
      * Creates a `Pod` or `Job` for the given [JobRequest] and returns a [JobExecution] with status
@@ -408,7 +413,15 @@ class KubernetesOrchestrationService @Inject constructor(
         // A Service-create failure rolls the workload back (issue #77) — see
         // createServiceIfRequested. Only POD/JOB reach this point; the when above throws for
         // DAEMON/HELM, so the else branch here is exactly the JOB path.
+        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
         createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
+            if (profile.workloadKind == WorkloadKind.POD) {
+                client.pods().inNamespace(namespace).withName(runName).delete()
+            } else {
+                client.batch().v1().jobs().inNamespace(namespace).withName(runName).delete()
+            }
+        }
+        copySecretsIntoLaunchNamespace(resolvedSecrets, namespace, runName, ownerRef) {
             if (profile.workloadKind == WorkloadKind.POD) {
                 client.pods().inNamespace(namespace).withName(runName).delete()
             } else {
@@ -507,7 +520,11 @@ class KubernetesOrchestrationService @Inject constructor(
 
         // A Service-create failure rolls the Deployment back (issue #77) — see
         // createServiceIfRequested.
+        val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
         createServiceIfRequested(profile.exposePorts, profile.serviceType, namespace, runName, ownerRef) {
+            client.apps().deployments().inNamespace(namespace).withName(runName).delete()
+        }
+        copySecretsIntoLaunchNamespace(resolvedSecrets, namespace, runName, ownerRef) {
             client.apps().deployments().inNamespace(namespace).withName(runName).delete()
         }
 
@@ -1365,6 +1382,124 @@ class KubernetesOrchestrationService @Inject constructor(
         container.env = merged.values.toList()
     }
 
+    /**
+     * Resolves [secrets] against the [secretStore] and wires each one into [spec]'s target
+     * container as a `valueFrom.secretKeyRef` env source (issue #84) — the value itself is never
+     * written into the spec; the kubelet resolves it from the workload's own namespace at schedule
+     * time. Every failure mode — unknown secret, unknown key, multi-value secret without an
+     * explicit key, unknown target container, env-key collision with anything already in the spec
+     * (profile env + overrides ran earlier), or a duplicate env target among the refs themselves —
+     * fails before the workload is created, same discipline as
+     * [applyContainerEnvironment].
+     *
+     * Returns the resolved refs for [copySecretsIntoLaunchNamespace], which runs after workload
+     * creation (the copies need the workload's ownerReference).
+     */
+    private fun resolveSecretRefs(spec: PodSpec, secrets: List<SecretRef>, runName: String): List<ResolvedSecretRef> {
+        if (secrets.isEmpty()) return emptyList()
+
+        val recallCache = HashMap<String, StoredSecret?>()
+        val claimedEnvKeys = HashSet<Pair<String?, String>>()
+
+        return secrets.map { ref ->
+            val stored = recallCache.getOrPut(ref.name) { secretStore.recall(ref.name) }
+                ?: throw JobException(
+                    "Secret '${ref.name}' not found in the secret store — nothing was created"
+                )
+
+            val key = ref.key ?: run {
+                if (stored.values.size != 1) {
+                    throw JobException(
+                        "Secret '${ref.name}' carries ${stored.values.size} values; the SecretRef " +
+                            "injecting '${ref.envKey}' must name its key explicitly"
+                    )
+                }
+                stored.values.keys.first()
+            }
+            if (key !in stored.values) {
+                throw JobException("Secret '${ref.name}' has no value named '$key'")
+            }
+
+            val containerName = ref.containerId ?: spec.containers.firstOrNull()?.name
+            val container = spec.containers.firstOrNull { it.name == containerName }
+                ?: throw UnknownContainerException("Container '$containerName' not found in PodTemplate spec")
+
+            if (container.env.orEmpty().any { it.name == ref.envKey }) {
+                throw JobException(
+                    "Cannot inject secret '${ref.name}' as '${ref.envKey}' into container " +
+                        "'$containerName': the key is already set by the profile or the request's " +
+                        "environment overrides"
+                )
+            }
+            val envTarget = containerName to ref.envKey
+            if (!claimedEnvKeys.add(envTarget)) {
+                throw JobException(
+                    "Two SecretRefs inject '${ref.envKey}' into container '$containerName'"
+                )
+            }
+
+            val copyName = "$runName-${ref.name}"
+            if (copyName.length > 253) {
+                throw JobException(
+                    "Secret copy name '$copyName' exceeds Kubernetes' 253-character name limit"
+                )
+            }
+
+            container.env = (container.env.orEmpty() + EnvVarBuilder()
+                .withName(ref.envKey)
+                .withNewValueFrom()
+                    .withNewSecretKeyRef()
+                        .withName(copyName)
+                        .withKey(key)
+                        .withOptional(false)
+                    .endSecretKeyRef()
+                .endValueFrom()
+                .build())
+
+            ResolvedSecretRef(ref = ref, copyName = copyName, values = stored.values)
+        }
+    }
+
+    /**
+     * Copies the resolved secrets' values into [namespace] as `Secret`s named after the workload
+     * ([runName]-prefixed) so the `secretKeyRef` entries resolve in the workload's own namespace —
+     * the stored secret lives in the configured namespace and Kubernetes `secretKeyRef` cannot
+     * cross namespaces. Each copy is labelled `namazu.conductor/owned-by` and owner-ref'd to the
+     * workload, so Kubernetes GC removes it with the workload (the same cleanup convention the
+     * owned `Service` uses). Copy failures roll the just-created workload back — a failed launch
+     * must never leave a half-dispatched workload behind (issue #77's rule, applied to secrets).
+     */
+    private fun copySecretsIntoLaunchNamespace(
+        resolved: List<ResolvedSecretRef>,
+        namespace: String,
+        runName: String,
+        ownerRef: OwnerReference,
+        rollback: () -> Unit
+    ) {
+        if (resolved.isEmpty()) return
+        try {
+            resolved.distinctBy { it.ref.name }.forEach { resolvedRef ->
+                val builder = SecretBuilder()
+                    .withNewMetadata()
+                        .withName(resolvedRef.copyName)
+                        .withNamespace(namespace)
+                        .addToLabels(LABEL_OWNED_BY, runName)
+                        .addToOwnerReferences(ownerRef)
+                    .endMetadata()
+                resolvedRef.values.forEach { (key, value) -> builder.addToStringData(key, value) }
+                client.secrets().inNamespace(namespace).resource(builder.build()).create()
+            }
+        } catch (e: Exception) {
+            runCatching(rollback).onFailure { rollbackFailure ->
+                logger.warn(
+                    "Failed to roll back workload '{}' after a secret-copy failure in namespace '{}'; it may be orphaned",
+                    runName, namespace, rollbackFailure
+                )
+            }
+            throw e
+        }
+    }
+
     /** Injects the workload's own Service identity into its primary container's env — a no-op when
      *  [exposePorts] declares no ports, since no Service is created in that case ([createServiceIfRequested]). */
     private fun applyServiceEnv(spec: PodSpec, primaryContainer: String, runName: String, exposePorts: String) {
@@ -1435,6 +1570,17 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("Unknown workload kind in execution id: '$id'")
         return Triple(parts[0], kind, parts[2])
     }
+
+    /**
+     * A [SecretRef] fully resolved against the store: the values to copy into the launch
+     * namespace and the name the copy will carry ([runName]-prefixed, owner-ref'd to the
+     * workload — see [copySecretsIntoLaunchNamespace]).
+     */
+    private data class ResolvedSecretRef(
+        val ref: SecretRef,
+        val copyName: String,
+        val values: Map<String, String>,
+    )
 
     companion object {
 

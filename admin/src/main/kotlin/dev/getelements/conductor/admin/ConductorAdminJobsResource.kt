@@ -205,12 +205,26 @@ class ConductorAdminJobsResource @Inject constructor(
                 .build()
         }
 
+        // Same fail-fast-into-400 pattern for secret references (issue #84): a container name the
+        // profile doesn't declare is a malformed request, not a provider fault. The provider
+        // re-validates everything (unknown secret names, key selection, env-key collisions)
+        // against the live store and workload spec.
+        val secretRefs = request.secrets ?: emptyList()
+        val unknownSecretContainers = secretRefs.mapNotNull { it.containerId }.toSet() - knownContainers
+        if (unknownSecretContainers.isNotEmpty()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to ("Unknown secret container(s) ${unknownSecretContainers.sorted().joinToString()}; " +
+                    "this profile declares: ${knownContainers.sorted().joinToString()}")))
+                .build()
+        }
+
         val jobRequest = JobRequest(
             profile     = profile,
             args        = request.args ?: emptyList(),
             command     = effectiveCommand,
             environment = request.environment ?: emptyMap(),
             containerEnvironment = request.containerEnvironment ?: emptyMap(),
+            secrets     = secretRefs.map { it.toSecretRef() },
             placement   = request.placement?.map { it.toPlacement() } ?: emptyList(),
             tty         = effectiveTty,
             metadata    = metadataOverrides

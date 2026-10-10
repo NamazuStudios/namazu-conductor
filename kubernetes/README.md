@@ -217,6 +217,20 @@ When a Service is created (both `execute()` and `deploy()`), the primary contain
 
 Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
 
+## Secrets (issue #84)
+The provider exposes a [SecretStore](../api/src/main/kotlin/dev/getelements/conductor/service/SecretStore.kt) backed by Kubernetes `Secret`s in the provider's configured namespace. Secrets are created/updated/deleted via the admin REST (`/conductor/admin/secrets/...`) or the interface directly; the listing returns names and metadata only — values are never echoed after write, and retrieval (`recall`) is the one authorized read.
+
+A launch ([JobRequest.secrets] / [DaemonRequest.secrets]) references secrets by [SecretRef](../api/src/main/kotlin/dev/getelements/conductor/SecretRef.kt) — `{name, envKey, containerId?, key?}` — instead of carrying literal values, so the secret never appears in annotations, logs, or the workload's spec:
+
+- At execute/deploy the referenced secret is **copied into the workload's namespace** under `<workload-name>-<secret-name>` (Kubernetes `secretKeyRef` cannot cross namespaces; the store lives in the configured namespace, which for multi-tenant deployments is not the namespace the workload lands in). The copy is labelled `namazu.conductor/owned-by` and owner-ref'd to the workload, so Kubernetes GC removes it when the workload dies — the same cleanup convention as the owned `Service`.
+- The target container gets a `valueFrom.secretKeyRef` env source (`secretKeyRef` requires the copy to exist by schedule time; the kubelet resolves it). The value is never written into the spec.
+- Every failure mode — unknown secret name, unknown key, multi-value secret without an explicit `key`, unknown target container, env-key collision with the profile env or request overrides — fails the launch **before** anything is created; a copy failure rolls the just-created workload back (issue #77's rule).
+- Providers without a `SecretStore` (ECS, EdgeGap) reject any launch carrying `secrets` entries outright.
+
+RBAC: dispatching into namespaces other than the configured one requires `create/get/list/delete` on core `secrets` cluster-wide (the control-plane's `conductor-cluster-*` ClusterRole carries it); single-namespace deployments work with the namespaced Role alone.
+
+Command, argument, and environment overrides from the `JobRequest` are applied to the template's primary (first) container — `command` maps to the container's `command`, `args` to `args`, and `environment` is merged over the container's env.
+
 Multi-container pods can receive caller-supplied env on any container via
 `JobRequest.containerEnvironment` (issue #73): a map keyed by container name (as listed in the
 profile's `containers`), whose values merge over that container's env. It is additive — the flat

@@ -36,6 +36,27 @@ You can safely override any of these per-deployment — the dashboard UI discove
 
 ## REST API
 
+### Secrets (issue #84)
+
+Durable, namespaced secret storage that jobs reference by name (`JobRequest.secrets` →
+[SecretRef] — `{name, envKey, containerId?, key?}`) instead of receiving literal values, so the
+secret never appears in annotations, logs, or the workload's spec. Backed by Kubernetes `Secret`s
+in the provider's configured namespace; dispatched workloads get a copy in their own namespace
+(owner-ref'd, garbage-collected with the workload) and a `valueFrom.secretKeyRef` env source. All
+endpoints require `SUPERUSER`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /conductor/admin/secrets` | Lists every deployed store's secrets — **names and metadata only**; values are never echoed by listing |
+| `GET /conductor/admin/secrets/{element}/{name}` | Recalls one secret, values included — the one authorized read |
+| `PUT /conductor/admin/secrets/{element}/{name}` | Creates or replaces; body `{"values": {...}, "metadata": {...}}` |
+| `DELETE /conductor/admin/secrets/{element}/{name}` | Deletes; already-launched workloads keep functioning (injection resolves at launch time) |
+
+Names must be DNS-1123 subdomains (lowercase alphanumeric, `-`, `.`). A launch referencing an
+unknown secret, an unknown key, an unknown container, or an env key that collides with the profile
+env or request overrides fails before anything is created; providers without a secret store reject
+`secrets` entries outright.
+
 ### `GET /conductor/admin/profiles`
 
 Returns the current profile list from every deployed `OrchestrationService` provider.

@@ -3,10 +3,13 @@ package dev.getelements.conductor.kubernetes.service
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobStatus
+import dev.getelements.conductor.SecretRef
+import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.StdioUnavailableException
 import dev.getelements.conductor.exception.UnknownContainerException
 import dev.getelements.conductor.kubernetes.KubernetesExecutionDetails
+import dev.getelements.conductor.kubernetes.service.KubernetesSecretStore
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
@@ -117,6 +120,7 @@ class KubernetesOrchestrationServiceIT {
     private lateinit var client: KubernetesClient
     private lateinit var executor: ExecutorService
     private lateinit var service: KubernetesOrchestrationService
+    private lateinit var secretStore: KubernetesSecretStore
 
     private lateinit var podImage: String
     private lateinit var podArgs: List<String>
@@ -128,6 +132,7 @@ class KubernetesOrchestrationServiceIT {
     private val jobTemplate get() = "conductor-it-job-$runSuffix"
     private val multiContainerTemplate get() = "conductor-it-multi-$runSuffix"
     private val serviceGuardTemplate get() = "conductor-it-svcguard-$runSuffix"
+    private val secretName get() = "conductor-it-secret-$runSuffix"
     private lateinit var runSuffix: String
 
     private var podPort: Int = 80
@@ -170,6 +175,7 @@ class KubernetesOrchestrationServiceIT {
 
         client = buildClient()
         executor = Executors.newCachedThreadPool()
+        secretStore = KubernetesSecretStore(client, namespace)
         service = KubernetesOrchestrationService(
             namespace = namespace,
             jobSet = jobSet,
@@ -179,7 +185,8 @@ class KubernetesOrchestrationServiceIT {
             watchEnabled = env("KUBERNETES_IT_WATCH_ENABLED", "false"),
             kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
             client = client,
-            executor = executor
+            executor = executor,
+            secretStore = KubernetesSecretStore(client, namespace)
         )
 
         ensureNamespace()
@@ -221,6 +228,9 @@ class KubernetesOrchestrationServiceIT {
                 runCatching { client.rbac().roleBindings().inNamespace(namespace).withName("$name-binding").delete() }
                 runCatching { client.rbac().roles().inNamespace(namespace).withName("$name-role").delete() }
                 runCatching { client.serviceAccounts().inNamespace(namespace).withName(name).delete() }
+            }
+            if (::secretStore.isInitialized) {
+                runCatching { secretStore.delete(secretName) }
             }
             altNamespaceCreated?.let { alt ->
                 runCatching { client.namespaces().withName(alt).delete() }
@@ -272,7 +282,8 @@ class KubernetesOrchestrationServiceIT {
             watchEnabled = "false",
             kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
             client = client,
-            executor = executor
+            executor = executor,
+            secretStore = KubernetesSecretStore(client, namespace)
         )
 
         // Profiles: every namespace's templates are visible under discovery=any, each id namespaced.
@@ -722,7 +733,8 @@ class KubernetesOrchestrationServiceIT {
             watchEnabled = "false",
             kubeconfigPath = "",
             client = restrictedClient,
-            executor = executor
+            executor = executor,
+            secretStore = KubernetesSecretStore(restrictedClient, namespace)
         )
     }
 
@@ -1094,6 +1106,143 @@ class KubernetesOrchestrationServiceIT {
         )
 
         service.stop(execution)
+    }
+
+    /** Store/list/recall/delete round trip, replace semantics, values-never-listed, name rules. */
+    @Test
+    fun secretStoreCrudRoundtrip() {
+        secretStore.store(secretName, mapOf("token" to "s3cr3t"), mapOf("team" to "conductor-it"))
+        try {
+            val listed = secretStore.list()
+            assertTrue(listed.any { it.name == secretName }, "Stored secret missing from the listing: $listed")
+            assertEquals(mapOf("team" to "conductor-it"), listed.first { it.name == secretName }.metadata)
+
+            val recalled = secretStore.recall(secretName)
+            assertNotNull(recalled)
+            assertEquals(mapOf("token" to "s3cr3t"), recalled!!.values)
+
+            // Replace semantics: store() over an existing name updates it wholesale.
+            secretStore.store(secretName, mapOf("token" to "rotated"))
+            assertEquals("rotated", secretStore.recall(secretName)!!.values["token"])
+
+            secretStore.delete(secretName)
+            assertNull(secretStore.recall(secretName))
+        } finally {
+            runCatching { secretStore.delete(secretName) }
+        }
+    }
+
+    /** Kubernetes' DNS-1123 subdomain rule is enforced loudly, before any state changes. */
+    @Test
+    fun secretStoreRejectsInvalidNames() {
+        assertThrows(JobException::class.java) {
+            secretStore.store("Not_A_Valid_Secret_Name", mapOf("a" to "b"))
+        }
+        assertThrows(JobException::class.java) { secretStore.recall("Not_A_Valid_Secret_Name") }
+    }
+
+    /**
+     * A [SecretRef] injects a `valueFrom.secretKeyRef` env source — never a literal value — into
+     * the target container, and the referenced secret is copied into the launch namespace under a
+     * workload-owned name (issue #84). The copy is owner-ref'd, so stopping the workload removes
+     * it via Kubernetes GC.
+     */
+    @Test
+    fun secretRefInjectionWiresSecretKeyRefAndCopiesSecret() {
+        secretStore.store(secretName, mapOf("token" to "s3cr3t-value"))
+        try {
+            val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+                ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+            val execution = service.execute(JobRequest(
+                profile = profile,
+                secrets = listOf(SecretRef(name = secretName, envKey = "CONDUCTOR_IT_SECRET")),
+            )).also { executions += it }
+            val runName = decodeExecutionId(execution.id).third
+
+            val job = client.batch().v1().jobs().inNamespace(namespace).withName(runName).get()
+                ?: throw AssertionError("Job '$runName' not found after execute()")
+            val env = job.spec?.template?.spec?.containers?.first()?.env.orEmpty()
+            val injected = env.firstOrNull { it.name == "CONDUCTOR_IT_SECRET" }
+            assertNotNull(injected, "The SecretRef's env source is missing from the pod spec")
+            assertNull(injected!!.value, "The secret's value must never be embedded in the spec")
+            val keyRef = injected.valueFrom?.secretKeyRef
+            assertNotNull(keyRef, "The env source must be a secretKeyRef")
+            assertEquals("$runName-$secretName", keyRef!!.name, "The ref must target the workload's own copy")
+            assertEquals("token", keyRef.key)
+
+            val copy = client.secrets().inNamespace(namespace).withName("$runName-$secretName").get()
+            assertNotNull(copy, "The secret was not copied into the launch namespace")
+            assertEquals(runName, copy!!.metadata.labels[LABEL_OWNED_BY])
+            assertTrue(
+                copy.metadata.ownerReferences.orEmpty().any { it.name == runName && it.kind == "Job" },
+                "The copy must be owner-ref'd to the workload"
+            )
+            assertEquals(
+                mapOf("token" to "s3cr3t-value"),
+                copy.data?.mapValues { String(java.util.Base64.getDecoder().decode(it.value)) }
+            )
+
+            service.stop(execution)
+            executions.remove(execution)
+            awaitSecretAbsent("$runName-$secretName")
+        } finally {
+            runCatching { secretStore.delete(secretName) }
+        }
+    }
+
+    /** An unknown secret name fails the launch outright, before anything is created (issue #84). */
+    @Test
+    fun secretRefUnknownNameFailsBeforeAnythingIsCreated() {
+        val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+            ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+        try {
+            service.execute(JobRequest(
+                profile = profile,
+                secrets = listOf(SecretRef(name = "conductor-it-no-such-$runSuffix", envKey = "A")),
+            ))
+            throw AssertionError("execute() must fail for an unknown secret name")
+        } catch (e: JobException) {
+            // expected — nothing was created
+        }
+        val leftovers = client.batch().v1().jobs().inNamespace(namespace)
+            .withLabel(LABEL_OWNED_BY).list().items
+            .filter { it.metadata.name.startsWith("$jobTemplate-") }
+        assertTrue(leftovers.isEmpty(), "A failed launch must not leave the workload behind")
+    }
+
+    /** A SecretRef's envKey colliding with a literal env override fails before anything is created. */
+    @Test
+    fun secretRefEnvKeyCollisionFailsBeforeAnythingIsCreated() {
+        secretStore.store(secretName, mapOf("token" to "v"))
+        try {
+            val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+                ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+            try {
+                service.execute(JobRequest(
+                    profile = profile,
+                    environment = mapOf("CONDUCTOR_IT_SECRET" to "literal"),
+                    secrets = listOf(SecretRef(name = secretName, envKey = "CONDUCTOR_IT_SECRET")),
+                ))
+                throw AssertionError("execute() must fail on an env-key collision")
+            } catch (e: JobException) {
+                // expected — nothing was created
+            }
+            val leftovers = client.batch().v1().jobs().inNamespace(namespace)
+                .withLabel(LABEL_OWNED_BY).list().items
+                .filter { it.metadata.name.startsWith("$jobTemplate-") }
+            assertTrue(leftovers.isEmpty(), "A failed launch must not leave the workload behind")
+        } finally {
+            runCatching { secretStore.delete(secretName) }
+        }
+    }
+
+    /** The owner-ref'd secret copy is garbage-collected with its workload (asynchronously). */
+    private fun awaitSecretAbsent(name: String) {
+        repeat(30) {
+            if (client.secrets().inNamespace(namespace).withName(name).get() == null) return
+            Thread.sleep(1000)
+        }
+        throw AssertionError("Secret copy '$name' was not garbage-collected with its workload")
     }
 
     private fun decodeExecutionId(id: String): Triple<String, String, String> {

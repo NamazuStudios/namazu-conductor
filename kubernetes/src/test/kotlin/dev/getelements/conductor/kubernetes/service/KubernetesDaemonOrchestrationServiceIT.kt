@@ -3,9 +3,11 @@ package dev.getelements.conductor.kubernetes.service
 import dev.getelements.conductor.DaemonExecution
 import dev.getelements.conductor.DaemonRequest
 import dev.getelements.conductor.DaemonStatus
+import dev.getelements.conductor.SecretRef
 import dev.getelements.conductor.exception.JobException
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
 import dev.getelements.conductor.exception.UnknownContainerException
+import dev.getelements.conductor.kubernetes.service.KubernetesSecretStore
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_EXPOSE_PORTS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MAX_REPLICAS
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_MIN_REPLICAS
@@ -13,6 +15,7 @@ import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationServi
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_SERVICE_TYPE
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.ANN_WORKLOAD_KIND
 import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.LABEL_JOB_SET
+import dev.getelements.conductor.kubernetes.service.KubernetesOrchestrationService.Companion.LABEL_OWNED_BY
 import io.fabric8.kubernetes.api.model.ContainerBuilder
 import io.fabric8.kubernetes.api.model.NamespaceBuilder
 import io.fabric8.kubernetes.api.model.PodTemplate
@@ -27,6 +30,7 @@ import io.fabric8.kubernetes.client.KubernetesClientException
 import org.slf4j.LoggerFactory
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
+import org.testng.Assert.assertNotNull
 import org.testng.Assert.assertNull
 import org.testng.Assert.assertThrows
 import org.testng.Assert.assertTrue
@@ -70,6 +74,7 @@ class KubernetesDaemonOrchestrationServiceIT {
     private lateinit var client: KubernetesClient
     private lateinit var executor: ExecutorService
     private lateinit var service: KubernetesOrchestrationService
+    private lateinit var secretStore: KubernetesSecretStore
 
     private lateinit var podImage: String
     private lateinit var podArgs: List<String>
@@ -77,6 +82,7 @@ class KubernetesDaemonOrchestrationServiceIT {
     private val fixedTemplate get() = "conductor-it-daemon-fixed-$runSuffix"
     private val autoscaledTemplate get() = "conductor-it-daemon-hpa-$runSuffix"
     private val unboundedTemplate get() = "conductor-it-daemon-unbounded-$runSuffix"
+    private val secretName get() = "conductor-it-daemon-secret-$runSuffix"
     private lateinit var runSuffix: String
 
     private var podPort: Int = 8080
@@ -100,6 +106,7 @@ class KubernetesDaemonOrchestrationServiceIT {
 
         client = buildClient()
         executor = Executors.newCachedThreadPool()
+        secretStore = KubernetesSecretStore(client, namespace)
         service = KubernetesOrchestrationService(
             namespace = namespace,
             jobSet = jobSet,
@@ -109,7 +116,8 @@ class KubernetesDaemonOrchestrationServiceIT {
             watchEnabled = "false",
             kubeconfigPath = System.getenv("KUBERNETES_IT_KUBECONFIG") ?: "",
             client = client,
-            executor = executor
+            executor = executor,
+            secretStore = secretStore
         )
 
         ensureNamespace()
@@ -130,6 +138,9 @@ class KubernetesDaemonOrchestrationServiceIT {
                 runCatching { service.undeploy(execution) }
                     .onFailure { logger.warn("Failed to undeploy execution {}", execution.id, it) }
             }
+        }
+        if (::secretStore.isInitialized) {
+            runCatching { secretStore.delete(secretName) }
         }
 
         // Never delete the namespace itself here, even if this class created it: the namespace is
@@ -282,6 +293,53 @@ class KubernetesDaemonOrchestrationServiceIT {
 
         val running = awaitRunningCount(execution, 3)
         assertEquals(running.runningCount, 3, "Deployment did not scale to 3 running replicas")
+    }
+
+    /**
+     * A [SecretRef] on a daemon deploys the same way as on a job (issue #84): the Deployment's pod
+     * template carries a `valueFrom.secretKeyRef` env source (never a literal value), the secret is
+     * copied into the namespace under a deployment-owned name, and undeploying garbage-collects
+     * the copy via its ownerReference.
+     */
+    @Test
+    fun deployWithSecretRefWiresSecretKeyRefAndCopiesSecret() {
+        secretStore.store(secretName, mapOf("token" to "s3cr3t-value"))
+        try {
+            val profile = service.findAvailableDaemon("$namespace:$fixedTemplate")
+                ?: throw AssertionError("Daemon profile '$namespace:$fixedTemplate' not found")
+
+            val execution = service.deploy(DaemonRequest(
+                profile = profile,
+                secrets = listOf(SecretRef(name = secretName, envKey = "CONDUCTOR_IT_SECRET")),
+            )).also { executions += it }
+            awaitStatus(execution, DaemonStatus.RUNNING)
+
+            val (_, _, name) = decodeIdForTest(execution.id)
+            val deployment = client.apps().deployments().inNamespace(namespace).withName(name).get()
+                ?: throw AssertionError("Deployment '$name' not found after deploy()")
+            val env = deployment.spec?.template?.spec?.containers?.first()?.env.orEmpty()
+            val injected = env.firstOrNull { it.name == "CONDUCTOR_IT_SECRET" }
+            assertNotNull(injected, "The SecretRef's env source is missing from the pod template")
+            assertNull(injected!!.value, "The secret's value must never be embedded in the spec")
+            val keyRef = injected.valueFrom?.secretKeyRef
+            assertNotNull(keyRef, "The env source must be a secretKeyRef")
+            assertEquals("$name-$secretName", keyRef!!.name)
+            assertEquals("token", keyRef.key)
+
+            val copy = client.secrets().inNamespace(namespace).withName("$name-$secretName").get()
+            assertNotNull(copy, "The secret was not copied into the launch namespace")
+            assertEquals(name, copy!!.metadata.labels[LABEL_OWNED_BY])
+
+            service.undeploy(execution)
+            executions.remove(execution)
+            repeat(30) {
+                if (client.secrets().inNamespace(namespace).withName("$name-$secretName").get() == null) return
+                Thread.sleep(1000)
+            }
+            throw AssertionError("Secret copy '$name-$secretName' was not garbage-collected with the deployment")
+        } finally {
+            runCatching { secretStore.delete(secretName) }
+        }
     }
 
     @Test

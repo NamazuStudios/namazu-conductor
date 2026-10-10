@@ -50,6 +50,20 @@ data class JobRequest (
     val containerEnvironment : Map<String, Map<String, String>> = emptyMap(),
 
     /**
+     * Secrets the workload consumes by reference, injected at launch time under their
+     * [dev.getelements.conductor.SecretRef.envKey] — the orchestrator resolves each
+     * [dev.getelements.conductor.service.StoredSecret] so the value never appears in the
+     * workload's spec, logs, or annotations (see [dev.getelements.conductor.service.SecretStore]).
+     *
+     * Empty by default. A provider with no
+     * [dev.getelements.conductor.service.SecretStore] rejects any launch carrying entries here
+     * outright; a provider with one rejects unknown names, unknown container targets, and env-key
+     * collisions before anything is created — same discipline as
+     * [dev.getelements.conductor.exception.UnknownContainerException].
+     */
+    val secrets : List<SecretRef> = emptyList(),
+
+    /**
      * Optional [JobPlacement] hints that influence where the job is scheduled. Ignored if the
      * underlying [dev.getelements.conductor.service.OrchestrationService] implementation does not support placement.
      */

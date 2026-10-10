@@ -71,6 +71,7 @@ class ConductorAdminApplication : Application() {
     override fun getClasses(): Set<Class<*>> = setOf(
         ConductorAdminResource::class.java,
         ConductorAdminJobsResource::class.java,
+        ConductorAdminSecretsResource::class.java,
         DefaultExceptionMapper::class.java
     )
 
