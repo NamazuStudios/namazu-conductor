@@ -86,6 +86,15 @@ data class TerminalAttachContext(
      */
     val namespace: String?,
 
+    /**
+     * The execution's read-back metadata
+     * ([JobExecution.metadata]) — always the same value as [execution].`metadata`, duplicated
+     * here so a policy reads one uniform field across this context and [JobAccessContext] when
+     * voting on workload attributes stamped at dispatch (e.g. a `namazu.conductor`-prefixed owner
+     * marker). Empty for providers with no metadata channel.
+     */
+    val metadata: Map<String, String> = emptyMap(),
+
 )
 
 /**

@@ -210,7 +210,8 @@ internal object TerminalSessionHandler {
                         command = command,
                         elementName = lookup.elementName,
                         execution = lookup.execution,
-                        namespace = lookup.execution.namespace
+                        namespace = lookup.execution.namespace,
+                        metadata = lookup.execution.metadata
                     )
                 )
             } catch (e: Exception) {

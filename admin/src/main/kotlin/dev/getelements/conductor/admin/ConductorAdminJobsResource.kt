@@ -161,10 +161,33 @@ class ConductorAdminJobsResource @Inject constructor(
                 .entity(mapOf("error" to "Profile not found: ${request.profileId}"))
                 .build()
 
+        val metadataOverrides = request.metadata ?: emptyMap()
+
+        // Reject behavioural Conductor keys here rather than letting the provider's JobException
+        // fall into the generic 500 below. A behavioural-key override is a malformed request, not a
+        // provider fault, and the caller needs to know which key was wrong to fix it. Checked
+        // before the policy gate (so a malformed request surfaces as a 400 even when a policy
+        // would veto it) and before dispatch so nothing is created on the way to a rejection --
+        // Metadata.merge() throws again provider-side, but that's a backstop, not the primary
+        // defence. Cosmetic reserved keys (hidden, agent, link.*, ...) pass through and are free
+        // to override.
+        try {
+            Metadata.validate(metadataOverrides)
+        } catch (e: ReservedMetadataKeyException) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to e.message))
+                .build()
+        }
+
+        // The effective set the workload will carry — what a policy voting on per-execution
+        // metadata (issue #93) needs to see. Validation has already passed, so the merge itself
+        // cannot throw.
+        val effectiveMetadata = Metadata.merge(profile.metadata, metadataOverrides)
+
         // Policy gate — see JobAccessGate. A DENY from any policy vetoes outright (superusers
         // included); otherwise a single ALLOW suffices; with no vote either way the historical
         // SUPERUSER-only rule applies.
-        if (!authorizedToExecute(sessionSecret, user, request.element, profile)) {
+        if (!authorizedToExecute(sessionSecret, user, request.element, profile, effectiveMetadata)) {
             return Response.status(Response.Status.FORBIDDEN).build()
         }
 
@@ -174,22 +197,6 @@ class ConductorAdminJobsResource @Inject constructor(
         val effectiveTty = request.tty ?: profile.terminalJob
         val effectiveCommand = request.command
             ?: (if (effectiveTty) TERMINAL_COMMAND_SUGGESTION else emptyList())
-
-        val metadataOverrides = request.metadata ?: emptyMap()
-
-        // Reject behavioural Conductor keys here rather than letting the provider's JobException
-        // fall into the generic 500 below. A behavioural-key override is a malformed request, not a
-        // provider fault, and the caller needs to know which key was wrong to fix it. Checked
-        // before dispatch so nothing is created on the way to a rejection -- Metadata.merge()
-        // throws again provider-side, but that's a backstop, not the primary defence. Cosmetic
-        // reserved keys (hidden, agent, link.*, ...) pass through and are free to override.
-        try {
-            Metadata.validate(metadataOverrides)
-        } catch (e: ReservedMetadataKeyException) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(mapOf("error" to e.message))
-                .build()
-        }
 
         // Same fail-fast-into-400 pattern for per-container env (issue #73): a container name the
         // profile doesn't declare is a malformed request, not a provider fault. Validation runs
@@ -314,6 +321,7 @@ class ConductorAdminJobsResource @Inject constructor(
         user: User,
         elementName: String,
         profile: dev.getelements.conductor.service.JobProfile,
+        metadata: Map<String, String>,
     ): Boolean {
         val decision = when (val session = resolveSession(sessionSecret)) {
             null -> JobAccessGate.Decision.NoDecision
@@ -327,6 +335,7 @@ class ConductorAdminJobsResource @Inject constructor(
                     profile = profile,
                     execution = null,
                     namespace = profile.namespace,
+                    metadata = metadata,
                 )
             )
         }
@@ -349,6 +358,7 @@ class ConductorAdminJobsResource @Inject constructor(
                         profile = null,
                         execution = lookup.execution,
                         namespace = lookup.execution.namespace,
+                        metadata = lookup.execution.metadata,
                     )
                 )
             }

@@ -35,7 +35,11 @@ import dev.getelements.elements.sdk.annotation.ElementServiceExport
  *    one votes [JobAccessVote.ALLOW] and none vote [JobAccessVote.DENY]. [JobAccessVote.PASS] is
  *    an abstention: it is neither a yes nor a veto, and is ignored. A `SUPERUSER` session is
  *    subject to the same vote as any other — there is no superuser bypass once a policy is
- *    deployed. When every vote abstains, the historical `SUPERUSER`-only rule applies.
+ *    deployed. When every vote abstains, the historical `SUPERUSER`-only rule applies. The
+ *    context carries the action's effective per-execution metadata
+ *    ([JobAccessContext.metadata]) alongside the namespace, so a policy can vote on workload
+ *    attributes stamped at dispatch (e.g. a `namazu.conductor`-prefixed owner marker) rather than
+ *    namespace alone.
  *
  * Implementations must be safe to call from any thread and should not block for long.
  */
@@ -100,6 +104,17 @@ data class JobAccessContext(
      * concept.
      */
     val namespace: String? = null,
+
+    /**
+     * The effective per-execution metadata the action targets, for policies that vote on
+     * workload attributes rather than namespace — e.g. a `namazu.conductor`-prefixed owner marker
+     * written at dispatch. For an EXECUTE this is
+     * [Metadata.merge][dev.getelements.conductor.Metadata.merge] applied to
+     * [JobProfile.metadata] with the caller's `JobRequest.metadata` overrides — what the
+     * workload will actually carry when it lands. For a STOP this is the execution's read-back
+     * [JobExecution.metadata]. Empty for providers with no metadata channel.
+     */
+    val metadata: Map<String, String> = emptyMap(),
 
 )
 
