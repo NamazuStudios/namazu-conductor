@@ -2,6 +2,7 @@ package dev.getelements.conductor.admin.ws
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import dev.getelements.conductor.JobStdio
+import dev.getelements.conductor.Scopes
 import dev.getelements.conductor.TerminalAttachContext
 import dev.getelements.conductor.TerminalAttachVote
 import dev.getelements.conductor.TerminalLivenessEvents
@@ -210,7 +211,7 @@ internal object TerminalSessionHandler {
                         command = command,
                         elementName = lookup.elementName,
                         execution = lookup.execution,
-                        namespace = lookup.execution.namespace
+                        scope = Scopes.of(lookup.execution)
                     )
                 )
             } catch (e: Exception) {
@@ -329,7 +330,7 @@ internal object TerminalSessionHandler {
                     jobId = lookup.execution.id,
                     elementName = lookup.elementName,
                     execution = lookup.execution,
-                    namespace = lookup.execution.namespace
+                    scope = Scopes.of(lookup.execution)
                 )
             )
             logger.debug("Published terminal liveness event for job '{}'", lookup.execution.id)

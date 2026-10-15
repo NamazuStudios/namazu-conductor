@@ -1,6 +1,7 @@
 package dev.getelements.conductor.admin
 
 import dev.getelements.conductor.JobVisibility
+import dev.getelements.conductor.Scopes
 import dev.getelements.conductor.service.OrchestrationService
 import dev.getelements.elements.sdk.ElementRegistrySupplier
 import dev.getelements.elements.sdk.exception.SdkServiceNotFoundException
@@ -22,6 +23,7 @@ import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.slf4j.LoggerFactory
@@ -50,9 +52,12 @@ class ConductorAdminResource @Inject constructor(
     @Operation(
         summary = "List job profiles across all providers",
         description = "Returns the available JobProfiles from every deployed OrchestrationService provider. " +
+            "With the optional `scope` query parameter, only profiles belonging to that scope " +
+            "(Kubernetes namespace, reserved namazu.conductor/scope tag) are returned — the " +
+            "scope-tree panel's per-scope row fetch; omit it for the full listing. " +
             "Providers that fail to respond are included with a non-null error field. " +
             "SUPERUSER sessions see every profile. Otherwise a deployed JobAccessPolicy may grant " +
-            "listing visibility, in which case rows are filtered serverside to the namespaces the " +
+            "listing visibility, in which case rows are filtered serverside to the scopes the " +
             "session may see; with no policy deployed (or none granting visibility) this requires " +
             "SUPERUSER level, as historically."
     )
@@ -61,7 +66,10 @@ class ConductorAdminResource @Inject constructor(
     @ApiResponse(responseCode = "403", description = "Not authenticated, or insufficient privilege level and no JobAccessPolicy grants visibility.")
     @ApiResponse(responseCode = "503", description = "No OrchestrationService providers are currently deployed.",
         content = [Content(schema = Schema(example = """{"status":"error","message":"No OrchestrationService providers are deployed"}"""))])
-    fun getProfiles(@HeaderParam(Headers.SESSION_SECRET) sessionSecret: String?): Response {
+    fun getProfiles(
+        @HeaderParam(Headers.SESSION_SECRET) sessionSecret: String?,
+        @QueryParam("scope") scope: String?
+    ): Response {
         val user = userService.currentUser
             ?: return Response.status(Response.Status.FORBIDDEN).build()
 
@@ -89,10 +97,12 @@ class ConductorAdminResource @Inject constructor(
                 try {
                     val service = supplier.get()
                     val profiles = service.getAvailableProfiles()
+                        .filter { JobAccessGate.profileVisible(it, visibility) }
+                        .filter { scope == null || Scopes.of(it) == scope }
                     ProviderResult(
                         element = name,
                         providerType = profiles.firstOrNull()?.javaClass?.simpleName,
-                        profiles = profiles.filter { JobAccessGate.profileVisible(it, visibility) },
+                        profiles = profiles,
                         error = null,
                         jobSetName = service.jobSetName,
                         jobSetDescription = service.jobSetDescription

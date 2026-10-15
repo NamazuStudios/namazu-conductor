@@ -37,12 +37,13 @@ data class JobExecution(
     val containers : List<ContainerRef> = emptyList(),
 
     /**
-     * The effective namespace the running workload was created in, populated by providers that
-     * have a namespace concept (Kubernetes). Providers without one (ECS, EdgeGap) leave this null.
-     * Distinct from any [JobScope] supplied at launch time — this reflects where the workload
-     * actually landed. Exposed to the terminal attach policy layer.
+     * The provider-native scope the running workload belongs to — the Kubernetes namespace, a
+     * reserved `namazu.conductor/scope` tag elsewhere. Populated by providers that have a scope
+     * concept; providers without one (ECS, EdgeGap) leave this null. Distinct from any [JobScope]
+     * supplied at launch time — this reflects where the workload actually landed. Exposed to the
+     * terminal attach policy layer.
      */
-    val namespace : String? = null,
+    val scope : String? = null,
 
     /**
      * The metadata actually present on the running workload — the profile's declared set with

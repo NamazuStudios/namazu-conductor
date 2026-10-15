@@ -81,10 +81,10 @@ data class TerminalAttachContext(
     val execution: JobExecution,
 
     /**
-     * The effective namespace the job's workload was created in, or `null` for providers without
-     * a namespace concept (ECS, EdgeGap).
+     * The provider-native scope the job's workload belongs to, or `null` for providers without
+     * a scope concept (ECS, EdgeGap).
      */
-    val namespace: String?,
+    val scope: String?,
 
 )
 

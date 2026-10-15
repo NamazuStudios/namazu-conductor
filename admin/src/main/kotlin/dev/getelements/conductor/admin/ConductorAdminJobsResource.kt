@@ -6,6 +6,7 @@ import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobRequest
 import dev.getelements.conductor.JobVisibility
 import dev.getelements.conductor.Metadata
+import dev.getelements.conductor.Scopes
 import dev.getelements.conductor.admin.model.ExecuteJobRequest
 import dev.getelements.conductor.admin.model.StopJobRequest
 import dev.getelements.conductor.exception.ReservedMetadataKeyException
@@ -32,6 +33,7 @@ import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.slf4j.LoggerFactory
@@ -62,9 +64,12 @@ class ConductorAdminJobsResource @Inject constructor(
     @Operation(
         summary = "List running jobs across all providers",
         description = "Returns a point-in-time snapshot of executions from every deployed OrchestrationService provider. " +
+            "With the optional `scope` query parameter, only executions belonging to that scope " +
+            "(Kubernetes namespace, reserved namazu.conductor/scope tag) are returned — the " +
+            "scope-tree panel's per-scope row fetch; omit it for the full snapshot. " +
             "Providers that fail to respond are included with a non-null error field. " +
             "SUPERUSER sessions see every execution. Otherwise a deployed JobAccessPolicy may grant " +
-            "listing visibility, in which case rows are filtered serverside to the namespaces the " +
+            "listing visibility, in which case rows are filtered serverside to the scopes the " +
             "session may see; with no policy deployed (or none granting visibility) this requires " +
             "SUPERUSER level, as historically."
     )
@@ -72,7 +77,10 @@ class ConductorAdminJobsResource @Inject constructor(
     @ApiResponse(responseCode = "200", description = "Execution list retrieved. Check the 'status' field: ok | partial | error.")
     @ApiResponse(responseCode = "403", description = "Not authenticated, or insufficient privilege level and no JobAccessPolicy grants visibility.")
     @ApiResponse(responseCode = "503", description = "No OrchestrationService providers are currently deployed.")
-    fun listExecutions(@HeaderParam(Headers.SESSION_SECRET) sessionSecret: String?): Response {
+    fun listExecutions(
+        @HeaderParam(Headers.SESSION_SECRET) sessionSecret: String?,
+        @QueryParam("scope") scope: String?
+    ): Response {
         val user = userService.currentUser
             ?: return Response.status(Response.Status.FORBIDDEN).build()
 
@@ -98,7 +106,9 @@ class ConductorAdminJobsResource @Inject constructor(
                     val service = supplier.get()
                     ProviderExecutionResult(
                         element = name,
-                        executions = service.listExecutions().filter { JobAccessGate.executionVisible(it, visibility) },
+                        executions = service.listExecutions()
+                            .filter { JobAccessGate.executionVisible(it, visibility) }
+                            .filter { scope == null || Scopes.of(it) == scope },
                         error = null,
                         jobSetName = service.jobSetName,
                         jobSetDescription = service.jobSetDescription
@@ -326,7 +336,7 @@ class ConductorAdminJobsResource @Inject constructor(
                     elementName = elementName,
                     profile = profile,
                     execution = null,
-                    namespace = profile.namespace,
+                    scope = Scopes.of(profile),
                 )
             )
         }
@@ -348,7 +358,7 @@ class ConductorAdminJobsResource @Inject constructor(
                         elementName = lookup.elementName,
                         profile = null,
                         execution = lookup.execution,
-                        namespace = lookup.execution.namespace,
+                        scope = Scopes.of(lookup.execution),
                     )
                 )
             }

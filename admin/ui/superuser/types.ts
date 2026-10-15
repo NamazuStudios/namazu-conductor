@@ -14,6 +14,9 @@ export interface JobEndpoint {
 export interface JobExecution {
   id: string
   status: string
+  /** The provider-native scope the workload belongs to — Kubernetes namespace, reserved
+   * namazu.conductor/scope tag elsewhere; null when the provider has no scope concept. */
+  scope?: string | null
   endpoints?: JobEndpoint[]
   details?: unknown
   containers?: ContainerRef[]
@@ -27,6 +30,9 @@ export interface JobProfile {
   /** Friendly display name from the provider (namazu.conductor/display-name annotation or
    * displayName tag); null/absent when the provider has no name source — fall back to id. */
   name?: string | null
+  /** The provider-native scope this profile's jobs belong to — Kubernetes namespace, reserved
+   * namazu.conductor/scope tag elsewhere; null when the provider has no scope concept. */
+  scope?: string | null
   containers?: ContainerRef[]
   terminalJob?: boolean
   description?: string
@@ -49,6 +55,23 @@ export interface ProviderProfilesResult {
 export interface ProviderExecutionsResult {
   element: string
   executions?: JobExecution[]
+  error?: string | null
+  jobSetName?: string | null
+  jobSetDescription?: string | null
+}
+
+/** Per-scope row counts from GET /scopes, for the dashboard's scope tree (issue #52). */
+export interface ScopeCount {
+  /** Null for rows with no resolved scope — the tree groups those under a "default" node. */
+  scope: string | null
+  profiles: number
+  executions: number
+}
+
+export interface ProviderScopesResult {
+  element: string
+  providerType?: string | null
+  scopes?: ScopeCount[] | null
   error?: string | null
   jobSetName?: string | null
   jobSetDescription?: string | null

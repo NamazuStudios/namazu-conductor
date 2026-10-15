@@ -169,7 +169,7 @@ class KubernetesOrchestrationService @Inject constructor(
         }
 
         return KubernetesJobProfile(
-            namespace = template.metadata?.namespace ?: namespace,
+            scope = template.metadata?.namespace ?: namespace,
             templateName = templateName,
             primaryContainer = container.name,
             containers = containerRefsFor(containers, annotations),
@@ -304,10 +304,10 @@ class KubernetesOrchestrationService @Inject constructor(
             ?: throw JobException("JobProfile must be a ${KubernetesJobProfile::class.simpleName}; got ${request.profile::class.simpleName}")
 
         val template = client.resources(PodTemplate::class.java)
-            .inNamespace(profile.namespace)
+            .inNamespace(profile.scope)
             .withName(profile.templateName)
             .get()
-            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.namespace}'")
+            ?: throw JobException("PodTemplate '${profile.templateName}' not found in namespace '${profile.scope}'")
 
         val podTemplateSpec = template.template
             ?: throw JobException("PodTemplate '${profile.templateName}' has no pod template spec")
@@ -321,7 +321,7 @@ class KubernetesOrchestrationService @Inject constructor(
         if (request.tty) applyTty(spec, profile.primaryContainer)
 
         val namespace = request.scope.filterIsInstance<NamespaceScope>().firstOrNull()?.namespace
-            ?: profile.namespace
+            ?: profile.scope
 
         val runName = "${profile.templateName}-${UUID.randomUUID().toString().substring(0, 8)}"
         applyServiceEnv(spec, profile.primaryContainer, runName, profile.exposePorts)
@@ -445,7 +445,7 @@ class KubernetesOrchestrationService @Inject constructor(
                 name = runName
             ),
             containers = profile.containers,
-            namespace = namespace,
+            scope = namespace,
             metadata = metadata
         )
     }
@@ -817,7 +817,7 @@ class KubernetesOrchestrationService @Inject constructor(
                         status = status,
                         details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = ns,
+                        scope = ns,
                         metadata = reportedMetadataOf(annotations)
                     )
                     return@pod
@@ -830,7 +830,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = ns, workloadKind = "pod", name = podName),
                     containers = containers,
-                    namespace = ns,
+                    scope = ns,
                     metadata = reportedMetadataOf(annotations)
                 )
             }
@@ -866,7 +866,7 @@ class KubernetesOrchestrationService @Inject constructor(
                         status = mapJobStatus(ns, jobName, job),
                         details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
                         containers = containers,
-                        namespace = ns,
+                        scope = ns,
                         metadata = reportedMetadataOf(jobAnnotations)
                     )
                     return@job
@@ -881,7 +881,7 @@ class KubernetesOrchestrationService @Inject constructor(
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
                     details = KubernetesExecutionDetails(namespace = ns, workloadKind = "job", name = name),
                     containers = containers,
-                    namespace = ns,
+                    scope = ns,
                     metadata = reportedMetadataOf(jobAnnotations)
                 )
             }
@@ -1000,7 +1000,7 @@ class KubernetesOrchestrationService @Inject constructor(
         status = status,
         endpoints = if (status == JobStatus.RUNNING) mapEndpoints(execution) else emptyList(),
         containers = execution.containers,
-        namespace = execution.namespace ?: decodeId(execution.id).first,
+        scope = execution.scope ?: decodeId(execution.id).first,
         metadata = execution.metadata
     )
 

@@ -18,14 +18,15 @@ import dev.getelements.elements.sdk.annotation.ElementServiceExport
  * When no policy Element is deployed the admin module falls back to its historical behaviour:
  * the REST endpoints admit `SUPERUSER` sessions only. When at least one is deployed:
  *
- *  - **Listings** (`GET /profiles`, `GET /jobs`) consult [visibleNamespaces] once per request and
- *    filter every returned row down to what the session may see. Rows are matched by their
- *    namespace ([JobProfile.namespace] for profiles, [JobExecution.namespace] for executions);
- *    rows whose namespace is `null` (providers with no namespace concept — ECS, EdgeGap) are
+ *  - **Listings** (`GET /profiles`, `GET /jobs`) consult [visibleScopes] once per request and
+ *    filter every returned row down to what the session may see. Rows are matched by their scope
+ *    ([Scopes.of][dev.getelements.conductor.Scopes.of] — the provider-native scope field for
+ *    [JobProfile]/[JobExecution], falling back to the reserved `namazu.conductor/scope` metadata
+ *    key); rows whose scope is `null` (providers with no scope concept — ECS, EdgeGap) are
  *    visible only under [JobVisibility.All]. Visibility is aggregated as a union:
  *    if any policy returns [JobVisibility.All] the session sees everything, otherwise the union of
- *    every policy's [JobVisibility.Namespaces] sets applies. A policy returning [JobVisibility.None]
- *    (or throwing) contributes nothing — the abstention. A [JobVisibility.Namespaces] grant — even
+ *    every policy's [JobVisibility.Scopes] sets applies. A policy returning [JobVisibility.None]
+ *    (or throwing) contributes nothing — the abstention. A [JobVisibility.Scopes] grant — even
  *    an **empty** set — authorizes the listing (an authorized session that simply has nothing to
  *    see); only when no policy is deployed, or every policy abstains, does the historical
  *    `SUPERUSER`-only rule apply instead.
@@ -43,11 +44,11 @@ import dev.getelements.elements.sdk.annotation.ElementServiceExport
 interface JobAccessPolicy {
 
     /**
-     * Reports which job namespaces the supplied session may see in listing responses, so the
+     * Reports which job scopes the supplied session may see in listing responses, so the
      * admin module can filter rows serverside rather than trusting the client to hide them.
      */
-    fun visibleNamespaces(session: dev.getelements.elements.sdk.model.session.Session,
-                          user: dev.getelements.elements.sdk.model.user.User?): JobVisibility
+    fun visibleScopes(session: dev.getelements.elements.sdk.model.session.Session,
+                      user: dev.getelements.elements.sdk.model.user.User?): JobVisibility
 
     /**
      * Votes on whether the session in [context] may perform [JobAccessContext.action] against the
@@ -95,11 +96,11 @@ data class JobAccessContext(
     val execution: JobExecution? = null,
 
     /**
-     * The effective namespace the action would land in or target — [JobProfile.namespace] for an
-     * EXECUTE, [JobExecution.namespace] for a STOP. `null` when the provider has no namespace
-     * concept.
+     * The provider-native scope the action would land in or target — [JobProfile.scope] for an
+     * EXECUTE, [JobExecution.scope] for a STOP. `null` when the provider has no scope concept
+     * (or the row carries none).
      */
-    val namespace: String? = null,
+    val scope: String? = null,
 
 )
 
@@ -118,16 +119,16 @@ enum class JobAccessVote {
 
 /**
  * The listing visibility a [JobAccessPolicy] grants a session. Aggregated as a union across every
- * deployed policy: any [All] wins outright, [Namespaces] sets merge, and [None] contributes
+ * deployed policy: any [All] wins outright, [Scopes] sets merge, and [None] contributes
  * nothing (the abstention).
  */
 sealed interface JobVisibility {
 
-    /** The session may see every row, including rows with a `null` namespace. */
+    /** The session may see every row, including rows with a `null` scope. */
     object All : JobVisibility
 
-    /** The session may see only rows whose namespace is in [namespaces]. */
-    data class Namespaces(val namespaces: Set<String>) : JobVisibility
+    /** The session may see only rows whose scope is in [scopes]. */
+    data class Scopes(val scopes: Set<String>) : JobVisibility
 
     /** The session may see nothing this policy grants — an abstention, not a veto. */
     object None : JobVisibility
