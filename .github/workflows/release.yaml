@@ -1,10 +1,10 @@
-name: Maven Central Release
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Perform a dry run (no commits, tags, or Maven Central deploy)'
+        description: 'Perform a dry run (no commits, tags, or deploy)'
         required: false
         default: 'false'
       resume_from_build:
@@ -39,9 +39,6 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-          server-id: central
-          server-username: CENTRAL_USERNAME
-          server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: GPG_PASSPHRASE
 
@@ -117,7 +114,7 @@ jobs:
           echo "Next snapshot:      ${{ steps.version.outputs.next_version }}"
           echo "Would run: mvn versions:set -DnewVersion=${{ steps.version.outputs.release_version }}"
           echo "Would tag: v${{ steps.version.outputs.release_version }}"
-          echo "Would deploy to Maven Central"
+          echo "Would deploy to maven.namazustudios.com"
           echo "Would create GitHub release"
           echo "Would bump to: ${{ steps.version.outputs.next_version }}"
           echo "No files or tags have been changed."
@@ -155,17 +152,6 @@ jobs:
             --paths "/${GROUP_PATH}/*"
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-
-      # Integration tests are intentionally skipped here (-DskipITs) — see the "Verify release
-      # commit already passed integration tests" step above for why that's safe.
-      - name: Build and Publish Release (Maven Central, optional)
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        continue-on-error: true
-        run: mvn -B --no-transfer-progress -Pcentral-publish clean deploy -DskipITs
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
 
       - name: Create GitHub release
         if: ${{ success() && github.event.inputs.dry_run != 'true' }}
