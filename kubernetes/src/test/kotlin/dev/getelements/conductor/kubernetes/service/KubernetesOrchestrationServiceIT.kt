@@ -1082,6 +1082,35 @@ class KubernetesOrchestrationServiceIT {
     }
 
     /**
+     * Stopping an execution whose workload is already gone must succeed, not throw (issue #99).
+     * `listExecutions()` is a point-in-time snapshot, so a caller stopping a COMPLETED (or
+     * raced) row can target a Job Kubernetes has already reaped; the caller's desired outcome
+     * (the object gone from the namespace) already holds true, and throwing turned every
+     * cleanup of a stale listing row into a 500. Mirrors the real admin-REST call shape —
+     * `ConductorAdminJobsResource.stop()` dispatches a freshly fabricated `JobExecution(id,
+     * RUNNING)` — by stopping the same execution id a second time after the first stop
+     * completed and asserting the second stop returns normally.
+     */
+    @Test
+    fun stopOfAlreadyGoneWorkloadSucceeds() {
+        val profile = service.findAvailableProfile("$namespace:$jobTemplate")
+            ?: throw AssertionError("Profile '$namespace:$jobTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        val (ns, _, jobName) = decodeExecutionId(execution.id)
+
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+        service.stop(execution)
+        // BACKGROUND-propagation delete is asynchronous — await the object's actual disappearance
+        // before deciding whether the second stop has anything left to no-op.
+        awaitWorkloadAbsent(ns, jobName)
+
+        // The second stop — in the same shape the admin REST dispatches (a freshly fabricated
+        // RUNNING execution carrying only the id) — must be a silent success, not a 500.
+        service.stop(JobExecution(id = execution.id, status = JobStatus.RUNNING))
+    }
+
+    /**
      * Stopping a HELM execution must succeed with **no native classifier bundled** in the .elm
      * (issue #78): helm-java resolves the native library for the runtime OS/arch on first use via
      * its built-in RemoteJarLoader — downloading the matching classifier artifact from Maven
@@ -1249,6 +1278,15 @@ class KubernetesOrchestrationServiceIT {
             Thread.sleep(1000)
         }
         throw AssertionError("Secret copy '$name' was not garbage-collected with its workload")
+    }
+
+    /** BACKGROUND-propagation delete is asynchronous — await the object's actual disappearance. */
+    private fun awaitWorkloadAbsent(ns: String, name: String) {
+        repeat(30) {
+            if (client.batch().v1().jobs().inNamespace(ns).withName(name).get() == null) return
+            Thread.sleep(1000)
+        }
+        throw AssertionError("Workload '$name' was not deleted in namespace '$ns'")
     }
 
     private fun decodeExecutionId(id: String): Triple<String, String, String> {
