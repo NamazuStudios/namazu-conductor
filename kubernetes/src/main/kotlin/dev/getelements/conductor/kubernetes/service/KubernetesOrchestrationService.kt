@@ -1007,8 +1007,10 @@ class KubernetesOrchestrationService @Inject constructor(
     /**
      * Deletes the workload identified by [execution] and any Service the provider created for it.
      *
-     * @throws dev.getelements.conductor.exception.JobException if the workload is not found
-     *   (Fabric8 returns an empty result list rather than throwing on 404).
+     * Idempotent for already-gone workloads (issue #99): an empty delete result — Fabric8
+     * returns an empty result list rather than throwing on 404 — is treated as a successful
+     * no-op, since the caller's desired outcome (the object gone from the namespace) already
+     * holds true. Only a bearing provider fault (RBAC, API unreachable) still fails.
      */
     override fun stop(execution: JobExecution) {
         val (ns, kind, name) = decodeId(execution.id)
@@ -1030,10 +1032,20 @@ class KubernetesOrchestrationService @Inject constructor(
         }
 
         if (deleted.isEmpty()) {
-            logger.warn("stop(): {} '{}' not found in namespace '{}' — nothing deleted", kind, name, ns)
-            throw JobException(
-                "Kubernetes ${kind.name.lowercase()} '$name' not found in namespace '$ns'"
+            // Already gone — this is a SUCCESSFUL stop, not a fault (issue #99). listExecutions()
+            // is a point-in-time snapshot, so by the time a caller stops a COMPLETED (or raced)
+            // row the Job/Pod may have been reaped by Kubernetes or the @KeepWarm babysitter; the
+            // outcome the caller wants — the object gone from the namespace — already holds true.
+            // Mirrors the pod/job paths' own permissiveness from the Helm branch, where an
+            // already-uninstalled release treats ignoreNotFound as a successful uninstall, and
+            // reinforces the after-the-fact Service deletion below (which refuses to fail a
+            // successful stop over the already-gone fine print for exactly the same reason).
+            // Throwing here turned every cleanup of a stale listing row into a 500.
+            logger.info(
+                "stop(): {} '{}' not found in namespace '{}' — already gone; " +
+                    "treating stop as idempotent no-op", kind, name, ns
             )
+            return
         }
 
         logger.debug("stop(): deleted {} '{}' in namespace '{}'", kind, name, ns)
