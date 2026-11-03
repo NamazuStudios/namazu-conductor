@@ -211,7 +211,8 @@ internal object TerminalSessionHandler {
                         command = command,
                         elementName = lookup.elementName,
                         execution = lookup.execution,
-                        scope = Scopes.of(lookup.execution)
+                        scope = Scopes.of(lookup.execution),
+                        metadata = lookup.execution.metadata
                     )
                 )
             } catch (e: Exception) {

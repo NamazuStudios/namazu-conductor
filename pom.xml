@@ -34,7 +34,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>dev.getelements.conductor</groupId>
   <artifactId>conductor</artifactId>
-  <version>1.2.17-SNAPSHOT</version>
+  <version>1.2.20-SNAPSHOT</version>
 
   <packaging>pom</packaging>
 
@@ -224,6 +224,33 @@
       </distributionManagement>
     </profile>
     <profile>
+      <id>gpg-sign</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.4</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+                <configuration>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
       <id>central-publish</id>
       <build>
         <plugins>
@@ -265,5 +292,18 @@
       </build>
     </profile>
   </profiles>
+
+    <repositories>
+        <repository>
+            <id>namazu</id>
+            <url>https://maven.namazustudios.com/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
 </project>
