@@ -83,14 +83,25 @@ function postJson<T>(path: string, payload: unknown): Promise<T> {
   })
 }
 
-export async function fetchProfiles() {
-  const root = await resolveRestRoot()
-  return requestJson<{ status: string; providers: import('./types').ProviderProfilesResult[] }>(`${root}/profiles`)
+function scopeQuery(scope?: string | null): string {
+  return scope ? `?scope=${encodeURIComponent(scope)}` : ''
 }
 
-export async function fetchJobs() {
+export async function fetchProfiles(scope?: string | null) {
   const root = await resolveRestRoot()
-  return requestJson<{ status: string; providers: import('./types').ProviderExecutionsResult[] }>(`${root}/jobs`)
+  return requestJson<{ status: string; providers: import('./types').ProviderProfilesResult[] }>(
+    `${root}/profiles${scopeQuery(scope)}`)
+}
+
+export async function fetchJobs(scope?: string | null) {
+  const root = await resolveRestRoot()
+  return requestJson<{ status: string; providers: import('./types').ProviderExecutionsResult[] }>(
+    `${root}/jobs${scopeQuery(scope)}`)
+}
+
+export async function fetchScopes() {
+  const root = await resolveRestRoot()
+  return requestJson<{ status: string; providers: import('./types').ProviderScopesResult[] }>(`${root}/scopes`)
 }
 
 export interface ExecuteJobRequestBody {

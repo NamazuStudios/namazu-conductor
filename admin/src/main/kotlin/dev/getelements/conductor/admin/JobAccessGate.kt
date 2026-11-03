@@ -4,6 +4,7 @@ import dev.getelements.conductor.JobAccessContext
 import dev.getelements.conductor.JobAccessVote
 import dev.getelements.conductor.JobExecution
 import dev.getelements.conductor.JobVisibility
+import dev.getelements.conductor.Scopes
 import dev.getelements.conductor.service.JobProfile
 import dev.getelements.elements.sdk.model.session.Session
 import dev.getelements.elements.sdk.model.user.User
@@ -18,10 +19,10 @@ import org.slf4j.LoggerFactory
  *    abstains. A policy that throws is treated as `PASS`.
  *
  *  - **Visibility** (listings): a union — any [JobVisibility.All] wins outright, otherwise the
- *    union of every [JobVisibility.Namespaces] set applies. A policy that throws is treated as
+ *    union of every [JobVisibility.Scopes] set applies. A policy that throws is treated as
  *    [JobVisibility.None] (the abstention). When no policy is deployed, or every policy abstains,
  *    [visibility] returns `null` so the caller falls back to the historical `SUPERUSER`-only
- *    rule. A `Namespaces` grant — even an empty set — authorizes the listing.
+ *    rule. A `Scopes` grant — even an empty set — authorizes the listing.
  */
 internal object JobAccessGate {
 
@@ -51,24 +52,24 @@ internal object JobAccessGate {
 
         ElementLookup.forEachJobAccessPolicy(callerClass) { elementName, policy ->
             val v = try {
-                policy.visibleNamespaces(session, user)
+                policy.visibleScopes(session, user)
             } catch (e: Exception) {
-                logger.warn("JobAccessPolicy [{}] threw in visibleNamespaces(); treating as None", elementName, e)
+                logger.warn("JobAccessPolicy [{}] threw in visibleScopes(); treating as None", elementName, e)
                 JobVisibility.None
             }
             when (v) {
                 is JobVisibility.All -> { sawGrant = true; sawAll = true }
-                is JobVisibility.Namespaces -> {
+                is JobVisibility.Scopes -> {
                     sawGrant = true
                     if (union == null) union = mutableSetOf()
-                    union!!.addAll(v.namespaces)
+                    union!!.addAll(v.scopes)
                 }
                 JobVisibility.None -> {}
             }
         }
 
         if (!sawGrant) return null
-        return if (sawAll) JobVisibility.All else JobVisibility.Namespaces(union ?: emptySet())
+        return if (sawAll) JobVisibility.All else JobVisibility.Scopes(union ?: emptySet())
     }
 
     /**
@@ -101,17 +102,22 @@ internal object JobAccessGate {
         }
     }
 
-    /** True when [profile]'s row may appear in a listing response under [visibility]. */
+    /**
+     * True when [profile]'s row may appear in a listing response under [visibility]. Rows are
+     * matched by resolved scope ([Scopes.of]) — the native scope field first, else the reserved
+     * `scope` metadata key — so a tag-scoped row is visible to a matching grant regardless of
+     * whether its provider has a native scope concept.
+     */
     fun profileVisible(profile: JobProfile, visibility: JobVisibility): Boolean = when (visibility) {
         JobVisibility.All -> true
-        is JobVisibility.Namespaces -> profile.namespace in visibility.namespaces
+        is JobVisibility.Scopes -> Scopes.of(profile) in visibility.scopes
         JobVisibility.None -> false
     }
 
     /** True when [execution]'s row may appear in a listing response under [visibility]. */
     fun executionVisible(execution: JobExecution, visibility: JobVisibility): Boolean = when (visibility) {
         JobVisibility.All -> true
-        is JobVisibility.Namespaces -> execution.namespace in visibility.namespaces
+        is JobVisibility.Scopes -> Scopes.of(execution) in visibility.scopes
         JobVisibility.None -> false
     }
 

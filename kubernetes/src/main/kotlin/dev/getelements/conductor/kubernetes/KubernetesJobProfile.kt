@@ -8,7 +8,7 @@ import dev.getelements.conductor.service.JobProfile
  * the discovery scope (the configured namespace, or every namespace when namespace discovery is `any`
  * — see [KubernetesAttributes.NAMESPACE_DISCOVERY]).
  *
- * The [id] is `"$namespace:$templateName"`. [primaryContainer] is the name of the first container in the
+ * The [id] is `"$scope:$templateName"`. [primaryContainer] is the name of the first container in the
  * template's pod spec and is the target of command, argument, and environment overrides at execution
  * time; [containers] lists every container in the template's pod spec, in pod-spec order, with the
  * first entry marked [ContainerRef.primary]. [workloadKind] is derived from the
@@ -18,7 +18,12 @@ import dev.getelements.conductor.service.JobProfile
  * (defaulting to `"NodePort"`).
  */
 data class KubernetesJobProfile(
-    override val namespace: String,
+    /**
+     * The Kubernetes namespace the `PodTemplate` was discovered in — the provider-native
+     * realization of [JobProfile.scope]. Distinct from a `namazu.conductor/job-set` label (the
+     * per-instance filter) and from [WorkloadKind] (what gets created).
+     */
+    override val scope: String,
     /** The `PodTemplate`'s resource name — distinct from [JobProfile.name], the friendly display name. */
     val templateName: String,
     val primaryContainer: String,
@@ -68,6 +73,6 @@ data class KubernetesJobProfile(
 ) : JobProfile {
 
     override val id: String
-        get() = "$namespace:$templateName"
+        get() = "$scope:$templateName"
 
 }

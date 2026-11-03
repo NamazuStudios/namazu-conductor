@@ -32,7 +32,8 @@ class ConductorAdminApplication : Application() {
         val WS_ROOT: String = "dev.getelements.elements.element.ws.root"
 
         /**
-         * Mounts the REST API ([ConductorAdminResource], [ConductorAdminJobsResource]):
+         * Mounts the REST API ([ConductorAdminResource], [ConductorAdminJobsResource],
+         * [ConductorAdminScopesResource], [ConductorAdminSecretsResource]):
          * `http://<host>/conductor/admin/...`.
          *
          * This is the original path from the 1.1 release line, restored for backward compatibility
@@ -71,6 +72,7 @@ class ConductorAdminApplication : Application() {
     override fun getClasses(): Set<Class<*>> = setOf(
         ConductorAdminResource::class.java,
         ConductorAdminJobsResource::class.java,
+        ConductorAdminScopesResource::class.java,
         ConductorAdminSecretsResource::class.java,
         DefaultExceptionMapper::class.java
     )

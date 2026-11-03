@@ -48,13 +48,14 @@ interface JobProfile {
     val name: String? get() = null
 
     /**
-     * The namespace this profile's jobs are created in, for providers that have a namespace
-     * concept (Kubernetes). `null` for providers without one — mirrors
-     * [dev.getelements.conductor.JobExecution.namespace]. Surfaced so authorization layers (e.g.
-     * [dev.getelements.conductor.JobAccessPolicy]) can decide on an execute *before* dispatch,
-     * from the profile alone.
+     * The provider-native scope this profile's jobs belong to, for providers that have a scope
+     * concept — the Kubernetes namespace, a reserved `namazu.conductor/scope` tag elsewhere.
+     * `null` when the provider (or this profile) has none; consumers group such rows under a
+     * default node. Mirrors [dev.getelements.conductor.JobExecution.scope]. Surfaced so
+     * authorization layers (e.g. [dev.getelements.conductor.JobAccessPolicy]) can decide on an
+     * execute *before* dispatch, from the profile alone.
      */
-    val namespace: String? get() = null
+    val scope: String? get() = null
 
     /**
      * Free-form, provider-agnostic presentation metadata declared alongside this profile by the

@@ -298,7 +298,7 @@ class KubernetesOrchestrationServiceIT {
         // findAvailableProfile resolves across namespaces, and execute() lands in the profile's own namespace.
         val profile = anyDiscovery.findAvailableProfile("$altNamespace:$altTemplate")
             ?: throw AssertionError("Profile '$altNamespace:$altTemplate' not found under discovery=any")
-        assertEquals(profile.namespace, altNamespace, "Expected the profile to carry its own namespace")
+        assertEquals(profile.scope, altNamespace, "Expected the profile to carry its own namespace")
 
         val execution = anyDiscovery.execute(JobRequest(profile = profile)).also { executions += it }
         anyDiscovery.getFutureForStatus(execution, JobStatus.COMPLETED).get(timeoutMinutes, TimeUnit.MINUTES)
@@ -306,7 +306,7 @@ class KubernetesOrchestrationServiceIT {
         // listExecutions() under discovery=any reports the workload with its own namespace.
         val listed = anyDiscovery.listExecutions().firstOrNull { it.id == execution.id }
             ?: throw AssertionError("Execution '${execution.id}' missing from discovery=any listing")
-        assertEquals(listed.namespace, altNamespace, "Expected the execution to report its own namespace")
+        assertEquals(listed.scope, altNamespace, "Expected the execution to report its own namespace")
     }
 
     /**
@@ -1138,7 +1138,7 @@ class KubernetesOrchestrationServiceIT {
                 workloadKind = "helm",
                 name = releaseName
             ),
-            namespace = namespace
+            scope = namespace
         )
 
         service.stop(execution)

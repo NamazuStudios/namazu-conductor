@@ -1,11 +1,12 @@
 import React from 'react'
-import { fetchJobs, stopJob } from './api'
+import { fetchJobs, fetchScopes, stopJob } from './api'
 import {
   Accordion, CollapsibleMarkdown, conductorKeySuffix, containerMetadataFlag, DetailGrid, LinkPills,
-  MarkdownBlock, MetadataPills, ShowHiddenCheckbox, metadataFlag, useShowHidden,
+  MetadataPills, ShowHiddenCheckbox, metadataFlag, useShowHidden,
 } from './ui'
+import { ScopeTree } from './ScopeTree'
 import { terminalSessionManager } from './terminal'
-import type { JobExecution, ProviderExecutionsResult } from './types'
+import type { JobExecution } from './types'
 
 const h = React.createElement
 
@@ -123,38 +124,32 @@ function RunningJobRow(props: { execution: JobExecution; element: string; onRefr
 }
 
 export function RunningJobsSection() {
-  const [data, setData] = React.useState<{ loading: boolean; providers: ProviderExecutionsResult[]; error: string | null }>({
-    loading: true, providers: [], error: null,
-  })
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
   const [sectionExpanded, setSectionExpanded] = React.useState(true)
+  const [scopesState, setScopesState] = React.useState<{ loading: boolean; status: string | null; error: string | null }>({
+    loading: true, status: null, error: null,
+  })
+  const [refreshToken, setRefreshToken] = React.useState(0)
   const [showHidden, setShowHidden] = useShowHidden()
 
-  const load = React.useCallback(() => {
-    fetchJobs()
-      .then((body) => setData({ loading: false, providers: body.providers || [], error: null }))
-      .catch((e: Error) => setData({ loading: false, providers: [], error: e.message }))
+  // Poll the (expanded) scopes every 10s by bumping the tree's refresh token; the tree reloads
+  // the scope list and every open scope's rows, never the full unfiltered listing.
+  React.useEffect(() => {
+    const interval = setInterval(() => setRefreshToken((v) => v + 1), 10000)
+    return () => clearInterval(interval)
   }, [])
 
-  React.useEffect(() => {
-    load()
-    const interval = setInterval(load, 10000)
-    return () => clearInterval(interval)
-  }, [load])
+  const refresh = React.useCallback(() => setRefreshToken((v) => v + 1), [])
 
-  const allExecutions = data.providers.flatMap((p) =>
-    (p.executions ?? []).map((execution) => ({ element: p.element, jobSetLabel: p.jobSetName ?? p.element, execution })))
-
-  const visible = showHidden
-    ? allExecutions
-    : allExecutions.filter((item) => !metadataFlag(item.execution.metadata, 'hidden'))
-  const hiddenCount = allExecutions.length - visible.length
-
-  const providerNotes = data.providers.filter((p) => p.jobSetDescription)
-
-  const refreshIcon: React.ReactNode = data.loading
-    ? h('span', { className: 'w-3 h-3 rounded-full bg-gray-400 animate-pulse inline-block' })
-    : '↺'
+  const renderRow = React.useCallback((row: JobExecution, ctx: { element: string; jobSetName?: string | null }) =>
+    h(RunningJobRow, {
+      execution: row,
+      element: ctx.element,
+      onRefresh: refresh,
+      isExpanded: expandedIds.has(row.id),
+      onToggle: () => toggle(row.id),
+      showHidden,
+    }), [expandedIds, refresh, showHidden])
 
   function toggle(id: string) {
     setExpandedIds((prev) => {
@@ -164,37 +159,40 @@ export function RunningJobsSection() {
     })
   }
 
+  const refreshIcon: React.ReactNode = scopesState.loading
+    ? h('span', { className: 'w-3 h-3 rounded-full bg-gray-400 animate-pulse inline-block' })
+    : '↺'
+
   const header = h('div', { className: 'flex items-center justify-between gap-3' },
     h('div', { className: 'flex items-center gap-4' },
       h('h2', { className: 'text-lg font-semibold' }, 'Running Jobs'),
-      hiddenCount > 0 && h('span', { className: 'text-xs text-muted-foreground' }, `${hiddenCount} hidden`),
       h(ShowHiddenCheckbox, { showHidden, onChange: setShowHidden })),
     h('button', {
-      onClick: (e: React.MouseEvent) => { e.stopPropagation(); load() },
-      disabled: data.loading,
+      onClick: (e: React.MouseEvent) => { e.stopPropagation(); refresh() },
+      disabled: scopesState.loading,
       className: 'flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm hover:bg-muted transition-colors disabled:opacity-50',
-    }, refreshIcon, data.loading ? ' Refreshing…' : ' Refresh'))
+    }, refreshIcon, scopesState.loading ? ' Refreshing…' : ' Refresh'))
 
   return h(Accordion, { isExpanded: sectionExpanded, onToggle: () => setSectionExpanded((v) => !v), header },
-    data.error && h('p', { className: 'text-xs text-destructive mb-2' }, data.error),
-    providerNotes.map((p) => h('div', {
-      key: `jobset-${p.element}`,
-      className: 'rounded-lg border bg-muted/30 p-3 mb-2',
-    },
-      h('div', { className: 'text-xs font-semibold mb-1' }, p.jobSetName ?? p.element),
-      h(MarkdownBlock, { markdown: p.jobSetDescription as string, className: 'text-sm' }))),
-    !data.loading && visible.length === 0 &&
-      h('p', { className: 'text-sm text-muted-foreground' }, 'No active jobs found.'),
-    visible.length > 0 &&
-      h('div', { className: 'space-y-2' },
-        visible.map((item) => h('div', { key: `${item.element}:${item.execution.id}` },
-          h('div', { className: 'text-xs text-muted-foreground mb-1 font-mono' }, item.jobSetLabel),
-          h(RunningJobRow, {
-            execution: item.execution,
-            element: item.element,
-            onRefresh: load,
-            isExpanded: expandedIds.has(item.execution.id),
-            onToggle: () => toggle(item.execution.id),
-            showHidden,
-          })))))
+    h(ScopeTree<JobExecution>, {
+      fetchScopes,
+      fetchScopeRows: async (scope) => {
+        const body = await fetchJobs(scope)
+        return {
+          status: body.status,
+          providers: body.providers.map((p) => ({
+            element: p.element,
+            error: p.error,
+            rows: p.executions ?? null,
+            jobSetName: p.jobSetName ?? null,
+          })),
+        }
+      },
+      renderRow,
+      rowKey: (row, ctx) => `${ctx.element}:${row.id}`,
+      isVisible: (execution) => showHidden || !metadataFlag(execution.metadata, 'hidden'),
+      emptyMessage: 'No active jobs found.',
+      refreshToken,
+      onScopesState: setScopesState,
+    }))
 }

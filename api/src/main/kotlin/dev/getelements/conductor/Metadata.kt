@@ -73,7 +73,7 @@ object Metadata {
         // kubernetes — synthesized on created workloads, never caller-owned
         "default-container-exec",
         // ecs — workload-kind selection, scoping, launch shape
-        "workloadkind", "jobset", "job-set", "launchtype", "assignpublicip",
+        "workloadkind", "jobset", "job-set", "launchtype", "assignpublicip", "scope",
         // ecs — daemon tuning
         "desiredcount", "mincount", "maxcount",
     )
