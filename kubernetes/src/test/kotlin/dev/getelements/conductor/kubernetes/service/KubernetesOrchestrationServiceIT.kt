@@ -1099,7 +1099,14 @@ class KubernetesOrchestrationServiceIT {
         val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
         val (ns, _, jobName) = decodeExecutionId(execution.id)
 
-        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+        // The future resolves on RUNNING or, race-tolerantly, any terminal status — the Job may
+        // complete before its RUNNING transition is ever observed (the CI timeout this guards
+        // against). Either way the workload is stoppable, which is all this test needs.
+        val awaited = service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+        assertTrue(
+            awaited.status == JobStatus.RUNNING || awaited.status == JobStatus.COMPLETED,
+            "Expected RUNNING or COMPLETED, got ${awaited.status}"
+        )
         service.stop(execution)
         // BACKGROUND-propagation delete is asynchronous — await the object's actual disappearance
         // before deciding whether the second stop has anything left to no-op.

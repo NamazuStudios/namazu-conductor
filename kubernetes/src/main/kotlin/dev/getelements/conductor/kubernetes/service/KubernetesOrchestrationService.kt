@@ -890,10 +890,15 @@ class KubernetesOrchestrationService @Inject constructor(
     }
 
     /**
-     * Resolves once [status] (or [JobStatus.FAILED]) is reached, populating [JobEndpoint]s once the
-     * workload is [JobStatus.RUNNING]. When [KubernetesAttributes.WATCH_ENABLED] is `true`, the
-     * transition is observed via a Kubernetes watch on the underlying Pod/Job; otherwise the workload
-     * status is polled on a background thread every [pollIntervalMs].
+     * Resolves once [status] or **any terminal status** ([JobStatus.COMPLETED] / [JobStatus.FAILED])
+     * is reached, populating [JobEndpoint]s once the workload is [JobStatus.RUNNING]. A terminal
+     * status different from [status] completes the future normally with that status as the result —
+     * it must never hang: a caller waiting for [JobStatus.RUNNING] whose workload completed (or
+     * failed) before the transition was observed can only check the resolved status, and a future
+     * that never completes holds the caller's `.get(timeout)` for the full timeout. When
+     * [KubernetesAttributes.WATCH_ENABLED] is `true`, the transition is observed via a Kubernetes
+     * watch on the underlying Pod/Job; otherwise the workload status is polled on a background
+     * thread every [pollIntervalMs].
      */
     override fun getFutureForStatus(execution: JobExecution, status: JobStatus): Future<JobExecution> =
         internalFutureForStatus(execution, status)
@@ -910,13 +915,13 @@ class KubernetesOrchestrationService @Inject constructor(
         do {
             Thread.sleep(pollIntervalMs)
             result = resultFor(execution, currentStatus(execution))
-        } while (result.status != status && result.status != JobStatus.FAILED)
+        } while (result.status != status && !result.status.isTerminal)
         return result
     }
 
     /**
      * Watches the Pod/Job backing [execution] and completes the returned future as soon as [target]
-     * (or [JobStatus.FAILED]) is observed, rather than waiting for the next poll tick. The watch is
+     * (or any terminal status) is observed, rather than waiting for the next poll tick. The watch is
      * started from the resourceVersion of the object fetched to compute the initial status, so a
      * transition landing between that fetch and the watch registering is still delivered as an event
      * rather than silently missed. Falls back to [pollForStatus] if the watch closes with an error
@@ -927,7 +932,7 @@ class KubernetesOrchestrationService @Inject constructor(
         val (ns, kind, name) = decodeId(execution.id)
 
         fun completeIfTerminal(current: JobStatus) {
-            if (!future.isDone && (current == target || current == JobStatus.FAILED)) {
+            if (!future.isDone && (current == target || current.isTerminal)) {
                 future.complete(resultFor(execution, current))
             }
         }
@@ -978,6 +983,11 @@ class KubernetesOrchestrationService @Inject constructor(
         future.whenComplete { _, _ -> watch.close() }
         return future
     }
+
+    /** Terminal [JobStatus] values resolve [pollForStatus]/[watchFutureForStatus] regardless of
+     *  the requested target — no terminal state ever leaves the future's caller waiting. */
+    private val JobStatus.isTerminal: Boolean
+        get() = this == JobStatus.COMPLETED || this == JobStatus.FAILED
 
     private fun fallBackToPoll(
         future: CompletableFuture<JobExecution>,
