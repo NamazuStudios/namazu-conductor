@@ -306,7 +306,7 @@ class KubernetesOrchestrationServiceIT {
         // listExecutions() under discovery=any reports the workload with its own namespace.
         val listed = anyDiscovery.listExecutions().firstOrNull { it.id == execution.id }
             ?: throw AssertionError("Execution '${execution.id}' missing from discovery=any listing")
-        assertEquals(listed.namespace, altNamespace, "Expected the execution to report its own namespace")
+        assertEquals(listed.scope, altNamespace, "Expected the execution to report its own namespace")
     }
 
     /**
@@ -1138,7 +1138,7 @@ class KubernetesOrchestrationServiceIT {
                 workloadKind = "helm",
                 name = releaseName
             ),
-            namespace = namespace
+            scope = namespace
         )
 
         service.stop(execution)
