@@ -74,6 +74,15 @@ class ConductorAdminResource @Inject constructor(
 
         val registry = ElementRegistrySupplier.getElementLocal(ConductorAdminResource::class.java).get()
 
+        // Dedupe by the resolved SERVICE identity (#104): a dependent element's
+        // @ElementDependency bridges the provider's exposed OrchestrationService INTO its own
+        // locator, so the same service instance re-resolves through every dependent element —
+        // and the registry walk used to report each of those as its own provider (the same
+        // profiles listed twice from one cluster). The dependency bridge is many-to-one by
+        // design: the FIRST element resolving a service instance is the provider; later
+        // elements resolving the SAME instance are views of it, not providers of their own.
+        val seenServices = mutableSetOf<Any>()
+
         val providers = registry.stream().toList().mapNotNull { el ->
             val name = el.elementRecord.definition().name()
             // Workaround: FilteredServiceLocator.findInstance() throws SdkServiceNotFoundException
@@ -88,6 +97,12 @@ class ConductorAdminResource @Inject constructor(
             serviceOptional.map { supplier ->
                 try {
                     val service = supplier.get()
+                    // The dedupe: a service instance already reported under another element is a
+                    // dependency-bridge view, not a second provider.
+                    if (!seenServices.add(service)) {
+                        logger.debug("Element {} resolves an OrchestrationService already reported; skipping as a duplicate provider", name)
+                        return@map null
+                    }
                     val profiles = service.getAvailableProfiles()
                     ProviderResult(
                         element = name,
