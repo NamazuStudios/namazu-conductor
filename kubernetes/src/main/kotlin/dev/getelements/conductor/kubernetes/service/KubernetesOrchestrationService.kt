@@ -343,6 +343,13 @@ class KubernetesOrchestrationService @Inject constructor(
         // from — mutating the spec after create() has no effect server-side.
         val resolvedSecrets = resolveSecretRefs(spec, request.secrets, runName)
 
+        // Every created workload's TOP-LEVEL metadata must carry the job-set label: the
+        // listExecutions() queries filter on the workload object itself (Pod / Job / Deployment),
+        // and the PodTemplate's job-set label lives on the *resource's* metadata — carried through
+        // to Pod dispatch only via templateLabels when the owner put it on the inner template block.
+        // Stamping it explicitly at dispatch keeps conductor-created workloads from aliasing as
+        // another element's and vanishing on a shared-namespace deployment.
+
         val ownerRef = when (profile.workloadKind) {
             WorkloadKind.POD -> {
                 val pod = PodBuilder()
@@ -352,6 +359,7 @@ class KubernetesOrchestrationService @Inject constructor(
                             .withNamespace(namespace)
                             .addToLabels(templateLabels)
                             .addToLabels(LABEL_OWNED_BY, runName)
+                            .addToLabels(LABEL_JOB_SET, jobSet)
                             .addToAnnotations(metadata)
                             .addToAnnotations(execAnnotations)
                             .build()
@@ -381,6 +389,7 @@ class KubernetesOrchestrationService @Inject constructor(
                             .withName(runName)
                             .withNamespace(namespace)
                             .addToLabels(LABEL_OWNED_BY, runName)
+                            .addToLabels(LABEL_JOB_SET, jobSet)
                             .build()
                     )
                     .withNewSpec()
@@ -780,11 +789,18 @@ class KubernetesOrchestrationService @Inject constructor(
         else
             client.batch().v1().jobs().inNamespace(namespace)
 
+        // Scoped to this element's configured job set: dispatch stamps every created workload
+        // with `namazu.conductor/job-set=<jobSet>` (inherited from the profile's PodTemplate
+        // labels — profile discovery is label-filtered, so every profile carries it) — mirroring
+        // the profile/daemon discovery filters above. Without this, a deployment spanning
+        // multiple elements over the SAME namespaces (e.g. staging and production control
+        // planes on one shared EKS cluster) cross-lists every other element's tenant
+        // workloads: profile listings don't leak (label-filtered), execution listings do.
         // Standalone pods: not owned by a batch Job, and not already terminating.
         // Terminating pods (deletionTimestamp set) are excluded so that the list reflects
         // the intended state immediately after stop() is called rather than waiting for the
         // full graceful-termination period (default 30 s) to elapse.
-        pods.withLabel(LABEL_OWNED_BY).list().items
+        pods.withLabel(LABEL_OWNED_BY).withLabel(LABEL_JOB_SET, jobSet).list().items
             .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
             .filter { pod -> pod.metadata?.deletionTimestamp == null }
             .forEach pod@{ pod ->
@@ -836,7 +852,7 @@ class KubernetesOrchestrationService @Inject constructor(
             }
 
         // Batch Jobs
-        batchJobs.withLabel(LABEL_OWNED_BY).list().items
+        batchJobs.withLabel(LABEL_OWNED_BY).withLabel(LABEL_JOB_SET, jobSet).list().items
             .forEach job@{ job ->
                 val jobName = job.metadata?.name ?: return@job
                 // Per-row namespace, mirroring the standalone-pod loop above.
