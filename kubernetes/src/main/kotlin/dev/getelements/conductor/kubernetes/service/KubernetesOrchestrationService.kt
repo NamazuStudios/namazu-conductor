@@ -780,11 +780,18 @@ class KubernetesOrchestrationService @Inject constructor(
         else
             client.batch().v1().jobs().inNamespace(namespace)
 
+        // Scoped to this element's configured job set: dispatch stamps every created workload
+        // with `namazu.conductor/job-set=<jobSet>` (inherited from the profile's PodTemplate
+        // labels — profile discovery is label-filtered, so every profile carries it) — mirroring
+        // the profile/daemon discovery filters above. Without this, a deployment spanning
+        // multiple elements over the SAME namespaces (e.g. staging and production control
+        // planes on one shared EKS cluster) cross-lists every other element's tenant
+        // workloads: profile listings don't leak (label-filtered), execution listings do.
         // Standalone pods: not owned by a batch Job, and not already terminating.
         // Terminating pods (deletionTimestamp set) are excluded so that the list reflects
         // the intended state immediately after stop() is called rather than waiting for the
         // full graceful-termination period (default 30 s) to elapse.
-        pods.withLabel(LABEL_OWNED_BY).list().items
+        pods.withLabel(LABEL_OWNED_BY).withLabel(LABEL_JOB_SET, jobSet).list().items
             .filter { pod -> pod.metadata?.ownerReferences?.any { it.kind == "Job" } != true }
             .filter { pod -> pod.metadata?.deletionTimestamp == null }
             .forEach pod@{ pod ->
@@ -836,7 +843,7 @@ class KubernetesOrchestrationService @Inject constructor(
             }
 
         // Batch Jobs
-        batchJobs.withLabel(LABEL_OWNED_BY).list().items
+        batchJobs.withLabel(LABEL_OWNED_BY).withLabel(LABEL_JOB_SET, jobSet).list().items
             .forEach job@{ job ->
                 val jobName = job.metadata?.name ?: return@job
                 // Per-row namespace, mirroring the standalone-pod loop above.
