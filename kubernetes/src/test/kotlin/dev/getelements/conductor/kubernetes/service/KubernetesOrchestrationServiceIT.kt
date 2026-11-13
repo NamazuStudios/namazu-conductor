@@ -454,6 +454,33 @@ class KubernetesOrchestrationServiceIT {
         assertEquals(env[KubernetesOrchestrationService.SERVICE_PORTS_ENV_VAR], "$podPort/$podProtocol")
     }
 
+    /**
+     * listExecutions() carries the scheduling node: `details.nodeName` mirrors
+     * `Pod.spec.nodeName` (#472). Under shared-capacity NodeClasses the EC2 node carries no
+     * tenant tags, so the pod's own nodeName is the only per-tenant node attribution that
+     * exists — Namazu Cloud's per-workspace "Nodes" view correlates occupancy from it.
+     */
+    @Test
+    fun listExecutionsCarriesTheSchedulingNode() {
+        val profile = service.findAvailableProfile("$namespace:$nodePortTemplate")
+            ?: throw AssertionError("Profile '$namespace:$nodePortTemplate' not found")
+
+        val execution = service.execute(JobRequest(profile = profile)).also { executions += it }
+        service.getFutureForStatus(execution, JobStatus.RUNNING).get(timeoutMinutes, TimeUnit.MINUTES)
+
+        val listed = service.listExecutions().firstOrNull { it.id == execution.id }
+            ?: throw AssertionError("Execution '${execution.id}' missing from listing")
+        val details = listed.details as KubernetesExecutionDetails
+
+        val (ns, _, podName) = decodeExecutionId(execution.id)
+        val pod = client.pods().inNamespace(ns).withName(podName).get()
+            ?: throw AssertionError("Pod '$podName' not found")
+
+        // Cross-checked against the cluster, not just non-null: the reported node must be
+        // the pod's actual node, and a scheduled pod always has one.
+        assertEquals(pod.spec.nodeName, details.nodeName, "details.nodeName must mirror Pod.spec.nodeName")
+    }
+
     @Test
     fun serviceEnvVarsAbsentWhenNoPortsExposed() {
         val profile = service.findAvailableProfile("$namespace:$jobTemplate")

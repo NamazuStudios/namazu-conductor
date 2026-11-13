@@ -831,7 +831,10 @@ class KubernetesOrchestrationService @Inject constructor(
                     executions += JobExecution(
                         id = encodeId(ns, WorkloadKind.HELM, releaseName),
                         status = status,
-                        details = KubernetesExecutionDetails(namespace = ns, workloadKind = "helm", name = releaseName),
+                        details = KubernetesExecutionDetails(
+                            namespace = ns, workloadKind = "helm", name = releaseName,
+                            nodeName = pod.spec?.nodeName
+                        ),
                         containers = containers,
                         scope = ns,
                         metadata = reportedMetadataOf(annotations)
@@ -844,7 +847,14 @@ class KubernetesOrchestrationService @Inject constructor(
                     id = id,
                     status = status,
                     endpoints = if (status == JobStatus.RUNNING) mapEndpoints(JobExecution(id = id, status = status)) else emptyList(),
-                    details = KubernetesExecutionDetails(namespace = ns, workloadKind = "pod", name = podName),
+                    details = KubernetesExecutionDetails(
+                        namespace = ns, workloadKind = "pod", name = podName,
+                        // The scheduling node (k8s places it on the pod at binding). Namazu Cloud's
+                        // per-workspace "Nodes" view correlates node occupancy from this (#472):
+                        // under shared-capacity NodeClasses the EC2 node carries no tenant tags, so
+                        // the pod's own nodeName is the only per-tenant node attribution that exists.
+                        nodeName = pod.spec?.nodeName
+                    ),
                     containers = containers,
                     scope = ns,
                     metadata = reportedMetadataOf(annotations)
