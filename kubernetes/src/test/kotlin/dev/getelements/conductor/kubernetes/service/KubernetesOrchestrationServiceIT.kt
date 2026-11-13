@@ -477,8 +477,11 @@ class KubernetesOrchestrationServiceIT {
             ?: throw AssertionError("Pod '$podName' not found")
 
         // Cross-checked against the cluster, not just non-null: the reported node must be
-        // the pod's actual node, and a scheduled pod always has one.
+        // the pod's actual node, and a scheduled pod always has one. Both surfaces carry it —
+        // the details (REST consumers) and the execution itself (in-process consumers reading
+        // the typed field off the registry-resolved service, no provider-module dependency).
         assertEquals(pod.spec.nodeName, details.nodeName, "details.nodeName must mirror Pod.spec.nodeName")
+        assertEquals(pod.spec.nodeName, listed.nodeName, "JobExecution.nodeName must mirror Pod.spec.nodeName")
     }
 
     @Test

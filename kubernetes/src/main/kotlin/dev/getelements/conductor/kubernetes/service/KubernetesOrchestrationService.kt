@@ -835,6 +835,7 @@ class KubernetesOrchestrationService @Inject constructor(
                             namespace = ns, workloadKind = "helm", name = releaseName,
                             nodeName = pod.spec?.nodeName
                         ),
+                        nodeName = pod.spec?.nodeName,
                         containers = containers,
                         scope = ns,
                         metadata = reportedMetadataOf(annotations)
@@ -855,6 +856,10 @@ class KubernetesOrchestrationService @Inject constructor(
                         // the pod's own nodeName is the only per-tenant node attribution that exists.
                         nodeName = pod.spec?.nodeName
                     ),
+                    // On the execution itself, not just the details: in-process consumers (elements
+                    // resolving the service from the registry) read the typed field without
+                    // depending on this provider module.
+                    nodeName = pod.spec?.nodeName,
                     containers = containers,
                     scope = ns,
                     metadata = reportedMetadataOf(annotations)

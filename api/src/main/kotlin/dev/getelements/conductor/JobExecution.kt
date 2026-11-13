@@ -46,6 +46,17 @@ data class JobExecution(
     val scope : String? = null,
 
     /**
+     * The scheduling node for Kubernetes-backed workloads, from `Pod.spec.nodeName`. Null for
+     * batch-Job rows (a Job object carries no node; only its pods do) and for providers
+     * without a node concept (ECS, EdgeGap). Lives on the execution (not just the provider
+     * details) so in-process consumers — elements resolving the service from the registry —
+     * can correlate node occupancy per tenant without depending on a provider module: under
+     * shared-capacity NodeClasses the EC2 node carries no tenant tags, and the scheduling
+     * node is the only per-tenant node attribution that exists (#472).
+     */
+    val nodeName : String? = null,
+
+    /**
      * The metadata actually present on the running workload — the profile's declared set with
      * [dev.getelements.conductor.JobRequest.metadata] applied over it, read back from the live
      * resource rather than echoed from the request.
